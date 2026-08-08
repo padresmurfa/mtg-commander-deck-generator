@@ -73,37 +73,60 @@ Cards are assigned functional roles such as:
 
 ## Getting Started
 
+This project runs entirely in Docker — no Node.js, npm, or any other tooling needs to be
+installed on your machine. All dependencies live inside the container.
+
 ### Prerequisites
 
-- Node.js 18+
-- npm or yarn
+- [Docker](https://docs.docker.com/get-docker/) (Desktop or Engine)
+- [VS Code](https://code.visualstudio.com/) with the
+  [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+  extension (optional, but the intended way to edit this project)
 
-### Installation
+### Running via VS Code Dev Containers (recommended)
 
 ```bash
 git clone https://github.com/20q2/mtg-commander-deck-generator.git
 cd mtg-commander-deck-generator
-npm install
-npm run dev
+code .
+```
+
+Then run **Dev Containers: Reopen in Container** from the command palette. VS Code builds the
+`app` service from the root `Dockerfile` and attaches to it — `npm install`, the dev server, and
+all tooling run inside the container. The app is available at http://localhost:5173.
+
+### Running via Docker Compose directly
+
+```bash
+docker compose up app
 ```
 
 The app will be available at:
 http://localhost:5173
 
-### Build for Production
+### Local tag data
+
+Two features (Tagger-based role detection and SpellChroma) depend on Scryfall tag data that used
+to be synced by scheduled Lambdas into S3. Locally, populate it on demand into a bind-mounted
+`./data` folder instead, served back to the app by the `tagdata` service:
 
 ```bash
-npm run build
-npm run preview
+docker compose run --rm tagger-sync
+docker compose run --rm spellchroma-index
 ```
 
-### Deployment (GitHub Pages)
+Re-run these occasionally to refresh the data — there's no need to run them on every startup.
+
+### Production build preview
+
+To sanity-check a production build (served by nginx, matching what the app looks like once
+built) without deploying anywhere:
 
 ```bash
-npm run build
+docker compose --profile preview up preview
 ```
 
-Then deploy the generated `dist/` folder to your GitHub Pages branch.
+Available at http://localhost:8080.
 
 ---
 

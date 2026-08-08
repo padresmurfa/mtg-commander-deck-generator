@@ -1,0 +1,10 @@
+{
+  "name": "manafoundry-data-sync",
+  "private": true,
+  "type": "module",
+  "description": "Local replacement for the tagger-sync/spellchroma-index Lambdas — scrapes Scryfall tag data to a mounted volume instead of S3.",
+  "scripts": {
+    "tagger-sync": "node tagger-sync.mjs",
+    "spellchroma-index": "node spellchroma-index.mjs"
+  }
+}
