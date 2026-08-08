@@ -47,3 +47,7 @@ coverage
 # CDK
 cdk.out
 *.d.ts.map
+
+# Docker local data — populated by `docker compose run --rm tagger-sync` / `spellchroma-index`
+data/*
+!data/.gitkeep

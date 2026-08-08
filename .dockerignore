@@ -1,0 +1,17 @@
+node_modules
+dist
+build
+.vite
+.git
+.github
+.devcontainer
+.vscode
+infra
+docs
+data
+coverage
+*.md
+.env
+.env.*
+!.env.docker
+npm-debug.log*

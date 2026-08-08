@@ -1,0 +1,66 @@
+services:
+  # Hot-reloading dev server — the day-to-day service. Also what the VS Code
+  # Dev Containers extension attaches to (see .devcontainer/devcontainer.json).
+  app:
+    build:
+      context: .
+      target: dev
+    ports:
+      - '5173:5173'
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    env_file:
+      - .env.docker
+    environment:
+      - CHOKIDAR_USEPOLLING=1
+    stdin_open: true
+    tty: true
+
+  # Production build served by nginx, for sanity-checking a real build locally.
+  # Not started by a plain `docker compose up` — run explicitly:
+  #   docker compose --profile preview up preview
+  preview:
+    build:
+      context: .
+      target: production
+      args:
+        VITE_TAG_REPO_URL: ${VITE_TAG_REPO_URL:-http://localhost:8081/tagger-tags.json}
+        VITE_SPELLCHROMA_DICT_URL: ${VITE_SPELLCHROMA_DICT_URL:-http://localhost:8081/spellchroma-tag-dictionary.json}
+        VITE_SPELLCHROMA_INDEX_URL: ${VITE_SPELLCHROMA_INDEX_URL:-http://localhost:8081/spellchroma-tag-index.json}
+    ports:
+      - '8080:80'
+    profiles: ['preview']
+
+  # Serves the JSON files data-sync jobs write to ./data — the local stand-in for the
+  # public S3 bucket tagger-sync/spellchroma-index used to upload to. Always up so the
+  # app's VITE_TAG_REPO_URL / VITE_SPELLCHROMA_*_URL have something to fetch from.
+  tagdata:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./data:/usr/share/nginx/html:ro
+      - ./docker/nginx/tagdata.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - '8081:80'
+
+  # One-off jobs — replace the weekly-cron Lambdas. Run on demand:
+  #   docker compose run --rm tagger-sync
+  #   docker compose run --rm spellchroma-index
+  tagger-sync:
+    build:
+      context: ./docker/data-sync
+    command: ['node', 'tagger-sync.mjs']
+    volumes:
+      - ./data:/data
+    profiles: ['tools']
+
+  spellchroma-index:
+    build:
+      context: ./docker/data-sync
+    command: ['node', 'spellchroma-index.mjs']
+    volumes:
+      - ./data:/data
+    profiles: ['tools']
+
+volumes:
+  node_modules:
