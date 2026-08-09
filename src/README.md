@@ -25,6 +25,9 @@
 | `digest` | 128-bit output digests and the five named layers |
 | `reduce` | Index-ordered collection: arrival order cannot reach the answer |
 | `trial` | A stand-in evaluation with no game semantics. Exists to be deleted |
+| `jstream` | One value at a time out of a JSON array too large to hold |
+| `card` | The card record, its normalisation, and the printing merge rules |
+| `scryfall` | Bulk-export field names, and nothing else |
 | `json` | Minimal JSON reader and writer. Written in-tree, not vendored |
 | `config` | Run configuration: defaults, load, validate, serialise |
 | `artifact` | Append-only buffered JSONL run artifact |

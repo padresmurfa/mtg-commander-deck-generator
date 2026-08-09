@@ -13,8 +13,8 @@
 
 meta:
   status: in_progress
-  current_sprint: "1.1"
-  task_split_valid_for: "1.1"     # task-splitting any other sprint is speculative
+  current_sprint: "1.2"
+  task_split_valid_for: "1.2"     # task-splitting any other sprint is speculative
   baseline: greenfield
   language: c
   deliverable: cli
@@ -211,8 +211,14 @@ epics:
     sprints:
       - id: "1.1"
         name: Acquisition & oracle normalisation
-        status: planned
+        status: done
+        retro: docs/plan/retros/1.1-acquisition.md
         tasks_doc: docs/plan/sprints/1.1-acquisition.md
+        result:
+          checks: 3119
+          line_coverage: 100.00
+          branch_coverage: 96.84
+          function_coverage: 100.00
         exit_criteria:
           - Scryfall bulk ingested
           - grouped by oracle_id
@@ -399,96 +405,35 @@ epics:
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
 tasks:
-  sprint: "1.1"
-  doc: docs/plan/sprints/1.1-acquisition.md
+  sprint: "1.2"
+  doc: docs/plan/sprints/1.2-opcode-model.md
   goal: >
-    Scryfall bulk data normalised into an oracle_id-keyed card set with resolved legality, colour
-    identity and a minimum paper price. The input every later epic treats as given.
+    Oracle text becomes opcodes for the modelled subset, and the card struct fits in 32 bytes.
+    Ends with G1, the project's first kill-switch.
   why_now: >
-    E0 is finished and the determinism harness has nothing but a stand-in to measure. This is the
-    first sprint that produces something real, and G1 in 1.2 cannot be asked until there is a real
-    card pool to ask it about.
-  decisions:
-    - id: preprocessing_language
-      decided: c
-      why: >
-        A second toolchain is a second thing to install, pin and keep deterministic. The only
-        argument for Node was that a Node app existed around the project; sprint 0.1 removed it.
-        Design §8 amended in the same change, with the superseded paragraph quoted rather than
-        rewritten.
-    - id: fetch_or_consume
-      decided: consume
-      why: >
-        The card table is an input to a deterministic core, so a subcommand that downloaded would
-        condition the determinism invariant on the network and on the day it ran.
-      invocation: "mfsim preprocess --bulk <file>"
-    - id: reading_strategy
-      decided: stream one array element at a time
-      why: >
-        ~110,000 printings and several hundred megabytes. A parsed document would cost gigabytes
-        for a result read once, field by field, and discarded.
-    - id: price_representation
-      decided: integer cents
-      why: exact, order-independent to sum, and no float comparison in a bit-identical pipeline
-    - id: legality_disagreement
-      decided: legal if any paper printing says so; count the disagreements
-      why: >
-        Legality is a property of the oracle card, so a disagreement is a stale record rather than
-        a real distinction. The count goes in the run artifact so a non-zero one is noticed.
-  list:
-    - id: T0
-      name: Apply the two decisions to the design of record
-      done_when: [design §8 and a new spec preprocessing block agree with each other and with the build]
-      note: First, not last — every task below contradicted §8 as it stood.
-    - id: T1
-      name: "mf/jstream: one value at a time out of a huge array"
-      done_when:
-        - the arena high-water mark is bounded by the largest element, not by the file
-        - braces, brackets and escaped quotes inside strings do not confuse the scanner
-        - a truncated array is an mf_err, not a crash
-        - an element larger than the buffer still works
-    - id: T2
-      name: "mf/scryfall: one bulk object to one printing"
-      done_when:
-        - every field is read, and a missing or wrongly-typed field rejects the printing with a reason
-        - the module has no opinion about merging
-    - id: T3
-      name: "mf/cards: the merge rules"
-      done_when:
-        - every rule has a test that fails when the rule is inverted
-        - an oracle with no priced printing is flagged rather than priced at zero
-        - the merge is testable without any JSON
-    - id: T4
-      name: "Normalisation: mana pips, type bitmask, CMC"
-      done_when:
-        - hybrid, Phyrexian, X and colourless pips are each a decided case with a test
-        - a type line with a subtype section parses the same as one without
-    - id: T5
-      name: Deterministic emission and content hash
-      done_when:
-        - shuffling the input order leaves the output and the digest byte-identical
-        - the golden file gains a row
-    - id: T6
-      name: "mfsim preprocess --bulk, end to end"
-      done_when:
-        - a fixture with the awkward cases runs end to end in a real process
-        - a missing --bulk is a usage error rather than a crash
-    - id: T7
-      name: Retro and amendments
-      done_when: [retro filed, design and spec amended in the same change, status advanced]
-      note: >
-        Deleting reference/legacy-ts/ belongs to the E1 retro, not this one — EDHREC and Tagger are
-        still unported.
+    The card set exists and has nothing in it the simulator can act on. G1 asks whether enough of a
+    real commander's pool can be modelled at all, and it cannot be asked until there is a pool.
+  gate: G1
+  task_split_deferred_until:
+    reason: >
+      The split depends on what the first run against the real Scryfall export shows — which fields
+      are rejected, how many cards there are, and what the oracle text actually looks like at scale.
+      Splitting before that is guessing at the shape of the work.
+    blockers: [first_real_export_run]
   input_from_previous_retro:
     - >
-      The determinism harness is calibrated but unproven — the six-way matrix runs against mf/trial,
-      which has no game semantics. The card table is the first real data to reach the digest layers.
-    - A covered branch is not a tested branch. A parser is mostly branches, so the coverage number
-      will look reassuring long before the tests are. Budget for mutation testing.
-    - Mutation testing found four tests in 0.3 that passed for the wrong reason, and the coverage
-      floor found none of them.
-    - No CI, by decision. Run make check before every push; make hook enforces it locally.
-    - mf/trial and its golden rows are deleted in E2, not here.
+      Nothing has run against the real 500 MB export. Every test in 1.1 is a fixture, so the first
+      real run is the first honest measurement — and the rejection counts in the artifact are how it
+      reports its own surprises.
+    - The card table is JSONL until this sprint's opcode encoding decides the 32-byte layout.
+    - Prices that are absent stay absent; imputation is 1.3, not a guess.
+    - >
+      Real uncovered branches went from 1 to 10, all in the two new parsers. The floor has headroom
+      but this is the first sprint the number moved the wrong way.
+    - >
+      A rule worth having is worth a test even when today's data cannot distinguish it. mf_types_parse
+      stops at the subtype dash and no printed subtype is spelled like a type; the test is synthetic
+      and says so.
 retros:
   - sprint: "0.1"
     doc: docs/plan/retros/0.1-greenfield-skeleton.md
@@ -536,4 +481,19 @@ retros:
       and a hosted runner would compile a different program. Two mutations survive and are recorded:
       both weaken the digest's internal mixing without changing anything its contract exposes, which
       is the nature of a hash.
+    carry_over: []
+  - sprint: "1.1"
+    doc: docs/plan/retros/1.1-acquisition.md
+    gates: []
+    design_amendments: 3
+    headline: >
+      The first sprint that produces something real. Two blocking decisions were
+      answered — preprocessing runs in C, and it consumes a bulk file rather than
+      fetching one — and design §8 was amended with the superseded paragraph quoted
+      rather than rewritten. The coverage floor found two branches a refactor had
+      just made unreachable; mutation testing found a rule with no test, which no
+      printed card can currently distinguish, so the test that pins it is
+      deliberately synthetic. The most useful failure was in a test: a hand-counted
+      literal length turned valid input into malformed input and the scanner was
+      suspected for a long time first.
     carry_over: []

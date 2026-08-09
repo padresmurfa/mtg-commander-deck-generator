@@ -5,10 +5,19 @@
 A command-line tool that evaluates Magic: The Gathering Commander decks **by simulation** and
 optimises them by search.
 
-> **Status: early.** Epic 0 is complete — the skeleton builds and dispatches, all memory is
-> arena-allocated, a worker that runs out is relaunched with more, and every run emits layered
-> digests that a golden file pins. **No simulation exists yet**; the determinism harness currently
-> measures a stand-in with no game semantics. See [`docs/plan/`](docs/plan/).
+> **Status: early.** Epic 0 is complete and the card pipeline has started: `preprocess` turns a
+> Scryfall bulk export into an `oracle_id`-keyed card table. All memory is arena-allocated, a worker
+> that runs out is relaunched with more, and every run emits layered digests that a golden file
+> pins. **No simulation exists yet.** See [`docs/plan/`](docs/plan/).
+
+```
+$ curl -sL "$(curl -s https://api.scryfall.com/bulk-data/default-cards |
+      sed -n 's/.*"download_uri":"\([^"]*\)".*/\1/p')" -o data/scryfall.json
+$ mfsim preprocess --config run.json --bulk data/scryfall.json
+```
+
+`preprocess` **consumes** that file; it never downloads one. The card table is an input to a
+deterministic core, so a subcommand that fetched would make the output depend on the day it ran.
 
 ## Why
 
