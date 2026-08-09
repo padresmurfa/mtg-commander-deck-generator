@@ -5,6 +5,11 @@ COPY package.json package-lock.json ./
 
 # ---- dev: hot-reloading Vite dev server, used by docker-compose + the VS Code dev container ---
 FROM base AS dev
+# node:20-alpine ships neither of these. VS Code's Source Control panel shells out to `git`, and
+# its default Linux terminal profile (plus most devcontainer lifecycle scripts) expects `bash` —
+# without them the dev container comes up but is a degraded place to actually work in.
+# openssh-client is what git needs for ssh:// remotes.
+RUN apk add --no-cache git bash openssh-client
 RUN npm ci
 COPY . .
 EXPOSE 5173

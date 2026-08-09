@@ -25,6 +25,7 @@ services:
       context: .
       target: production
       args:
+        VITE_ANALYTICS_URL: ${VITE_ANALYTICS_URL:-http://localhost:8082}
         VITE_TAG_REPO_URL: ${VITE_TAG_REPO_URL:-http://localhost:8081/tagger-tags.json}
         VITE_SPELLCHROMA_DICT_URL: ${VITE_SPELLCHROMA_DICT_URL:-http://localhost:8081/spellchroma-tag-dictionary.json}
         VITE_SPELLCHROMA_INDEX_URL: ${VITE_SPELLCHROMA_INDEX_URL:-http://localhost:8081/spellchroma-tag-index.json}
@@ -42,6 +43,90 @@ services:
       - ./docker/nginx/tagdata.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - '8081:80'
+
+  # SQL Server backing the poll board and analytics. Developer edition is free for dev/test use.
+  #
+  # Apple Silicon: Microsoft publishes no arm64 image, so this pins linux/amd64 and runs under
+  # emulation. It works, but it's slow to start (expect a minute or two on first boot) and hungry
+  # — give Docker Desktop >= 4GB RAM, and turn on Settings → General → "Use Rosetta for x86_64/amd64
+  # emulation" if it isn't already, which makes a large difference.
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_PID=Developer
+      # Local-only throwaway credential. SQL Server enforces its own complexity rules, so this
+      # can't just be "password".
+      - MSSQL_SA_PASSWORD=Local_Dev_Passw0rd!
+    ports:
+      - '1433:1433'
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      # sqlcmd moved under /opt/mssql-tools18 in the 2022 image, and needs -C to accept the
+      # server's self-signed certificate.
+      test:
+        [
+          'CMD-SHELL',
+          '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+  # Creates the database and applies docker/mock-api/migrations/*.sql, then exits. Idempotent,
+  # so it runs on every `up` and is a no-op once the schema is current.
+  mock-api-migrate:
+    build:
+      context: ./docker/mock-api
+    command: ['node', 'migrate.mjs']
+    depends_on:
+      mssql:
+        condition: service_healthy
+    environment:
+      - MSSQL_HOST=mssql
+      - MSSQL_PORT=1433
+      - MSSQL_USER=sa
+      - MSSQL_PASSWORD=Local_Dev_Passw0rd!
+      - MSSQL_DATABASE=manafoundry
+    restart: on-failure
+
+  # Local stand-in for the analytics/poll Lambda Function URL that used to back the
+  # feature-suggestion board and the metrics dashboard. Same request/response contract,
+  # SQL Server instead of DynamoDB. .env.docker points VITE_ANALYTICS_URL here.
+  mock-api:
+    build:
+      context: ./docker/mock-api
+    ports:
+      - '8082:8082'
+    depends_on:
+      mock-api-migrate:
+        condition: service_completed_successfully
+    environment:
+      - MSSQL_HOST=mssql
+      - MSSQL_PORT=1433
+      - MSSQL_USER=sa
+      - MSSQL_PASSWORD=Local_Dev_Passw0rd!
+      - MSSQL_DATABASE=manafoundry
+      # Unlocks the admin actions (dev note / mark shipped / delete) on the poll board.
+      # Paste this into the board's admin prompt. Local-only, so it's fine in the clear.
+      - POLL_ADMIN_SECRET=local-dev-admin
+      # Production limits are 3 submissions and 60 vote-toggles per anon id per UTC day,
+      # which is painful when you're clicking around locally. Raised, not removed.
+      - POLL_SUBMIT_LIMIT=500
+      - POLL_VOTE_LIMIT=5000
+      # METRICS_SECRET intentionally unset — with no secret the GET metrics endpoint is
+      # open, so the dashboard works without also baking VITE_METRICS_SECRET into the build.
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:8082/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
   # One-off jobs — replace the weekly-cron Lambdas. Run on demand:
   #   docker compose run --rm tagger-sync
@@ -64,3 +149,4 @@ services:
 
 volumes:
   node_modules:
+  mssql_data:

@@ -4,11 +4,12 @@
   "service": "app",
   "workspaceFolder": "/app",
   "shutdownAction": "stopCompose",
-  "forwardPorts": [5173, 8080, 8081],
+  "forwardPorts": [5173, 8080, 8081, 8082],
   "portsAttributes": {
     "5173": { "label": "Vite dev server", "onAutoForward": "openBrowser" },
     "8080": { "label": "Production preview (nginx)", "onAutoForward": "silent" },
-    "8081": { "label": "Local tag-data server", "onAutoForward": "silent" }
+    "8081": { "label": "Local tag-data server", "onAutoForward": "silent" },
+    "8082": { "label": "Local poll/metrics API", "onAutoForward": "silent" }
   },
   "customizations": {
     "vscode": {

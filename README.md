@@ -117,6 +117,48 @@ docker compose run --rm spellchroma-index
 
 Re-run these occasionally to refresh the data — there's no need to run them on every startup.
 
+### Community poll & metrics dashboard
+
+The feature-suggestion board (`/community-poll`) and the dev-only metrics dashboard (`/metrics`)
+used to talk to a Lambda Function URL backed by DynamoDB. The `mock-api` service reimplements
+that same HTTP contract locally (see `docker/mock-api/`), so both screens work out of the box —
+`.env.docker` already points `VITE_ANALYTICS_URL` at it. All of it comes up with a plain
+`docker compose up`:
+
+| Service            | Role                                                                |
+| ------------------ | ------------------------------------------------------------------- |
+| `mssql`            | SQL Server 2022 Developer edition, data in the `mssql_data` volume  |
+| `mock-api-migrate` | Applies `docker/mock-api/migrations/*.sql`, then exits              |
+| `mock-api`         | The HTTP API itself, on :8082                                       |
+
+The DynamoDB single-table layout is normalised into real tables — `suggestions`, `votes`,
+`analytics_events`, plus `rate_limits` for the per-day submit/vote counters. `mock-api` waits for
+`mock-api-migrate` to finish, which in turn waits for `mssql` to pass its healthcheck, so the
+ordering is handled for you.
+
+The board's admin actions (dev note, mark shipped, delete) are behind a bearer token. Open
+`/community-poll/admin` and enter the `POLL_ADMIN_SECRET` set in `docker-compose.yml`
+(`local-dev-admin` by default).
+
+Two deliberate differences from production: the per-day submit/vote rate limits are raised
+(`POLL_SUBMIT_LIMIT` / `POLL_VOTE_LIMIT`) so local clicking doesn't lock you out, and no
+`METRICS_SECRET` is set, so the metrics endpoint doesn't require a bearer token.
+
+**On Apple Silicon**, note that Microsoft ships no arm64 SQL Server image. The compose file pins
+`platform: linux/amd64`, so it runs emulated: first boot takes a minute or two and it wants a good
+chunk of RAM. Give Docker Desktop at least 4GB and enable **Settings → General → Use Rosetta for
+x86_64/amd64 emulation** — it's substantially faster than the QEMU fallback.
+
+To add a schema change, drop a new numbered file in `docker/mock-api/migrations/` and run
+`docker compose up mock-api-migrate`. To wipe the local poll/analytics data entirely:
+
+```bash
+docker compose rm -sf mssql && docker volume rm mtg-commander-deck-generator_mssql_data
+```
+
+Note that `trackEvent` no-ops on `localhost`, so `analytics_events` only fills up if you post
+events yourself — the poll board is the part that gets real use locally.
+
 ### Production build preview
 
 To sanity-check a production build (served by nginx, matching what the app looks like once

@@ -1,0 +1,14 @@
+{
+  "name": "manafoundry-mock-api",
+  "private": true,
+  "type": "module",
+  "description": "Local stand-in for the analytics/poll Lambda Function URL (infra/lambda/index.ts + poll.ts). Same HTTP contract, SQL Server instead of DynamoDB.",
+  "scripts": {
+    "start": "node server.mjs",
+    "migrate": "node migrate.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "mssql": "^11.0.1"
+  }
+}

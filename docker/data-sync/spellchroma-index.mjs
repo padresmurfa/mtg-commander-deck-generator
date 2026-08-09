@@ -3,6 +3,9 @@
 // Run on demand: docker compose run --rm spellchroma-index
 import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { createGunzip } from 'node:zlib';
+import { Readable } from 'node:stream';
+import { createInterface } from 'node:readline';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const UA = 'Manafoundry-LocalSpellChromaIndex/1.0';
@@ -54,16 +57,44 @@ async function fetchJson(url) {
   return res.json();
 }
 
+/**
+ * Scryfall serves bulk files as gzipped JSONL (one tag object per line) under
+ * `jsonl_download_uri`. It's sent as Content-Type: application/gzip with no
+ * Content-Encoding, so fetch hands us the raw gzip stream and we inflate it
+ * ourselves. Streaming line-by-line also keeps peak memory well under the
+ * ~700MB a JSON.parse of the whole inflated file would need.
+ */
+async function fetchJsonLines(url) {
+  const res = await fetch(url, { headers: { 'User-Agent': UA } });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+
+  const source = url.endsWith('.gz')
+    ? Readable.fromWeb(res.body).pipe(createGunzip())
+    : Readable.fromWeb(res.body);
+
+  const out = [];
+  for await (const line of createInterface({ input: source, crlfDelay: Infinity })) {
+    if (line.trim()) out.push(JSON.parse(line));
+  }
+  return out;
+}
+
 async function main() {
   await mkdir(DATA_DIR, { recursive: true });
 
   console.log('SpellChroma index build: locating oracle_tags bulk file...');
   const catalog = await fetchJson('https://api.scryfall.com/bulk-data');
   const entry = (catalog.data ?? []).find((d) => d.type === 'oracle_tags');
-  if (!entry?.download_uri) throw new Error('oracle_tags bulk entry not found');
+  // `download_uri` (a plain JSON array) was retired in favour of `jsonl_download_uri`;
+  // prefer the JSONL feed but stay compatible if the old field ever comes back.
+  const downloadUri = entry?.jsonl_download_uri ?? entry?.download_uri;
+  if (!downloadUri) throw new Error('oracle_tags bulk entry not found');
 
-  console.log(`Downloading ${entry.download_uri} (~${Math.round((entry.size ?? 0) / 1e6)} MB)...`);
-  const tags = await fetchJson(entry.download_uri);
+  const sizeBytes = entry.compressed_size ?? entry.size ?? 0;
+  console.log(`Downloading ${downloadUri} (~${Math.round(sizeBytes / 1e6)} MB)...`);
+  const tags = entry.jsonl_download_uri
+    ? await fetchJsonLines(downloadUri)
+    : await fetchJson(downloadUri);
 
   const { dictFile, indexFile, stats } = buildArtifacts(tags, new Date().toISOString());
   console.log(`Built: ${stats.tags} tags, ${stats.cards} cards, ${stats.taggings} taggings`);
