@@ -24,7 +24,10 @@ void mf_config_defaults(mf_config *c) {
     c->cvar_quantile = 0.10;
     c->seed = 0;
     snprintf(c->artifact_path, sizeof c->artifact_path, "runs/run.jsonl");
-    snprintf(c->card_table_path, sizeof c->card_table_path, "data/cards.bin");
+    /* JSONL until sprint 1.3 decides the binary layout, which it cannot do
+       before the opcode encoding exists. */
+    snprintf(c->card_table_path, sizeof c->card_table_path, "data/cards.jsonl");
+    c->bulk_path[0] = '\0';
 
     /* Eight megabytes rather than sixty-four: the pools are stocked eagerly, so
        this number is multiplied by every depth below it before a run does any
@@ -129,6 +132,8 @@ mf_err mf_config_load_json(mf_arena *a, mf_config *c, const char *text, char *eb
             e = want_string(v, key, c->artifact_path, sizeof c->artifact_path, eb, el);
         } else if (strcmp(key, "card_table_path") == 0) {
             e = want_string(v, key, c->card_table_path, sizeof c->card_table_path, eb, el);
+        } else if (strcmp(key, "bulk_path") == 0) {
+            e = want_string(v, key, c->bulk_path, sizeof c->bulk_path, eb, el);
         } else if (strcmp(key, "arena_bytes") == 0) {
             e = want_number(v, key, &num, eb, el);
             if (e == MF_OK && (num < MF_ARENA_MIN || num > MF_ARENA_LIMIT)) {
@@ -198,6 +203,7 @@ void mf_config_write(const mf_config *c, mf_jw *w) {
     mf_jw_key(w, "seed");                 mf_jw_int(w, (long long)c->seed);
     mf_jw_key(w, "artifact_path");        mf_jw_str(w, c->artifact_path);
     mf_jw_key(w, "card_table_path");      mf_jw_str(w, c->card_table_path);
+    mf_jw_key(w, "bulk_path");            mf_jw_str(w, c->bulk_path);
     mf_jw_key(w, "arena_bytes");          mf_jw_int(w, (long long)c->arena_bytes);
     mf_jw_key(w, "arena_max_bytes");      mf_jw_int(w, (long long)c->arena_max_bytes);
     mf_jw_key(w, "heap_pool_depth");      mf_jw_int(w, (long long)c->heap_pool_depth);

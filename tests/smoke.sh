@@ -105,6 +105,42 @@ depth=$(sed 's/.*"stack_pool_depth":\([0-9]*\).*/\1/' "$WORK/deepen.json")
 [ "$depth" -ge 3 ] || fail "stack_pool_depth was not written back (still $depth)"
 ok "the orchestrator deepened the stack pool and kept the answer ($depth arenas)"
 
+# --- preprocess consumes a bulk file and refuses to invent one ------------
+cat > "$WORK/pre.json" <<EOF
+{"artifact_path":"$WORK/pre.jsonl","card_table_path":"$WORK/cards.jsonl",
+ "arena_bytes":4194304,"persist_growth":false}
+EOF
+
+rc=0
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "preprocess without --bulk should exit 2, got $rc"
+ok "preprocess without a bulk file is a usage error"
+
+rc=0
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --bulk "$WORK/no-such-bulk.json" \
+    >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 1 ] || fail "a missing bulk file should exit 1, got $rc"
+ok "a bulk file that is not there is a plain failure"
+
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" \
+    --bulk tests/fixtures/bulk-sample.json >/dev/null 2>&1 ||
+    fail "preprocess on the fixture failed"
+grep -q '"cards":6' "$WORK/pre.jsonl" || fail "wrong card count"
+grep -q '"non_paper":2' "$WORK/pre.jsonl" || fail "digital printings were not dropped"
+grep -q '"legality_disagreements":1' "$WORK/pre.jsonl" || fail "the disagreement was not counted"
+grep -q '"no_oracle_id":1' "$WORK/pre.jsonl" || fail "the unusable printing was not counted"
+[ "$(wc -l < "$WORK/cards.jsonl")" -eq 6 ] || fail "the card table has the wrong number of rows"
+grep -q '"price_cents":175' "$WORK/cards.jsonl" || fail "the cheapest printing did not win"
+ok "preprocess merged the fixture into 6 cards"
+
+# --- a truncated bulk file is not a smaller card table --------------------
+head -c 400 tests/fixtures/bulk-sample.json > "$WORK/cut.json"
+rc=0
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --bulk "$WORK/cut.json" \
+    >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 1 ] || fail "a truncated bulk file should exit 1, got $rc"
+ok "a half-downloaded bulk file fails instead of quietly shrinking"
+
 # --- single-process mode does the same work without a child ---------------
 cat > "$WORK/solo.json" <<EOF
 {"artifact_path":"$WORK/solo.jsonl","arena_bytes":4194304}

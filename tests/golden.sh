@@ -49,6 +49,31 @@ line=$(grep '"record":"digest"' "$WORK/run.jsonl") || fail "no digest record in 
     done
 } > "$WORK/actual.txt"
 
+# --- and the card table, which is the first real data the harness measures ---
+cat > "$WORK/pre.json" <<EOF
+{"artifact_path":"$WORK/pre.jsonl","card_table_path":"$WORK/cards.jsonl",
+ "arena_bytes":4194304,"seed":7,"persist_growth":false}
+EOF
+
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" \
+    --bulk tests/fixtures/bulk-sample.json >/dev/null 2>&1 ||
+    fail "the preprocess run did not succeed"
+
+pre=$(grep '"record":"preprocess"' "$WORK/pre.jsonl") || fail "no preprocess record"
+{
+    for field in cards printings non_paper legality_disagreements; do
+        val=$(printf '%s' "$pre" | sed -n "s/.*\"$field\":\([0-9-]*\).*/\1/p")
+        [ -n "$val" ] || fail "the preprocess record has no '$field'"
+        echo "cards.$field $val"
+    done
+    hex=$(printf '%s' "$pre" | sed -n 's/.*"preprocess":"\([0-9a-f]*\)".*/\1/p')
+    [ -n "$hex" ] || fail "the preprocess record has no digest"
+    echo "cards.digest $hex"
+    # The card table itself, so a change in what is written is not hidden behind
+    # a digest of what was read.
+    echo "cards.rows $(wc -l < "$WORK/cards.jsonl" | tr -d ' ')"
+} >> "$WORK/actual.txt"
+
 if [ "$UPDATE" = "1" ]; then
     cp "$WORK/actual.txt" "$GOLDEN"
     echo "golden updated: $GOLDEN"

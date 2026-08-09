@@ -1,0 +1,13 @@
+[
+{"oracle_id":"0001","name":"Sol Ring","type_line":"Artifact","color_identity":[],"cmc":1,"mana_cost":"{1}","games":["paper"],"prices":{"usd":"1.75"},"legalities":{"commander":"legal"}},
+{"oracle_id":"0001","name":"Sol Ring","type_line":"Artifact","color_identity":[],"cmc":1,"mana_cost":"{1}","games":["paper"],"prices":{"usd":"58.00"},"legalities":{"commander":"legal"}},
+{"oracle_id":"0001","name":"Sol Ring","type_line":"Artifact","color_identity":[],"cmc":1,"mana_cost":"{1}","games":["mtgo"],"prices":{"usd":"0.02"},"legalities":{"commander":"legal"}},
+{"oracle_id":"0002","name":"Foil Only","type_line":"Creature — Human Wizard","color_identity":["U"],"cmc":2,"mana_cost":"{1}{U}","games":["paper"],"prices":{"usd":null,"usd_foil":"25.00"},"legalities":{"commander":"legal"}},
+{"oracle_id":"0003","name":"Ach! Hans, Run!","type_line":"Enchantment","color_identity":["R","G"],"cmc":6,"mana_cost":"{4}{R}{G}","games":["paper"],"prices":{"usd":"3.10"},"legalities":{"commander":"not_legal"}},
+{"oracle_id":"0004","name":"Delver of Secrets // Insectile Aberration","type_line":"Creature — Human Insect","color_identity":["U"],"cmc":1,"games":["paper"],"card_faces":[{"mana_cost":"{U}"},{"mana_cost":""}],"prices":{"usd":"0.30"},"legalities":{"commander":"legal"}},
+{"oracle_id":"0005","name":"Disputed","type_line":"Instant","color_identity":["W"],"cmc":1,"mana_cost":"{W}","games":["paper"],"prices":{"usd":"0.50"},"legalities":{"commander":"banned"}},
+{"oracle_id":"0005","name":"Disputed","type_line":"Instant","color_identity":["W"],"cmc":1,"mana_cost":"{W}","games":["paper"],"prices":{"usd":"0.40"},"legalities":{"commander":"legal"}},
+{"oracle_id":"0006","name":"Alchemy Only","type_line":"Creature","color_identity":["B"],"cmc":3,"mana_cost":"{2}{B}","games":["arena"],"prices":{"usd":"9.99"},"legalities":{"commander":"legal"}},
+{"name":"No Oracle Id","type_line":"Land","games":["paper"]},
+{"oracle_id":"0007","name":"Hybrid Test","type_line":"Legendary Creature — Elf Druid","color_identity":["B","G"],"cmc":2,"mana_cost":"{B/G}{2/W}{X}","games":["paper"],"prices":{"usd":"12.345"},"legalities":{"commander":"legal"}}
+]

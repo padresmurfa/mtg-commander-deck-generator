@@ -43,7 +43,7 @@ mf_err mf_cli_parse(int argc, char **argv, mf_cli *out, char *eb, size_t el) {
             return MF_OK;
         }
         if (strcmp(arg, "--config") == 0 || strcmp(arg, "--out") == 0 ||
-            strcmp(arg, "--report") == 0) {
+            strcmp(arg, "--report") == 0 || strcmp(arg, "--bulk") == 0) {
             if (i + 1 >= argc) {
                 say(eb, el, "%s needs a value", arg);
                 return MF_ERR_ARGS;
@@ -51,6 +51,7 @@ mf_err mf_cli_parse(int argc, char **argv, mf_cli *out, char *eb, size_t el) {
             const char *value = argv[++i];
             if (strcmp(arg, "--config") == 0) out->config_path = value;
             else if (strcmp(arg, "--out") == 0) out->out_path = value;
+            else if (strcmp(arg, "--bulk") == 0) out->bulk_path = value;
             else out->report_path = value;
             continue;
         }
@@ -101,6 +102,7 @@ void mf_cli_usage(FILE *f) {
         "options:\n"
         "  --config <path>   run configuration (JSON)\n"
         "  --out <path>      artifact path, overriding the config\n"
+        "  --bulk <path>     Scryfall bulk export for preprocess\n"
         "  --version         print the version\n"
         "  -h, --help        show this message\n"
         "\n"

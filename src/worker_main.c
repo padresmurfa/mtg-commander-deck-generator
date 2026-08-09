@@ -47,6 +47,9 @@ int main(int argc, char **argv) {
     if (cli.out_path) {
         snprintf(cfg.artifact_path, sizeof cfg.artifact_path, "%s", cli.out_path);
     }
+    if (cli.bulk_path) {
+        snprintf(cfg.bulk_path, sizeof cfg.bulk_path, "%s", cli.bulk_path);
+    }
 
     int rc = mf_worker_run(root, &cfg, cli.cmd, NULL);
     mf_arena_destroy(root);

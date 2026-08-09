@@ -64,6 +64,13 @@ int main(int argc, char **argv) {
         }
         snprintf(cfg.artifact_path, sizeof cfg.artifact_path, "%s", cli.out_path);
     }
+    if (cli.bulk_path) {
+        if (strlen(cli.bulk_path) >= sizeof cfg.bulk_path) {
+            fprintf(stderr, "mfsim: --bulk path is too long\n");
+            return MF_EXIT_USAGE;
+        }
+        snprintf(cfg.bulk_path, sizeof cfg.bulk_path, "%s", cli.bulk_path);
+    }
 
     /* One process, for debugging and for anyone who would rather not have a
        child. Nothing is retried here: a worker that cannot ask for a bigger

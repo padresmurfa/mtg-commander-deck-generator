@@ -7,3 +7,9 @@ seed 20260809
 items 32
 hand_total 46060
 score_total 1390456210
+cards.cards 6
+cards.printings 8
+cards.non_paper 2
+cards.legality_disagreements 1
+cards.digest ac91be901676bda84f303a6c9def2c0a
+cards.rows 6

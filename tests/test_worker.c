@@ -86,12 +86,78 @@ MF_TEST(the_unimplemented_subcommands_fail_rather_than_pretending) {
     mf_config c = worker_cfg(4u << 20);
     MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_EVAL, NULL), MF_EXIT_FAILURE);
     MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_OPTIMIZE, NULL), MF_EXIT_FAILURE);
-    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_FAILURE);
 
     /* The run_config record is still written: a run that failed is still a run
        that happened. */
     char *text = mf_mem_read_file(A, PATH, NULL);
     MF_CHECK(strstr(text, "\"command\":\"eval\"") != NULL);
+    remove(PATH);
+}
+
+MF_TEST(preprocess_without_a_bulk_file_is_a_usage_error_not_a_failure) {
+    /* It consumes a file and does not fetch one, so "you did not say which"
+       is a mistake in the command line rather than something that went wrong
+       with the run — and the exit code has to say which. */
+    remove(PATH);
+    mf_config c = worker_cfg(4u << 20);
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_USAGE);
+    remove(PATH);
+}
+
+MF_TEST(preprocess_reads_a_bulk_file_and_writes_a_card_table) {
+    remove(PATH);
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.jsonl");
+
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_OK);
+
+    char *run = mf_mem_read_file(A, PATH, NULL);
+    MF_CHECK(strstr(run, "\"record\":\"preprocess\"") != NULL);
+    MF_CHECK(strstr(run, "\"cards\":6") != NULL);
+    MF_CHECK(strstr(run, "\"non_paper\":2") != NULL);
+    MF_CHECK(strstr(run, "\"no_oracle_id\":1") != NULL);
+
+    char *table = mf_mem_read_file(A, "build/test-worker-cards.jsonl", NULL);
+    MF_CHECK(table != NULL);
+    MF_CHECK(strstr(table, "\"price_cents\":175") != NULL);
+
+    remove("build/test-worker-cards.jsonl");
+    remove(PATH);
+}
+
+MF_TEST(a_bulk_file_that_is_not_there_is_a_plain_failure) {
+    /* A path the user typed wrongly is theirs to fix. */
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "build/definitely-no-such-bulk.json");
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_FAILURE);
+    remove(PATH);
+}
+
+MF_TEST(a_card_table_that_cannot_be_written_stops_the_run) {
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/no/such/dir/cards.jsonl");
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_FAILURE);
+    remove(PATH);
+}
+
+MF_TEST(a_truncated_bulk_file_is_not_a_smaller_card_table) {
+    /* The failure this whole pipeline is careful about: a half-downloaded file
+       must not produce a card table quietly missing its tail. */
+    const char *cut = "build/test-worker-cut.json";
+    FILE *f = fopen(cut, "wb");
+    fputs("[{\"oracle_id\":\"a\",\"name\":\"n\",\"type_line\":\"Land\","
+          "\"games\":[\"paper\"]},{\"oracle_id\":\"b\"",
+          f);
+    fclose(f);
+
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "%s", cut);
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cut-cards.jsonl");
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_FAILURE);
+
+    remove(cut);
     remove(PATH);
 }
 
@@ -168,6 +234,11 @@ void run_worker_tests(void) {
     MF_RUN_A(validate_exercises_the_memory_layer_and_records_what_it_used);
     MF_RUN_A(validate_exercises_both_pool_disciplines);
     MF_RUN_A(the_unimplemented_subcommands_fail_rather_than_pretending);
+    MF_RUN_A(preprocess_without_a_bulk_file_is_a_usage_error_not_a_failure);
+    MF_RUN_A(preprocess_reads_a_bulk_file_and_writes_a_card_table);
+    MF_RUN_A(a_bulk_file_that_is_not_there_is_a_plain_failure);
+    MF_RUN_A(a_card_table_that_cannot_be_written_stops_the_run);
+    MF_RUN_A(a_truncated_bulk_file_is_not_a_smaller_card_table);
     MF_RUN_A(an_artifact_that_cannot_be_opened_stops_the_run);
     MF_RUN_A(a_record_that_cannot_be_flushed_is_reported_and_the_run_continues);
     MF_RUN_A(a_failing_close_does_not_overwrite_a_failure_already_reported);

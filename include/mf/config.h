@@ -19,6 +19,10 @@ typedef struct {
     unsigned long long seed;  /* run seed; the whole RNG state is derived from it */
     char artifact_path[MF_PATH_MAX];
     char card_table_path[MF_PATH_MAX];
+    /* The Scryfall bulk export to read. Empty means none was given, which
+       `preprocess` reports as a usage error — it consumes a file, it does not
+       fetch one (design §8). */
+    char bulk_path[MF_PATH_MAX];
 
     /* Memory. None of these is a specification — each is a starting guess the
        worker dies against and the orchestrator grows, so they converge over a

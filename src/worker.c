@@ -1,10 +1,13 @@
 #include "mf/worker.h"
 
 #include "mf/artifact.h"
+#include "mf/card.h"
 #include "mf/digest.h"
 #include "mf/json.h"
 #include "mf/panic.h"
 #include "mf/pool.h"
+#include "mf/jstream.h"
+#include "mf/scryfall.h"
 #include "mf/trial.h"
 
 #include <stdio.h>
@@ -116,6 +119,118 @@ static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
     return MF_EXIT_OK;
 }
 
+/* Reads the bulk export into a card set and writes it out.
+ *
+ * Two pooled arenas, claimed once for the whole run: one holds the card set and
+ * the names, and lives as long as the set does; the other is pushed and popped
+ * around every element, so the parsed JSON of a hundred thousand printings
+ * costs one printing's worth of memory. Getting these the wrong way round is
+ * the mistake this arrangement exists to prevent — a name allocated in the
+ * frame is a dangling pointer by the time the card is written. */
+static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
+    if (c->bulk_path[0] == '\0') {
+        fprintf(stderr, "mfsim: preprocess needs --bulk <file>; it consumes a Scryfall bulk "
+                        "export rather than downloading one\n");
+        return MF_EXIT_USAGE;
+    }
+
+    mf_pool *heap = mf_pool_create(root, "eval", MF_POOL_HEAP, c->arena_bytes, c->heap_pool_depth);
+    mf_arena *durable = mf_pool_acquire(heap);
+    mf_arena *scratch = mf_pool_acquire(heap);
+
+    mf_jstream *stream = NULL;
+    if (mf_jstream_open(durable, c->bulk_path, &stream) != MF_OK) {
+        fprintf(stderr, "mfsim: cannot open bulk file: %s\n", c->bulk_path);
+        mf_pool_destroy(heap);
+        return MF_EXIT_FAILURE;
+    }
+
+    mf_cardset *set = mf_cardset_new(durable);
+    size_t rejected[MF_SCRY_REJECT_COUNT] = {0};
+
+    for (;;) {
+        mf_arena_mark frame = mf_arena_push(scratch);
+        mf_json *doc = NULL;
+        if (!mf_jstream_next(stream, scratch, &doc)) {
+            mf_arena_pop(scratch, frame);
+            break;
+        }
+        mf_printing p;
+        mf_scry_reject why = mf_scryfall_printing(durable, doc, &p);
+        mf_arena_pop(scratch, frame);
+
+        if (why != MF_SCRY_OK) {
+            rejected[why]++;
+            continue;
+        }
+        mf_cardset_add(set, &p);
+    }
+
+    mf_err stream_err = mf_jstream_error(stream);
+    if (stream_err != MF_OK) {
+        /* A half-downloaded file must not become a smaller card table. */
+        fprintf(stderr, "mfsim: %s: %s\n", c->bulk_path, mf_jstream_message(stream));
+    }
+    mf_jstream_close(stream);
+
+    const mf_card *cards = mf_cardset_sorted(set);
+    size_t count = mf_cardset_count(set);
+
+    int rc = stream_err == MF_OK ? MF_EXIT_OK : MF_EXIT_FAILURE;
+    if (rc == MF_EXIT_OK) {
+        mf_artifact *table = NULL;
+        if (mf_artifact_open(durable, c->card_table_path, &table) != MF_OK) {
+            fprintf(stderr, "mfsim: cannot write card table: %s\n", c->card_table_path);
+            rc = MF_EXIT_FAILURE;
+        } else {
+            for (size_t i = 0; i < count; i++) {
+                mf_arena_mark frame = mf_arena_push(scratch);
+                mf_jw *cw = mf_jw_new(scratch);
+                mf_card_write(&cards[i], cw);
+                if (mf_artifact_write(table, mf_jw_text(cw)) != MF_OK) rc = MF_EXIT_FAILURE;
+                mf_arena_pop(scratch, frame);
+            }
+            if (mf_artifact_close(table) != MF_OK) rc = MF_EXIT_FAILURE;
+        }
+    }
+
+    /* The card table is an input to the deterministic core, so its digest is
+       what makes "same seed + config + card table" checkable at all — and this
+       is the first real data the harness has ever measured. */
+    mf_digests g;
+    mf_digests_init(&g, c->seed);
+    mf_cardset_digest(set, mf_digests_layer(&g, MF_LAYER_PREPROCESS));
+    mf_digests_seal(&g);
+
+    mf_jw *w = mf_jw_new(root);
+    mf_jw_obj_begin(w);
+    mf_jw_key(w, "record");        mf_jw_str(w, "preprocess");
+    mf_jw_key(w, "bulk_path");     mf_jw_str(w, c->bulk_path);
+    mf_jw_key(w, "cards");         mf_jw_int(w, (long long)count);
+    mf_jw_key(w, "printings");     mf_jw_int(w, (long long)mf_cardset_merged(set));
+    mf_jw_key(w, "non_paper");     mf_jw_int(w, (long long)mf_cardset_dropped(set));
+    mf_jw_key(w, "legality_disagreements");
+    mf_jw_int(w, (long long)mf_cardset_disagreements(set));
+    mf_jw_key(w, "rejected");
+    mf_jw_obj_begin(w);
+    /* Every reason, including the zeroes: a renamed field shows up as one of
+       these going from zero to a hundred thousand, and a key that only appears
+       when it is non-zero is a key nobody notices appearing. */
+    for (int r = 1; r < MF_SCRY_REJECT_COUNT; r++) {
+        mf_jw_key(w, mf_scry_reject_name((mf_scry_reject)r));
+        mf_jw_int(w, (long long)rejected[r]);
+    }
+    mf_jw_obj_end(w);
+    mf_jw_key(w, "layers");        mf_digests_write(&g, w);
+    mf_jw_obj_end(w);
+    write_record(art, w);
+
+    mf_pool_release(heap, scratch);
+    mf_pool_release(heap, durable);
+    mf_pool_destroy(heap);
+    return rc;
+}
+
 int mf_worker_run(mf_arena *root, const mf_config *c, mf_cmd cmd, mf_artifact *art) {
     if (!art && mf_artifact_open(root, c->artifact_path, &art) != MF_OK) {
         fprintf(stderr, "mfsim: cannot open artifact: %s\n", c->artifact_path);
@@ -138,6 +253,8 @@ int mf_worker_run(mf_arena *root, const mf_config *c, mf_cmd cmd, mf_artifact *a
     int rc;
     if (cmd == MF_CMD_VALIDATE) {
         rc = validate(root, c, art);
+    } else if (cmd == MF_CMD_PREPROCESS) {
+        rc = preprocess(root, c, art);
     } else {
         fprintf(stderr, "mfsim: '%s' is not implemented yet\n", mf_cli_cmd_name(cmd));
         rc = MF_EXIT_FAILURE;

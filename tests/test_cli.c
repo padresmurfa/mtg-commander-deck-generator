@@ -60,11 +60,13 @@ MF_TEST(cli_rejects_an_unknown_subcommand) {
 
 MF_TEST(cli_parses_global_options_before_the_subcommand) {
     mf_cli c;
-    const char *argv[] = {"mfsim", "--config", "a.json", "--out", "b.jsonl", "eval"};
-    MF_EQ_INT(parse(&c, 6, argv), MF_OK);
+    const char *argv[] = {"mfsim",     "--config", "a.json", "--out", "b.jsonl",
+                          "--bulk", "cards.json", "eval"};
+    MF_EQ_INT(parse(&c, 8, argv), MF_OK);
     MF_EQ_INT(c.cmd, MF_CMD_EVAL);
     MF_EQ_STR(c.config_path, "a.json");
     MF_EQ_STR(c.out_path, "b.jsonl");
+    MF_EQ_STR(c.bulk_path, "cards.json");
 }
 
 MF_TEST(cli_parses_global_options_after_the_subcommand) {
