@@ -21,28 +21,43 @@
  * trusted anyway once the failure is memory. */
 
 /* A worker's fatal report, once parsed. Absent or unreadable leaves `present`
-   false, which is survivable: the orchestrator can still double blindly. */
+   false, which is survivable for an arena: the orchestrator can still double
+   blindly. It is not survivable for a pool, because without the report there is
+   nothing to say which depth ran out. */
 typedef struct {
     bool present;
     int code;
     char reason[32];
-    char arena[32];
-    size_t need; /* the smallest capacity that would have served the failing allocation */
+    char resource[32]; /* the arena's or the pool's name */
+    char kind[16];     /* a pool's discipline: "heap" or "stack". Empty for an arena */
+    size_t need;       /* the smallest size that would have served the failing request */
 } mf_fatal;
 
 void mf_orch_read_report(mf_arena *a, const char *path, mf_fatal *out);
 
 typedef enum {
     MF_ORCH_DONE,     /* nothing to retry — propagate the worker's exit code */
-    MF_ORCH_RETRY,    /* relaunch at *next_arena */
-    MF_ORCH_CEILING,  /* the run needs more than arena_max_bytes allows */
+    MF_ORCH_RETRY,    /* relaunch with *next */
+    MF_ORCH_CEILING,  /* the run needs more than the configured ceiling allows */
     MF_ORCH_EXHAUSTED /* out of relaunches */
 } mf_orch_verdict;
 
+/* What the next launch gets. Every field is filled, grown or not, so the caller
+   applies the whole struct and never has to know which one moved. */
+typedef struct {
+    size_t arena_bytes;
+    size_t heap_pool_depth;
+    size_t stack_pool_depth;
+} mf_orch_growth;
+
 /* The growth decision, as a pure function: no I/O, no spawning, no clock. Every
-   interesting case is a table row rather than a process. */
+   interesting case is a table row rather than a process.
+
+   Which knob moves is decided by the worker's exit code and, for a pool, by the
+   kind in its report. A kind this function does not recognise is not grown at
+   all — the safe answer, since guessing would relaunch an identical run. */
 mf_orch_verdict mf_orch_plan_next(const mf_config *c, int exit_code, const mf_fatal *f,
-                                  int attempts_used, size_t *next_arena);
+                                  int attempts_used, mf_orch_growth *next);
 
 /* How a worker gets run. The seam exists so the retry loop can be driven
    through every outcome without spawning anything. */
@@ -58,7 +73,7 @@ typedef struct {
 } mf_orch;
 
 /* Runs the worker, growing and relaunching as needed. Returns the exit code the
-   orchestrator should exit with. Mutates c->arena_bytes when it grows. */
+   orchestrator should exit with. Mutates whichever size or depth it grew. */
 int mf_orch_run(mf_orch *o, mf_config *c);
 
 /* ---- the real launcher --------------------------------------------------- */

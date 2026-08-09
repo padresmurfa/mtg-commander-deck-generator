@@ -30,7 +30,7 @@ ok "usage errors exit 2"
 # validate asks for 1 MiB per work item; 64 KiB cannot serve that.
 cat > "$WORK/tiny.json" <<EOF
 {"artifact_path":"$WORK/run.jsonl","arena_bytes":65536,
- "arena_max_bytes":65536,"max_relaunch":0,"persist_arena_growth":false}
+ "arena_max_bytes":65536,"max_relaunch":0,"persist_growth":false}
 EOF
 
 rc=0
@@ -47,7 +47,7 @@ ok "an exhausted worker exits 70 with a machine-readable report"
 # Starts far too small, with room and retries to climb out of it.
 cat > "$WORK/grow.json" <<EOF
 {"artifact_path":"$WORK/grown.jsonl","arena_bytes":65536,
- "arena_max_bytes":67108864,"max_relaunch":8,"arena_pool_depth":1}
+ "arena_max_bytes":67108864,"max_relaunch":8}
 EOF
 
 out=$("$BIN" validate --config "$WORK/grow.json" 2>&1) || fail "grow run failed: $out"
@@ -67,7 +67,7 @@ ok "the second run fitted first time"
 # --- a ceiling below what the work needs stops rather than looping ---------
 cat > "$WORK/capped.json" <<EOF
 {"artifact_path":"$WORK/capped.jsonl","arena_bytes":65536,
- "arena_max_bytes":131072,"max_relaunch":8,"persist_arena_growth":false}
+ "arena_max_bytes":131072,"max_relaunch":8,"persist_growth":false}
 EOF
 
 rc=0
@@ -76,9 +76,38 @@ out=$("$BIN" validate --config "$WORK/capped.json" 2>&1) || rc=$?
 echo "$out" | grep -q "arena_max_bytes" || fail "no explanation of the ceiling"
 ok "a ceiling below the requirement stops instead of looping"
 
+# --- a pool with too few arenas dies with its own code --------------------
+# validate nests three stack frames; a stack pool of one cannot serve the second.
+cat > "$WORK/shallow.json" <<EOF
+{"artifact_path":"$WORK/shallow.jsonl","arena_bytes":4194304,
+ "stack_pool_depth":1,"max_relaunch":0,"persist_growth":false}
+EOF
+
+rc=0
+"$WORKER" validate --config "$WORK/shallow.json" --report "$WORK/pool.json" \
+    >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 73 ] || fail "an exhausted pool should exit 73, got $rc"
+grep -q '"reason":"pool_exhausted"' "$WORK/pool.json" || fail "report has no reason"
+grep -q '"pool":"frame"' "$WORK/pool.json" || fail "report does not name the pool"
+grep -q '"kind":"stack"' "$WORK/pool.json" || fail "report does not say which depth to grow"
+grep -q '"need":2' "$WORK/pool.json" || fail "report has no need"
+ok "an exhausted pool exits 73 naming the depth to grow"
+
+# --- and the orchestrator deepens it exactly as it grows an arena ----------
+cat > "$WORK/deepen.json" <<EOF
+{"artifact_path":"$WORK/deepened.jsonl","arena_bytes":4194304,"stack_pool_depth":1}
+EOF
+
+out=$("$BIN" validate --config "$WORK/deepen.json" 2>&1) || fail "deepen run failed: $out"
+echo "$out" | grep -q "stack pool" || fail "the orchestrator never deepened the pool"
+grep -q '"stack_pool_peak":3' "$WORK/deepened.jsonl" || fail "the stack pool was not used"
+depth=$(sed 's/.*"stack_pool_depth":\([0-9]*\).*/\1/' "$WORK/deepen.json")
+[ "$depth" -ge 3 ] || fail "stack_pool_depth was not written back (still $depth)"
+ok "the orchestrator deepened the stack pool and kept the answer ($depth arenas)"
+
 # --- single-process mode does the same work without a child ---------------
 cat > "$WORK/solo.json" <<EOF
-{"artifact_path":"$WORK/solo.jsonl","arena_bytes":4194304,"arena_pool_depth":1}
+{"artifact_path":"$WORK/solo.jsonl","arena_bytes":4194304}
 EOF
 "$BIN" --no-spawn validate --config "$WORK/solo.json" >/dev/null 2>&1 ||
     fail "--no-spawn validate failed"

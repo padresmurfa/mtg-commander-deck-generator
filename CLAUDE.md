@@ -53,7 +53,7 @@ Stated in `docs/simulator-design.md` §10 and `docs/simulator-spec.yaml` under `
 | --------- | ---------- |
 | `no_io_in_loop` | Zero syscalls per game; O(1) per generation |
 | `fail_fast` | Environmental failure kills the process; it is never a value a caller inspects |
-| `arena_allocation` | All memory from caller-supplied arenas; allocation cannot fail; memory is always zeroed |
+| `arena_allocation` | All memory from caller-supplied arenas; allocation cannot fail; memory is always zeroed; a pool that runs out is fatal |
 | `lock_free_per_game` | No locks or atomics on the per-game path |
 | `l1_resident_hot_set` | Per-thread hot set fits in L1d |
 | `determinism` | Same seed + config + card table ⇒ bit-identical output |
@@ -133,6 +133,12 @@ worth consulting — that decision belongs in the E1 retro, not to a passing imp
   for. Do not check allocations for `NULL`; they cannot fail
 - **Do not `memset` what an arena just handed you.** It is already zero, on first use and after a
   pop. A struct from an arena starts fully zeroed, which is usually the whole initialisation
+- **Acquire a pooled arena at a phase boundary, never inside one.** A release pays for the reset
+  and the re-zeroing, so claiming per item pays it per item. `mf_pool_acquires` is in the run
+  artifact so churn is visible. If something genuinely needs short-lived arenas, give it its own
+  pool — but it almost certainly does not
+- **A pool that runs out kills the process**, exactly like an arena that is too small; the
+  orchestrator grows the depth and relaunches. Do not add a fallback path
 - **`mf_err` is for the user's mistakes, `mf_panic` for the environment's.** Missing file, bad
   config, unknown key → `mf_err`, handled. No memory, arena too small, broken invariant → fatal,
   uncatchable. The test for which: could the caller have done anything about it?

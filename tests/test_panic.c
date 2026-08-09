@@ -36,6 +36,39 @@ MF_TEST(panic_codes_are_stable) {
     MF_EQ_INT(MF_EXIT_ARENA, 70);
     MF_EQ_INT(MF_EXIT_OOM, 71);
     MF_EQ_INT(MF_EXIT_PANIC, 72);
+    MF_EQ_INT(MF_EXIT_POOL, 73);
+}
+
+MF_TEST(pool_exhaustion_reports_a_depth_the_same_way_an_arena_reports_bytes) {
+    /* Deliberately the same numeric shape as the arena report. The orchestrator
+       grows a different knob, but it does the arithmetic with the same code. */
+    const char *path = "build/test-fatal-pool.json";
+    remove(path);
+
+    mf_panic_report_path(path);
+    MF_EXPECT_PANIC({ mf_panic_pool("eval", "heap", 3); });
+    mf_panic_report_path(NULL);
+
+    MF_EQ_INT(mf_t_panic_code(), MF_EXIT_POOL);
+
+    const char *text = slurp(path);
+    MF_CHECK(text != NULL);
+    MF_CHECK(strstr(text, "\"reason\":\"pool_exhausted\"") != NULL);
+    MF_CHECK(strstr(text, "\"pool\":\"eval\"") != NULL);
+    MF_CHECK(strstr(text, "\"kind\":\"heap\"") != NULL);
+    MF_CHECK(strstr(text, "\"code\":73") != NULL);
+    MF_CHECK(strstr(text, "\"capacity\":3") != NULL);
+    MF_CHECK(strstr(text, "\"used\":3") != NULL);
+    MF_CHECK(strstr(text, "\"wanted\":1") != NULL);
+    MF_CHECK(strstr(text, "\"need\":4") != NULL);
+
+    remove(path);
+}
+
+MF_TEST(the_pool_fatal_says_which_pool_and_which_discipline) {
+    MF_EXPECT_PANIC({ mf_panic_pool("frame", "stack", 2); });
+    MF_CHECK(strstr(mf_t_panic_msg(), "frame") != NULL);
+    MF_CHECK(strstr(mf_t_panic_msg(), "stack") != NULL);
 }
 
 MF_TEST(panic_arena_names_the_shortfall) {
@@ -199,6 +232,8 @@ void run_panic_tests(void) {
     MF_RUN(panic_arena_names_the_shortfall);
     MF_RUN(the_human_line_is_prefixed_and_newline_terminated);
     MF_RUN(panic_arena_writes_a_report_a_machine_can_read);
+    MF_RUN(pool_exhaustion_reports_a_depth_the_same_way_an_arena_reports_bytes);
+    MF_RUN(the_pool_fatal_says_which_pool_and_which_discipline);
     MF_RUN(a_plain_panic_reports_without_arena_fields);
     MF_RUN(a_saturating_need_does_not_wrap_around_zero);
     MF_RUN(a_message_with_quotes_stays_valid_json);

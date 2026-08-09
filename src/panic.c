@@ -43,8 +43,18 @@ static void escape(const char *s, char *dst, size_t cap) {
     dst[n] = '\0';
 }
 
-static void write_report(int code, const char *reason, const char *msg, const char *arena,
-                         size_t capacity, size_t used, size_t wanted) {
+/* What ran out. `key` is the JSON key that names it — "arena" or "pool" — and
+   `kind`, when present, is the pool's discipline. Everything else is counted in
+   whatever unit the resource is sized in: bytes for an arena, arenas for a
+   pool. Keeping one shape means the orchestrator has one reader. */
+typedef struct {
+    const char *key;
+    const char *name;
+    const char *kind;
+    size_t capacity, used, wanted;
+} shortfall;
+
+static void write_report(int code, const char *reason, const char *msg, const shortfall *s) {
     if (!g_report_path) return;
     FILE *f = fopen(g_report_path, "wb");
     if (!f) return; /* the report is a courtesy; the death is the contract */
@@ -53,27 +63,27 @@ static void write_report(int code, const char *reason, const char *msg, const ch
     escape(msg, esc, sizeof esc);
     fprintf(f, "{\"record\":\"fatal\",\"code\":%d,\"reason\":\"%s\",\"message\":\"%s\"", code,
             reason, esc);
-    if (arena) {
+    if (s) {
         /* `need` is the smallest capacity that would have served this one
-           allocation. Saturating rather than wrapping matters: an
-           overflow-checked array asks for something near SIZE_MAX, and a
-           wrapped sum is a small number the orchestrator would cheerfully
-           accept as the new arena size. */
-        size_t need = wanted > SIZE_MAX - used ? SIZE_MAX : used + wanted;
-        fprintf(f, ",\"arena\":\"%s\",\"capacity\":%zu,\"used\":%zu,\"wanted\":%zu,\"need\":%zu",
-                arena, capacity, used, wanted, need);
+           request. Saturating rather than wrapping matters: an overflow-checked
+           array asks for something near SIZE_MAX, and a wrapped sum is a small
+           number the orchestrator would cheerfully accept as the new size. */
+        size_t need = s->wanted > SIZE_MAX - s->used ? SIZE_MAX : s->used + s->wanted;
+        fprintf(f, ",\"%s\":\"%s\"", s->key, s->name);
+        if (s->kind) fprintf(f, ",\"kind\":\"%s\"", s->kind);
+        fprintf(f, ",\"capacity\":%zu,\"used\":%zu,\"wanted\":%zu,\"need\":%zu", s->capacity,
+                s->used, s->wanted, need);
     }
     fputs("}\n", f);
     fclose(f);
 }
 
-static _Noreturn void die(int code, const char *reason, const char *msg, const char *arena,
-                          size_t capacity, size_t used, size_t wanted) {
+static _Noreturn void die(int code, const char *reason, const char *msg, const shortfall *s) {
     FILE *sink = g_sink ? g_sink : stderr;
     fprintf(sink, "mfsim: fatal: %s\n", msg);
     fflush(sink); /* _exit does not flush stdio, and this line is the point */
 
-    write_report(code, reason, msg, arena, capacity, used, wanted);
+    write_report(code, reason, msg, s);
 
     if (g_hook) g_hook(code, msg);
 
@@ -88,12 +98,23 @@ _Noreturn void mf_panic(int code, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
-    die(code, "panic", msg, NULL, 0, 0, 0);
+    die(code, "panic", msg, NULL);
 }
 
 _Noreturn void mf_panic_arena(const char *arena, size_t capacity, size_t used, size_t wanted) {
     char msg[MF_PANIC_MSG_MAX];
     snprintf(msg, sizeof msg, "arena '%s' exhausted: capacity %zu, used %zu, wanted %zu more",
              arena, capacity, used, wanted);
-    die(MF_EXIT_ARENA, "arena_exhausted", msg, arena, capacity, used, wanted);
+    shortfall s = {"arena", arena, NULL, capacity, used, wanted};
+    die(MF_EXIT_ARENA, "arena_exhausted", msg, &s);
+}
+
+_Noreturn void mf_panic_pool(const char *pool, const char *kind, size_t depth) {
+    char msg[MF_PANIC_MSG_MAX];
+    snprintf(msg, sizeof msg, "%s pool '%s' exhausted: all %zu arenas are out on loan", kind, pool,
+             depth);
+    /* All of them are lent, and one more would have served — so the numbers are
+       the arena's, counted in arenas. */
+    shortfall s = {"pool", pool, kind, depth, depth, 1};
+    die(MF_EXIT_POOL, "pool_exhausted", msg, &s);
 }

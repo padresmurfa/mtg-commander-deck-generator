@@ -34,11 +34,13 @@ MF_TEST(config_defaults_match_the_spec) {
 
     /* spec: parameters.memory. A drifting spec fails the build rather than
        silently changing what a run costs. */
-    MF_EQ_INT(c.arena_bytes, 67108864);
+    MF_EQ_INT(c.arena_bytes, 8388608);
     MF_EQ_INT(c.arena_max_bytes, 8589934592ull);
-    MF_EQ_INT(c.arena_pool_depth, 2);
+    MF_EQ_INT(c.heap_pool_depth, 2);
+    MF_EQ_INT(c.stack_pool_depth, 4);
+    MF_EQ_INT(c.pool_max_depth, 256);
     MF_EQ_INT(c.max_relaunch, 4);
-    MF_CHECK(c.persist_arena_growth == true);
+    MF_CHECK(c.persist_growth == true);
 }
 
 MF_TEST(config_reads_every_key) {
@@ -141,7 +143,8 @@ MF_TEST(config_round_trips_through_json) {
     mf_config c;
     MF_EQ_INT(load(&c, "{\"threads\":7,\"lambda_cvar\":2.5,\"seed\":99,"
                        "\"arena_bytes\":2097152,\"max_relaunch\":1,"
-                       "\"persist_arena_growth\":false}"),
+                       "\"heap_pool_depth\":3,\"stack_pool_depth\":5,"
+                       "\"pool_max_depth\":32,\"persist_growth\":false}"),
               MF_OK);
 
     mf_jw *w = mf_jw_new(A);
@@ -158,9 +161,11 @@ MF_TEST(config_round_trips_through_json) {
     MF_EQ_STR(back.card_table_path, c.card_table_path);
     MF_EQ_INT(back.arena_bytes, c.arena_bytes);
     MF_EQ_INT(back.arena_max_bytes, c.arena_max_bytes);
-    MF_EQ_INT(back.arena_pool_depth, c.arena_pool_depth);
+    MF_EQ_INT(back.heap_pool_depth, c.heap_pool_depth);
+    MF_EQ_INT(back.stack_pool_depth, c.stack_pool_depth);
+    MF_EQ_INT(back.pool_max_depth, c.pool_max_depth);
     MF_EQ_INT(back.max_relaunch, c.max_relaunch);
-    MF_CHECK(back.persist_arena_growth == c.persist_arena_growth);
+    MF_CHECK(back.persist_growth == c.persist_growth);
 }
 
 
@@ -208,14 +213,17 @@ MF_TEST(config_reports_errors_without_an_errbuf) {
 MF_TEST(config_reads_the_memory_keys) {
     mf_config c;
     MF_EQ_INT(load(&c, "{\"arena_bytes\":1048576,\"arena_max_bytes\":4194304,"
-                       "\"arena_pool_depth\":3,\"max_relaunch\":2,"
-                       "\"persist_arena_growth\":false}"),
+                       "\"heap_pool_depth\":3,\"stack_pool_depth\":6,"
+                       "\"pool_max_depth\":64,\"max_relaunch\":2,"
+                       "\"persist_growth\":false}"),
               MF_OK);
     MF_EQ_INT(c.arena_bytes, 1048576);
     MF_EQ_INT(c.arena_max_bytes, 4194304);
-    MF_EQ_INT(c.arena_pool_depth, 3);
+    MF_EQ_INT(c.heap_pool_depth, 3);
+    MF_EQ_INT(c.stack_pool_depth, 6);
+    MF_EQ_INT(c.pool_max_depth, 64);
     MF_EQ_INT(c.max_relaunch, 2);
-    MF_CHECK(c.persist_arena_growth == false);
+    MF_CHECK(c.persist_growth == false);
 }
 
 MF_TEST(config_enforces_memory_ranges) {
@@ -224,19 +232,24 @@ MF_TEST(config_enforces_memory_ranges) {
     MF_EQ_INT(load(&c, "{\"arena_bytes\":1e15}"), MF_ERR_RANGE);       /* past the ceiling */
     MF_EQ_INT(load(&c, "{\"arena_max_bytes\":1024}"), MF_ERR_RANGE);
     MF_EQ_INT(load(&c, "{\"arena_max_bytes\":1e15}"), MF_ERR_RANGE);
-    MF_EQ_INT(load(&c, "{\"arena_pool_depth\":-1}"), MF_ERR_RANGE);
-    MF_EQ_INT(load(&c, "{\"arena_pool_depth\":65}"), MF_ERR_RANGE);
-    MF_EQ_INT(load(&c, "{\"arena_pool_depth\":0}"), MF_OK);
+    /* Depth 0 used to mean "do not pool this". Now that running dry is fatal it
+       would mean "acquiring is always fatal", so the floor is 1. */
+    MF_EQ_INT(load(&c, "{\"heap_pool_depth\":0}"), MF_ERR_RANGE);
+    MF_EQ_INT(load(&c, "{\"heap_pool_depth\":257}"), MF_ERR_RANGE);
+    MF_EQ_INT(load(&c, "{\"stack_pool_depth\":0}"), MF_ERR_RANGE);
+    MF_EQ_INT(load(&c, "{\"stack_pool_depth\":257}"), MF_ERR_RANGE);
+    MF_EQ_INT(load(&c, "{\"pool_max_depth\":0}"), MF_ERR_RANGE);
+    MF_EQ_INT(load(&c, "{\"pool_max_depth\":257}"), MF_ERR_RANGE);
     MF_EQ_INT(load(&c, "{\"max_relaunch\":-1}"), MF_ERR_RANGE);
     MF_EQ_INT(load(&c, "{\"max_relaunch\":17}"), MF_ERR_RANGE);
     MF_EQ_INT(load(&c, "{\"max_relaunch\":0}"), MF_OK);
-    MF_EQ_INT(load(&c, "{\"persist_arena_growth\":1}"), MF_ERR_TYPE);
+    MF_EQ_INT(load(&c, "{\"persist_growth\":1}"), MF_ERR_TYPE);
 
     /* A type error must be caught before the range check looks at the value. */
     MF_EQ_INT(load(&c, "{\"cvar_quantile\":\"half\"}"), MF_ERR_TYPE);
     MF_EQ_INT(load(&c, "{\"arena_bytes\":\"lots\"}"), MF_ERR_TYPE);
     MF_EQ_INT(load(&c, "{\"arena_max_bytes\":null}"), MF_ERR_TYPE);
-    MF_EQ_INT(load(&c, "{\"arena_pool_depth\":[]}"), MF_ERR_TYPE);
+    MF_EQ_INT(load(&c, "{\"heap_pool_depth\":[]}"), MF_ERR_TYPE);
     MF_EQ_INT(load(&c, "{\"max_relaunch\":false}"), MF_ERR_TYPE);
 }
 
@@ -247,6 +260,11 @@ MF_TEST(config_rejects_a_ceiling_below_the_starting_size) {
     MF_EQ_INT(load(&c, "{\"arena_bytes\":8388608,\"arena_max_bytes\":1048576}"), MF_ERR_RANGE);
     MF_CHECK(strstr(errbuf, "arena_max_bytes") != NULL);
     MF_EQ_INT(load(&c, "{\"arena_max_bytes\":1048576,\"arena_bytes\":8388608}"), MF_ERR_RANGE);
+
+    /* Same reasoning one level up: a ceiling under either depth makes the first
+       relaunch impossible, and either key may be the one that arrives second. */
+    MF_EQ_INT(load(&c, "{\"heap_pool_depth\":8,\"pool_max_depth\":4}"), MF_ERR_RANGE);
+    MF_EQ_INT(load(&c, "{\"pool_max_depth\":4,\"stack_pool_depth\":8}"), MF_ERR_RANGE);
 }
 
 void run_config_tests(void) {

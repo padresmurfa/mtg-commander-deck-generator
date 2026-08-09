@@ -37,7 +37,8 @@ MF_TEST(a_report_is_parsed_into_a_decision) {
     MF_CHECK(f.present);
     MF_EQ_INT(f.code, 70);
     MF_EQ_STR(f.reason, "arena_exhausted");
-    MF_EQ_STR(f.arena, "worker");
+    MF_EQ_STR(f.resource, "worker");
+    MF_EQ_STR(f.kind, "");
     MF_EQ_INT(f.need, 1512);
     remove(path);
 }
@@ -70,7 +71,7 @@ MF_TEST(an_unusable_report_is_simply_absent) {
     mf_orch_read_report(A, path, &f);
     MF_CHECK(f.present);
     MF_EQ_INT(f.need, 0);
-    MF_EQ_STR(f.arena, "");
+    MF_EQ_STR(f.resource, "");
 
     remove(path);
 }
@@ -98,7 +99,7 @@ static mf_fatal arena_fatal(size_t need) {
 MF_TEST(anything_but_an_arena_exit_is_not_retried) {
     mf_config c = plan_cfg(1024, 1 << 20, 4);
     mf_fatal f = arena_fatal(2048);
-    size_t next = 0;
+    mf_orch_growth next;
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_OK, &f, 0, &next), MF_ORCH_DONE);
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_FAILURE, &f, 0, &next), MF_ORCH_DONE);
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_USAGE, &f, 0, &next), MF_ORCH_DONE);
@@ -111,7 +112,7 @@ MF_TEST(a_broken_invariant_is_not_a_sizing_problem) {
     mf_config c = plan_cfg(1024, 1 << 20, 4);
     mf_fatal f = arena_fatal(2048);
     snprintf(f.reason, sizeof f.reason, "panic");
-    size_t next = 0;
+    mf_orch_growth next;
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 0, &next), MF_ORCH_DONE);
 }
 
@@ -120,33 +121,33 @@ MF_TEST(growth_is_at_least_a_doubling) {
        Sizing to it exactly would buy a second death a few allocations later. */
     mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
     mf_fatal f = arena_fatal(1000); /* tiny need */
-    size_t next = 0;
+    mf_orch_growth next;
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 0, &next), MF_ORCH_RETRY);
-    MF_EQ_INT(next, 2u << 20);
+    MF_EQ_INT(next.arena_bytes, 2u << 20);
 }
 
 MF_TEST(a_large_need_wins_over_the_doubling_with_headroom) {
     mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
     mf_fatal f = arena_fatal(8u << 20);
-    size_t next = 0;
+    mf_orch_growth next;
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 0, &next), MF_ORCH_RETRY);
-    MF_EQ_INT(next, (8u << 20) / 4 * 5); /* 25% over what it asked for */
+    MF_EQ_INT(next.arena_bytes, (8u << 20) / 4 * 5); /* 25% over what it asked for */
 }
 
 MF_TEST(a_missing_report_still_doubles) {
     mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
     mf_fatal f = {0}; /* not present */
-    size_t next = 0;
+    mf_orch_growth next;
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 0, &next), MF_ORCH_RETRY);
-    MF_EQ_INT(next, 2u << 20);
+    MF_EQ_INT(next.arena_bytes, 2u << 20);
 }
 
 MF_TEST(growth_clamps_to_the_ceiling_rather_than_overshooting) {
     mf_config c = plan_cfg(768u << 10, 1u << 20, 4); /* doubling would exceed max */
     mf_fatal f = arena_fatal(0);
-    size_t next = 0;
+    mf_orch_growth next;
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 0, &next), MF_ORCH_RETRY);
-    MF_EQ_INT(next, 1u << 20);
+    MF_EQ_INT(next.arena_bytes, 1u << 20);
 }
 
 MF_TEST(headroom_that_overshoots_the_ceiling_is_trimmed_to_it) {
@@ -155,29 +156,29 @@ MF_TEST(headroom_that_overshoots_the_ceiling_is_trimmed_to_it) {
        retry — the arena is still large enough for what was actually asked. */
     mf_config c = plan_cfg(1u << 20, 4u << 20, 4);
     mf_fatal f = arena_fatal(4u << 20); /* exactly the ceiling */
-    size_t next = 0;
+    mf_orch_growth next;
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 0, &next), MF_ORCH_RETRY);
-    MF_EQ_INT(next, 4u << 20);
+    MF_EQ_INT(next.arena_bytes, 4u << 20);
 }
 
 MF_TEST(a_need_above_the_ceiling_stops_the_run) {
     mf_config c = plan_cfg(1u << 20, 4u << 20, 4);
     mf_fatal f = arena_fatal(64u << 20);
-    size_t next = 0;
+    mf_orch_growth next;
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 0, &next), MF_ORCH_CEILING);
 }
 
 MF_TEST(sitting_at_the_ceiling_already_stops_the_run) {
     mf_config c = plan_cfg(1u << 20, 1u << 20, 4);
     mf_fatal f = arena_fatal(0);
-    size_t next = 0;
+    mf_orch_growth next;
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 0, &next), MF_ORCH_CEILING);
 }
 
 MF_TEST(retries_are_bounded) {
     mf_config c = plan_cfg(1u << 20, 1u << 30, 2);
     mf_fatal f = arena_fatal(0);
-    size_t next = 0;
+    mf_orch_growth next;
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 1, &next), MF_ORCH_RETRY);
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 2, &next), MF_ORCH_EXHAUSTED);
     MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 9, &next), MF_ORCH_EXHAUSTED);
@@ -187,11 +188,94 @@ MF_TEST(retries_are_bounded) {
     MF_EQ_INT(mf_orch_plan_next(&never, MF_EXIT_ARENA, &f, 0, &next), MF_ORCH_EXHAUSTED);
 }
 
+/* ---- growing a pool rather than an arena --------------------------------- */
+
+static mf_fatal pool_fatal(const char *kind, size_t need) {
+    mf_fatal f = {0};
+    f.present = true;
+    f.code = MF_EXIT_POOL;
+    f.need = need;
+    snprintf(f.reason, sizeof f.reason, "pool_exhausted");
+    snprintf(f.kind, sizeof f.kind, "%s", kind);
+    return f;
+}
+
+MF_TEST(a_pool_death_grows_the_depth_its_kind_names_and_no_other) {
+    /* The two depths are independent knobs, and growing the wrong one would
+       relaunch a run that fails in exactly the same place. */
+    mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
+    c.heap_pool_depth = 2;
+    c.stack_pool_depth = 4;
+    mf_orch_growth next;
+
+    mf_fatal h = pool_fatal("heap", 3);
+    MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_POOL, &h, 0, &next), MF_ORCH_RETRY);
+    MF_EQ_INT(next.heap_pool_depth, 4); /* at least a doubling, as for an arena */
+    MF_EQ_INT(next.stack_pool_depth, 4);
+    MF_EQ_INT(next.arena_bytes, 1u << 20);
+
+    mf_fatal s = pool_fatal("stack", 9);
+    MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_POOL, &s, 0, &next), MF_ORCH_RETRY);
+    MF_EQ_INT(next.stack_pool_depth, 9); /* a need past the doubling wins */
+    MF_EQ_INT(next.heap_pool_depth, 2);
+}
+
+MF_TEST(an_arena_death_carries_the_pool_depths_forward_untouched) {
+    mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
+    c.heap_pool_depth = 3;
+    c.stack_pool_depth = 5;
+    mf_fatal f = arena_fatal(0);
+    mf_orch_growth next;
+
+    MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_ARENA, &f, 0, &next), MF_ORCH_RETRY);
+    MF_EQ_INT(next.arena_bytes, 2u << 20);
+    MF_EQ_INT(next.heap_pool_depth, 3);
+    MF_EQ_INT(next.stack_pool_depth, 5);
+}
+
+MF_TEST(a_pool_the_orchestrator_cannot_place_is_not_retried) {
+    /* Two ways to not know which depth ran out: a kind nobody registered, and
+       no report at all. Guessing either would relaunch an identical run, so
+       neither is a retry. */
+    mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
+    mf_orch_growth next;
+
+    mf_fatal unknown = pool_fatal("quantum", 3);
+    MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_POOL, &unknown, 0, &next), MF_ORCH_DONE);
+
+    mf_fatal absent = {0};
+    MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_POOL, &absent, 0, &next), MF_ORCH_DONE);
+}
+
+MF_TEST(a_depth_past_the_pool_ceiling_stops_the_run) {
+    mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
+    c.heap_pool_depth = 2;
+    c.pool_max_depth = 8;
+    mf_orch_growth next;
+
+    mf_fatal too_deep = pool_fatal("heap", 9);
+    MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_POOL, &too_deep, 0, &next), MF_ORCH_CEILING);
+
+    /* And a pool already at the ceiling has no larger depth left to try. */
+    c.heap_pool_depth = 8;
+    mf_fatal at_it = pool_fatal("heap", 0);
+    MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_POOL, &at_it, 0, &next), MF_ORCH_CEILING);
+}
+
+MF_TEST(pool_retries_are_bounded_like_arena_retries) {
+    mf_config c = plan_cfg(1u << 20, 1u << 30, 2);
+    mf_fatal f = pool_fatal("stack", 0);
+    mf_orch_growth next;
+    MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_POOL, &f, 1, &next), MF_ORCH_RETRY);
+    MF_EQ_INT(mf_orch_plan_next(&c, MF_EXIT_POOL, &f, 2, &next), MF_ORCH_EXHAUSTED);
+}
+
 /* ---- the retry loop, driven by a fake worker ----------------------------- */
 
 typedef struct {
     int calls;
     size_t saw_arena[8]; /* the arena size each launch was given */
+    size_t saw_stack[8]; /* and the stack pool depth */
     int rc[8];           /* what each launch returns */
     const char *report;  /* written before returning, or NULL */
 } fake;
@@ -199,6 +283,7 @@ typedef struct {
 static int fake_launch(void *vctx, const mf_config *c, const char *report_path) {
     fake *k = vctx;
     k->saw_arena[k->calls] = c->arena_bytes;
+    k->saw_stack[k->calls] = c->stack_pool_depth;
     int rc = k->rc[k->calls];
     k->calls++;
     if (k->report && report_path) write_file(report_path, k->report);
@@ -312,6 +397,84 @@ MF_TEST(a_worker_asking_past_the_ceiling_gives_up_immediately) {
     remove(report);
 }
 
+MF_TEST(a_pool_death_is_relaunched_deeper_and_the_answer_is_kept) {
+    /* The same loop as an arena death, on a different knob — which is the whole
+       point of giving the pool a fatal instead of a miss counter. */
+    const char *report = "build/test-orch-pool-loop.json";
+    remove(report);
+
+    fake k = {0};
+    k.rc[0] = MF_EXIT_POOL;
+    k.rc[1] = MF_EXIT_OK;
+    k.report = "{\"reason\":\"pool_exhausted\",\"code\":73,\"pool\":\"frame\","
+               "\"kind\":\"stack\",\"need\":6}";
+
+    char log[512] = {0};
+    FILE *lf = fmemopen(log, sizeof log, "w");
+    mf_orch o = fake_orch(&k, report, lf);
+    mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
+    c.stack_pool_depth = 2;
+
+    MF_EQ_INT(mf_orch_run(&o, &c), MF_EXIT_OK);
+    MF_EQ_INT(k.calls, 2);
+    MF_EQ_INT(k.saw_stack[0], 2);
+    MF_EQ_INT(k.saw_stack[1], 6);
+    MF_EQ_INT(c.stack_pool_depth, 6);
+    MF_EQ_INT(k.saw_arena[1], 1u << 20); /* the arena was not touched */
+
+    fclose(lf);
+    MF_CHECK(strstr(log, "stack pool") != NULL);
+    remove(report);
+}
+
+MF_TEST(a_heap_pool_death_is_relaunched_deeper_too) {
+    /* The stack case above and this one are separate paths through the log and
+       the config, and a run only ever takes one of them — so the other stays
+       unexercised unless it is asked for by name. */
+    const char *report = "build/test-orch-heap-loop.json";
+    remove(report);
+
+    fake k = {0};
+    k.rc[0] = MF_EXIT_POOL;
+    k.rc[1] = MF_EXIT_OK;
+    k.report = "{\"reason\":\"pool_exhausted\",\"code\":73,\"pool\":\"eval\","
+               "\"kind\":\"heap\",\"need\":0}";
+
+    char log[512] = {0};
+    FILE *lf = fmemopen(log, sizeof log, "w");
+    mf_orch o = fake_orch(&k, report, lf);
+    mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
+    c.heap_pool_depth = 2;
+
+    MF_EQ_INT(mf_orch_run(&o, &c), MF_EXIT_OK);
+    MF_EQ_INT(c.heap_pool_depth, 4);
+    MF_EQ_INT(c.stack_pool_depth, 4); /* untouched */
+
+    fclose(lf);
+    MF_CHECK(strstr(log, "heap pool") != NULL);
+    remove(report);
+}
+
+MF_TEST(a_pool_that_cannot_grow_gives_up_naming_its_own_ceiling) {
+    const char *report = "build/test-orch-pool-ceiling.json";
+    fake k = {0};
+    k.rc[0] = MF_EXIT_POOL;
+    k.report = "{\"reason\":\"pool_exhausted\",\"code\":73,\"kind\":\"heap\",\"need\":9999}";
+
+    char log[512] = {0};
+    FILE *lf = fmemopen(log, sizeof log, "w");
+    mf_orch o = fake_orch(&k, report, lf);
+    mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
+
+    /* The exit code is the pool's, not the arena's: they are different failures
+       and a caller reading 70 here would look for the wrong thing. */
+    MF_EQ_INT(mf_orch_run(&o, &c), MF_EXIT_POOL);
+    MF_EQ_INT(k.calls, 1);
+    fclose(lf);
+    MF_CHECK(strstr(log, "pool_max_depth") != NULL);
+    remove(report);
+}
+
 /* ---- writing the answer back --------------------------------------------- */
 
 MF_TEST(a_grown_arena_is_written_back_to_the_config) {
@@ -332,7 +495,7 @@ MF_TEST(a_grown_arena_is_written_back_to_the_config) {
 
     MF_EQ_INT(mf_orch_run(&o, &c), MF_EXIT_OK);
     fclose(lf);
-    MF_CHECK(strstr(log, "updated arena_bytes") != NULL);
+    MF_CHECK(strstr(log, "updated") != NULL);
 
     /* Next run starts where this one ended, rather than rediscovering it. */
     mf_config back;
@@ -359,7 +522,7 @@ MF_TEST(write_back_can_be_switched_off) {
     mf_orch o = fake_orch(&k, report, lf);
     o.config_path = cfg;
     mf_config c = plan_cfg(1u << 20, 1u << 30, 4);
-    c.persist_arena_growth = false;
+    c.persist_growth = false;
 
     MF_EQ_INT(mf_orch_run(&o, &c), MF_EXIT_OK);
     fclose(lf);
@@ -528,12 +691,20 @@ void run_orch_tests(void) {
     MF_RUN_A(a_need_above_the_ceiling_stops_the_run);
     MF_RUN_A(sitting_at_the_ceiling_already_stops_the_run);
     MF_RUN_A(retries_are_bounded);
+    MF_RUN_A(a_pool_death_grows_the_depth_its_kind_names_and_no_other);
+    MF_RUN_A(an_arena_death_carries_the_pool_depths_forward_untouched);
+    MF_RUN_A(a_pool_the_orchestrator_cannot_place_is_not_retried);
+    MF_RUN_A(a_depth_past_the_pool_ceiling_stops_the_run);
+    MF_RUN_A(pool_retries_are_bounded_like_arena_retries);
     MF_RUN_A(a_worker_that_succeeds_is_launched_once);
     MF_RUN_A(an_orchestrator_with_no_log_stream_writes_to_stderr);
     MF_RUN_A(a_worker_that_fails_for_other_reasons_is_not_relaunched);
     MF_RUN_A(an_arena_death_is_relaunched_larger_and_then_succeeds);
     MF_RUN_A(a_worker_that_never_fits_gives_up_after_the_retry_limit);
     MF_RUN_A(a_worker_asking_past_the_ceiling_gives_up_immediately);
+    MF_RUN_A(a_pool_death_is_relaunched_deeper_and_the_answer_is_kept);
+    MF_RUN_A(a_heap_pool_death_is_relaunched_deeper_too);
+    MF_RUN_A(a_pool_that_cannot_grow_gives_up_naming_its_own_ceiling);
     MF_RUN_A(a_grown_arena_is_written_back_to_the_config);
     MF_RUN_A(write_back_can_be_switched_off);
     MF_RUN_A(a_config_that_cannot_be_rewritten_does_not_stop_the_run);

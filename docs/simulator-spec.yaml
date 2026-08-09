@@ -192,7 +192,7 @@ invariants:
       There is no useful recovery from half an arena in a batch simulator. Handling it produces
       error branches that exist only to be tested and will never fire in anger.
     scope:
-      fatal: [out of memory, arena exhausted, broken internal invariant]
+      fatal: [out of memory, arena exhausted, pool exhausted, broken internal invariant]
       not_fatal: [missing file, malformed config, unknown subcommand, unimplemented subcommand]
     exit_codes:
       0: ok
@@ -201,6 +201,7 @@ invariants:
       70: arena exhausted — the report says by how much
       71: the OS refused memory the process genuinely needs
       72: an invariant this code guarantees did not hold
+      73: a pool had no arena left to lend — the report says which depth to grow
     stability: >
       The codes cross a process boundary and the orchestrator switches on them. Renumbering is a
       wire-format change, not a refactor.
@@ -220,8 +221,46 @@ invariants:
       - use-after-free and leaks are removed by construction, not by sanitiser
       - the per-game path takes memory reserved before the loop started (see no_io_in_loop)
     layout:
-      grain_bytes: 16          # alignof(max_align_t) on arm64
+      grain_bytes: 16          # not alignof(max_align_t), which is 8 here
+      grain_rationale: >
+        max_align_t covers the fundamental types. The ones this code will put in an arena —
+        __int128, and the NEON vectors sprint 6.3 wants — are extended types it says nothing
+        about, and malloc does not stoop to 8 either. arena.c static-asserts that 16 is no weaker
+        than alignof(max_align_t), so a port that disagrees fails to compile.
+      max_grain_bytes: 128     # equal to the payload alignment; a stronger request is a caller bug
       payload_alignment: 128   # every arena's payload starts on a cache line
+    alignment_contract:
+      added: sprint 0.2.1
+      rule: >
+        mf_arena_alloc_aligned's `align` must be a power of two in 1..128. Zero, a non-power-of-two,
+        and anything above the payload alignment are broken invariants (exit 72), not shortfalls.
+      rationale: >
+        Answering alignment in offsets is only sound up to the payload's own alignment, and the
+        masking arithmetic is only sound for a power of two. Growing the arena would not make a
+        request for 24-byte alignment meaningful, and diagnosing it as a shortfall would send the
+        orchestrator relaunching over a defect in the caller.
+    pools:
+      added: sprint 0.2.1
+      statement: >
+        A pool holds exactly `depth` arenas, created and zeroed before the first acquire, and never
+        creates another. Acquiring from an exhausted pool is fatal (exit 73).
+      rationale: >
+        A pool that quietly made another arena would be a recoverable environmental failure with an
+        unbounded footprint behind it. The depth is a configured size and behaves like every other
+        configured size here: too small kills the process, and the orchestrator grows it.
+      kinds:
+        heap: arenas are returned in any order
+        stack: arenas are returned in the exact reverse of the order taken; violating it is exit 72
+      kind_rationale: >
+        A stack pool can check that a release is the mirror of its acquire, so a frame outliving its
+        caller dies at the frame that caused it. A heap pool cannot, so it does not pretend to.
+      churn_rule: >
+        Acquire at phase boundaries, not inside them. Everything acquiring makes cheap is paid for
+        by the release that reset and re-zeroed the arena. mf_pool_acquires is emitted in the run
+        artifact so a churning caller is visible rather than merely disapproved of.
+      ownership: >
+        The pool owns every arena for its whole life, lent or not, so it must outlive its borrowers
+        and destroying one mid-flight is safe.
     todo_perf:
       - id: backing_store
         now: one calloc per arena
@@ -252,52 +291,86 @@ parameters:
     ref: "10"
     added: sprint 0.2
     note: >
-      arena_bytes is a starting guess, not a specification. The worker dies when it is too small
-      and the orchestrator relaunches at a larger one, so the value converges over a few runs
-      rather than having to be right up front.
+      None of these is a specification. Each is a starting guess the worker dies against and the
+      orchestrator grows, so they converge over a few runs rather than having to be right up front.
+      One capacity sizes every pooled arena: two would need the fatal report to say which arena it
+      was, which is a name table between the worker and the orchestrator, and nothing yet needs the
+      distinction.
     root_arena_bytes:
       type: size
       value: 1048576          # fixed, not grown: config, paths, the artifact record buffer
       note: Not the size the orchestrator grows. That one is per evaluation.
     arena_bytes:
       type: size
-      default: 67108864       # 64 MiB
+      default: 8388608        # 8 MiB — was 64 MiB until sprint 0.2.1
       min: 65536
       max: 1099511627776      # 1 TiB
+      note: >
+        The pools are stocked eagerly, so this is multiplied by every depth below it before a run
+        does any work. Eight megabytes is as much a guess as sixty-four was; it just does not
+        reserve most of a gigabyte to find that out.
     arena_max_bytes:
       type: size
       default: 8589934592     # 8 GiB
       min: 65536
       max: 1099511627776
       constraint: must be >= arena_bytes; checked after the whole document is read
-    arena_pool_depth:
+    heap_pool_depth:
       type: int
       default: 2
-      min: 0
-      max: 64
-      note: 0 means "do not pool"; every acquire is then a miss, which is legal.
+      min: 1
+      max: 256
+      note: Arenas returned in any order. Renamed from arena_pool_depth in sprint 0.2.1.
+    stack_pool_depth:
+      type: int
+      default: 4
+      min: 1
+      max: 256
+      note: Arenas returned in the mirror of the order taken.
+    pool_max_depth:
+      type: int
+      default: 256
+      min: 1
+      max: 256
+      constraint: must be >= both depths; checked after the whole document is read
+      note: >
+        Depth 0 is not permitted. It used to mean "do not pool this"; with exhaustion fatal it would
+        mean "acquiring is always fatal", which is a config that can only be a mistake.
     max_relaunch:
       type: int
       default: 4
       min: 0
       max: 16
       note: 0 means run once and report.
-    persist_arena_growth:
+    persist_growth:
       type: bool
       default: true
       note: >
-        Writes a grown arena_bytes back to the config file, atomically. Without it, "fixed by the
-        next retry" holds only within one invocation and tomorrow's run rediscovers the same size
-        the same expensive way.
+        Writes a grown size or depth back to the config file, atomically. Without it, "fixed by the
+        next retry" holds only within one invocation and tomorrow's run rediscovers the same numbers
+        the same expensive way. Renamed from persist_arena_growth in sprint 0.2.1, since it now
+        persists more than an arena size.
     growth_policy:
       ref: "10"
-      rule: max(need * 1.25, arena_bytes * 2), clamped to arena_max_bytes
-      headroom_rationale: >
-        `need` covers the one allocation that did not fit, not whatever the run would have gone on
-        to want. Sizing exactly to it invites a second death a few allocations later.
+      arena:
+        trigger: exit 70 with reason arena_exhausted
+        rule: max(need * 1.25, arena_bytes * 2), clamped to arena_max_bytes
+        headroom_rationale: >
+          `need` covers the one allocation that did not fit, not whatever the run would have gone on
+          to want. Sizing exactly to it invites a second death a few allocations later.
+      pool:
+        trigger: exit 73, with the report's `kind` naming which depth
+        rule: max(need, depth * 2), clamped to pool_max_depth
+        no_headroom_rationale: >
+          A depth is a count of concurrent borrowers, and the doubling already covers the ones the
+          report did not see.
+        unknown_kind: >
+          A kind the orchestrator does not recognise — including the empty kind of a report that
+          never arrived — is not grown at all. Guessing would relaunch a run that fails in exactly
+          the same place.
       stop_conditions:
-        - need above arena_max_bytes
-        - already at arena_max_bytes
+        - need above the relevant ceiling
+        - already at the relevant ceiling
         - attempts used == max_relaunch
 
   processes:

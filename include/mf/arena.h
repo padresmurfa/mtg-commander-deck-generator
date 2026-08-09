@@ -25,10 +25,20 @@
  * mmap(MAP_ANON) — already zero-filled by the kernel, so create() stops paying
  * for a memset — and 16 KB page alignment for the M1's TLB. */
 
-/* alignof(max_align_t) on arm64. Every allocation starts on this grain. */
+/* Every allocation starts on this grain. Sixteen rather than
+   alignof(max_align_t), which is 8 here: max_align_t covers the *fundamental*
+   types, and the ones this code will actually put in an arena — __int128, and
+   the NEON vectors sprint 6.3 wants — are extended types it says nothing about.
+   malloc does not stoop to 8 either. arena.c proves the choice is no weaker
+   than the standard's floor, so a port that disagrees fails to compile. */
 #define MF_ARENA_ALIGN 16
 /* Apple M1 line size — 128 bytes, not the 64 most code assumes (design §10.4). */
 #define MF_CACHE_LINE 128
+/* The strongest alignment an arena can honour. The payload starts on a cache
+   line, which is what makes alignment inside the arena a question about offsets
+   rather than about wherever calloc happened to land — and that reasoning stops
+   working above the line. A stronger request is a caller bug, not a shortfall. */
+#define MF_ARENA_MAX_ALIGN MF_CACHE_LINE
 
 typedef struct mf_arena mf_arena;
 

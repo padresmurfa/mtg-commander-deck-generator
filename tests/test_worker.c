@@ -24,7 +24,6 @@ static mf_config worker_cfg(size_t arena_bytes) {
     mf_config_defaults(&c);
     snprintf(c.artifact_path, sizeof c.artifact_path, "%s", PATH);
     c.arena_bytes = arena_bytes;
-    c.arena_pool_depth = 1;
     return c;
 }
 
@@ -44,34 +43,42 @@ MF_TEST(validate_exercises_the_memory_layer_and_records_what_it_used) {
     /* And closes with what the memory actually cost, which is the number that
        sizes the next run. */
     MF_CHECK(strstr(text, "\"record\":\"memcheck\"") != NULL);
-    MF_CHECK(strstr(text, "\"arena_high_water\":1048576") != NULL);
-    MF_CHECK(strstr(text, "\"pool_misses\":0") != NULL);
+    MF_CHECK(strstr(text, "\"heap_arena_peak\":1048576") != NULL);
+    MF_CHECK(strstr(text, "\"stack_arena_peak\":4096") != NULL);
     remove(PATH);
 }
 
-/* An arena too small for the work is the premise of the whole two-process
-   split, and it is verified in tests/smoke.sh rather than here — deliberately.
-   Catching the fatal with a longjmp means mf_pool_destroy never runs, so the
-   pooled arena is abandoned exactly as it would be in a dying process. That is
-   correct behaviour and a real leak in a suite that refuses to die, and
-   suppressing it would blunt the leak check for everything else.
-
-   Nothing is lost by moving it: the lines it would cover here are covered by
-   the runs below, the panic itself belongs to mf/arena and is tested there, and
-   the smoke test checks the part that only a real process can show — that the
-   exit code is 70 and the report names the `eval` arena. */
-
-MF_TEST(a_pool_that_runs_dry_still_serves_and_says_so) {
+MF_TEST(validate_exercises_both_pool_disciplines) {
+    /* The two pools are not interchangeable, so the run has to use both or the
+       stack one is scaffolding nobody has ever run. The peaks are what the
+       orchestrator would grow, and the acquire counts are the churn signal. */
     remove(PATH);
     mf_config c = worker_cfg(4u << 20);
-    c.arena_pool_depth = 0; /* nothing kept warm: every acquire is a miss */
 
     MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_VALIDATE, NULL), MF_EXIT_OK);
 
     char *text = mf_mem_read_file(A, PATH, NULL);
-    MF_CHECK(strstr(text, "\"pool_misses\":4") != NULL);
+    MF_CHECK(strstr(text, "\"heap_pool_peak\":2") != NULL);
+    MF_CHECK(strstr(text, "\"stack_pool_peak\":3") != NULL);
+    /* Two borrows for four items: the arenas are claimed for the whole loop,
+       not once per item. A regression to per-item claiming shows up here. */
+    MF_CHECK(strstr(text, "\"heap_pool_acquires\":2") != NULL);
+    MF_CHECK(strstr(text, "\"stack_pool_acquires\":3") != NULL);
     remove(PATH);
 }
+
+/* An arena too small for the work, and a pool with too few arenas in it, are
+   both premises of the two-process split — and both are verified in
+   tests/smoke.sh rather than here, deliberately. Catching the fatal with a
+   longjmp means mf_pool_destroy never runs, so every pooled arena is abandoned
+   exactly as it would be in a dying process. That is correct behaviour and a
+   real leak in a suite that refuses to die, and suppressing it would blunt the
+   leak check for everything else.
+
+   Nothing is lost by moving them: the lines they would cover here are covered by
+   the runs below, the panics themselves belong to mf/arena and mf/pool and are
+   tested there, and the smoke test checks the part only a real process can show
+   — the exit code, and a report the orchestrator can act on. */
 
 MF_TEST(the_unimplemented_subcommands_fail_rather_than_pretending) {
     remove(PATH);
@@ -158,7 +165,7 @@ void run_worker_tests(void) {
     A = mf_arena_create("worker-test", 4u << 20);
 
     MF_RUN_A(validate_exercises_the_memory_layer_and_records_what_it_used);
-    MF_RUN_A(a_pool_that_runs_dry_still_serves_and_says_so);
+    MF_RUN_A(validate_exercises_both_pool_disciplines);
     MF_RUN_A(the_unimplemented_subcommands_fail_rather_than_pretending);
     MF_RUN_A(an_artifact_that_cannot_be_opened_stops_the_run);
     MF_RUN_A(a_record_that_cannot_be_flushed_is_reported_and_the_run_continues);

@@ -78,6 +78,45 @@ MF_TEST(a_cache_line_request_is_honoured) {
     mf_arena_destroy(a);
 }
 
+MF_TEST(every_supported_grain_lands_on_an_address_not_an_offset) {
+    /* Offsets were the 0.2 defect: rounding `used` up to 128 only aligns the
+       pointer if the payload happens to start on a line, which calloc does not
+       promise. Walk every legal grain and check the address each time. */
+    mf_arena *a = mf_arena_create("t", 4096);
+    for (size_t grain = MF_ARENA_ALIGN; grain <= MF_ARENA_MAX_ALIGN; grain *= 2) {
+        mf_arena_alloc(a, 1); /* knock the bump pointer off the boundary */
+        char *p = mf_arena_alloc_aligned(a, 8, grain);
+        MF_EQ_INT((uintptr_t)p % grain, 0);
+    }
+    mf_arena_destroy(a);
+}
+
+MF_TEST(an_alignment_of_zero_is_a_caller_bug_not_a_sizing_problem) {
+    /* It used to be diagnosed as an arena too small, which would send the
+       orchestrator off growing memory over a defect in the caller. */
+    mf_arena *a = mf_arena_create("t", 4096);
+    MF_EXPECT_PANIC({ mf_arena_alloc_aligned(a, 16, 0); });
+    MF_EQ_INT(mf_t_panic_code(), MF_EXIT_PANIC);
+    mf_arena_destroy(a);
+}
+
+MF_TEST(an_alignment_that_is_not_a_power_of_two_is_rejected) {
+    /* round_up's masking arithmetic is meaningless for 24, and silently so. */
+    mf_arena *a = mf_arena_create("t", 4096);
+    MF_EXPECT_PANIC({ mf_arena_alloc_aligned(a, 16, 24); });
+    MF_EQ_INT(mf_t_panic_code(), MF_EXIT_PANIC);
+    mf_arena_destroy(a);
+}
+
+MF_TEST(an_alignment_beyond_what_the_payload_guarantees_is_rejected) {
+    /* Answering in offsets is only sound up to the payload's own alignment.
+       Past it the returned address would be wrong rather than merely unlucky. */
+    mf_arena *a = mf_arena_create("t", 4096);
+    MF_EXPECT_PANIC({ mf_arena_alloc_aligned(a, 16, MF_ARENA_MAX_ALIGN * 2); });
+    MF_EQ_INT(mf_t_panic_code(), MF_EXIT_PANIC);
+    mf_arena_destroy(a);
+}
+
 MF_TEST(a_zero_byte_request_is_legal_and_costs_nothing) {
     mf_arena *a = mf_arena_create("t", 4096);
     size_t before = mf_arena_used(a);
@@ -202,6 +241,18 @@ MF_TEST(an_array_allocation_is_zeroed_and_sized) {
     mf_arena_destroy(a);
 }
 
+MF_TEST(an_array_of_no_elements_does_not_divide_by_zero) {
+    /* The overflow guard divides by `count`, so a zero count has to be excluded
+       before the division rather than diagnosed after it. Legal, and the honest
+       spelling of "this collection happens to be empty". */
+    mf_arena *a = mf_arena_create("t", 4096);
+    size_t before = mf_arena_used(a);
+    void *p = mf_arena_array(a, 0, sizeof(long));
+    MF_CHECK(p != NULL);
+    MF_EQ_INT(mf_arena_used(a), before);
+    mf_arena_destroy(a);
+}
+
 MF_TEST(an_array_whose_size_overflows_is_fatal_not_wrapped) {
     /* count * size wrapping is how a bounds check turns into a heap overwrite.
        Growing the arena would never fix it, so this dies as a broken invariant
@@ -310,6 +361,10 @@ void run_arena_tests(void) {
     MF_RUN(memory_reused_after_a_reset_is_zeroed_again);
     MF_RUN(allocations_are_aligned_and_do_not_overlap);
     MF_RUN(a_cache_line_request_is_honoured);
+    MF_RUN(every_supported_grain_lands_on_an_address_not_an_offset);
+    MF_RUN(an_alignment_of_zero_is_a_caller_bug_not_a_sizing_problem);
+    MF_RUN(an_alignment_that_is_not_a_power_of_two_is_rejected);
+    MF_RUN(an_alignment_beyond_what_the_payload_guarantees_is_rejected);
     MF_RUN(a_zero_byte_request_is_legal_and_costs_nothing);
     MF_RUN(used_and_capacity_and_name_report_the_truth);
     MF_RUN(the_high_water_mark_survives_pops_and_resets);
@@ -319,6 +374,7 @@ void run_arena_tests(void) {
     MF_RUN(growing_a_buried_allocation_copies_it_forward);
     MF_RUN(growing_to_a_smaller_size_is_a_no_op);
     MF_RUN(an_array_allocation_is_zeroed_and_sized);
+    MF_RUN(an_array_of_no_elements_does_not_divide_by_zero);
     MF_RUN(an_array_whose_size_overflows_is_fatal_not_wrapped);
     MF_RUN(exhaustion_is_fatal_and_says_by_how_much);
     MF_RUN(a_failed_allocation_leaves_the_arena_untouched);

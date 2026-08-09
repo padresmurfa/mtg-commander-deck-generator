@@ -843,6 +843,14 @@ Two properties callers may rely on, and do:
 - **Allocation cannot fail.** There is no NULL to check, so no caller checks, so there is no
   branch. This is not optimism; see below.
 - **Memory is always zeroed**, on first use *and* after a pop. Nobody clears what they were handed.
+- **Every allocation is aligned to 16 bytes**, and a stronger grain up to a 128-byte cache line can
+  be asked for. Sixteen rather than `alignof(max_align_t)`, which is 8 on this machine: `max_align_t`
+  covers the *fundamental* types, and the ones that will actually go in an arena — `__int128`, and
+  the NEON vectors §11 wants — are extended types it says nothing about. A static assertion proves
+  16 is no weaker than the standard's floor, so a port that disagrees fails to compile. An alignment
+  request that is zero, not a power of two, or above the payload's own alignment is a **caller bug**
+  (code `72`), not a shortfall: growing the arena would not make it meaningful, and calling it a
+  shortfall would send the orchestrator relaunching over a defect in the caller.
 
 **Environmental failure kills the process.** No memory, an arena too small, an invariant this code
 claims to maintain — none of these has a useful recovery in a batch simulator. There is nothing to
@@ -856,6 +864,7 @@ which kind of failure it was.
 | `70` | An arena was too small. The report says by how much |
 | `71` | The OS refused memory the process genuinely needs |
 | `72` | An invariant this code guarantees did not hold |
+| `73` | A pool had no arena left to lend. The report says which depth to grow |
 
 Note what is *not* in that list: bad input. A missing file or a malformed config is a user error,
 reported as an `mf_err` and handled normally. Only the environment is fatal.
@@ -880,16 +889,41 @@ least a doubling and at least the reported shortfall plus 25% headroom, clamped 
 size is written back to the config file atomically, so the next run starts where this one ended
 rather than rediscovering it.
 
+The same loop runs for a **pool depth** (exit 73), on `pool_max_depth` rather than `arena_max_bytes`
+and without the 25% headroom — a depth is a count of concurrent borrowers, and the doubling already
+covers the ones the report did not see. Which of the two depths grows is decided by the `kind` in
+the report, and a kind the orchestrator does not recognise is not grown at all: guessing would
+relaunch a run that fails in exactly the same place.
+
 The control files this needs — the resolved config in, the fatal report out — are transient and
 carry a pid. **Nothing derived from them reaches an artifact**, so they cost the determinism
 invariant nothing.
 
 **Pooling and pre-zeroing.** Arenas come from a fixed-depth pool that hands them out for the cost of
-a pointer decrement. Everything expensive — asking the OS for pages, and clearing them — happens on
-*release*, after the caller has finished the work it cared about. Running the pool dry is not an
-error: it makes another arena and counts a miss, and the miss count is the signal that the depth was
-set too low. Releasing beyond the depth throws the arena away rather than growing, so a burst of
-work cannot permanently inflate the footprint.
+a pointer bump. Everything expensive — asking the OS for pages, and clearing them — happens on
+*release*, after the caller has finished the work it cared about. A pool holds exactly `depth`
+arenas, made and cleared before the first acquire, and those are the only ones there will ever be.
+
+*(Amended sprint 0.2.1. The first version made another arena when it ran dry and counted a miss.
+That was a recoverable environmental failure with an unbounded footprint behind it — the shape this
+design rejects everywhere else, sitting inside the memory layer itself.)* **Running out is fatal.**
+The depth is a configured size and behaves like every other configured size here: too small kills
+the process with a report, and the orchestrator grows it and relaunches. It converges; it does not
+have to be right.
+
+**Two disciplines, because they are different objects.** A `heap` pool takes its arenas back in any
+order. A `stack` pool takes them back in the exact mirror of the order it lent them, and refuses
+anything else as a broken invariant — so a frame outliving its caller dies at the frame that caused
+it rather than three phases later. A heap pool cannot make that check, so it does not pretend to.
+Release is identified by pointer rather than by name, which also catches a second release of the
+same arena — the one that would otherwise leave the pool holding one arena in two slots and
+eventually hand the same memory to two owners.
+
+**Acquire at phase boundaries, not inside them.** Everything acquiring makes cheap is paid for by
+the release that reset and re-zeroed the arena, so a loop that claims and releases per item pays it
+per item. `mf_pool_acquires` is emitted in the run artifact precisely so a churning caller is
+visible rather than merely disapproved of. If work genuinely needs short-lived arenas it gets its
+own pool; generally it should not.
 
 This is deliberate pre-optimisation, and scoped as such: the layer is built for the shape the
 optimised version needs — pooled, pre-zeroed, single-threaded, stack-framed — and backed for now by

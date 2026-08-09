@@ -27,11 +27,18 @@ enum {
     MF_EXIT_USAGE   = 2,  /* the command line was wrong */
     MF_EXIT_ARENA   = 70, /* an arena was too small; the report says by how much */
     MF_EXIT_OOM     = 71, /* the OS refused memory the process genuinely needs */
-    MF_EXIT_PANIC   = 72  /* an invariant this code guarantees did not hold */
+    MF_EXIT_PANIC   = 72, /* an invariant this code guarantees did not hold */
+    MF_EXIT_POOL    = 73  /* a pool had no arena left to lend */
 };
 
 _Noreturn void mf_panic(int code, const char *fmt, ...);
 _Noreturn void mf_panic_arena(const char *arena, size_t capacity, size_t used, size_t wanted);
+/* A pool with nothing left is the same kind of event as an arena with no room:
+   a configured size discovered to be too small. `kind` is the pool's discipline
+   as a literal — "heap" or "stack" — and it is in the report because it is what
+   tells the orchestrator which configured depth to grow. The numbers use the
+   arena's shape, in arenas rather than bytes, so one reader serves both. */
+_Noreturn void mf_panic_pool(const char *pool, const char *kind, size_t depth);
 
 /* Where the machine-readable fatal report goes. NULL (the default) writes none.
    The string is borrowed, not copied — the orchestrator owns a path that

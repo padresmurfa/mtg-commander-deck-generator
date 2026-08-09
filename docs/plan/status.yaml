@@ -166,6 +166,28 @@ epics:
           - environmental failure exits with a distinct code and a machine-readable report
           - arena stack frames release in O(1) and restore the zero guarantee
           - orchestrator relaunches the worker at a larger arena size and persists it
+      - id: "0.2.1"
+        name: Pool discipline & alignment
+        status: done
+        retro: docs/plan/retros/0.2.1-pool-discipline.md
+        result:
+          checks: 1754
+          line_coverage: 100.00
+          branch_coverage: 97.00
+          function_coverage: 100.00
+        tasks_doc: docs/plan/sprints/0.2.1-pool-discipline.md
+        inserted_after: "0.2"
+        why_inserted: >
+          A follow-on to 0.2, not a reopening of it: 0.2 is done and its retro is written, and
+          correcting that record in place would destroy it. The pool's contract inverted, so the
+          same ordering argument applies — changing it under a golden file would mean regenerating
+          the golden file.
+        exit_criteria:
+          - a pool holds exactly depth arenas and never creates another
+          - exhausting a pool exits 73 with a report naming the pool, its depth and its kind
+          - stack pools reject an out-of-order release; heap pools accept one
+          - the orchestrator grows the depth the report names, and persists it
+          - mf_arena_alloc_aligned rejects an alignment it cannot honour
       - id: "0.3"
         name: Determinism harness
         status: active
@@ -469,3 +491,17 @@ retros:
       alignment computed from an offset rather than an address, and a reader over-reserving arena
       that the high-water mark would have made permanent.
     carry_over: [ci_decision]
+  - sprint: "0.2.1"
+    doc: docs/plan/retros/0.2.1-pool-discipline.md
+    gates: []
+    design_amendments: 5
+    headline: >
+      The pool was the one place the design argued against itself: 0.2 spent its length removing
+      recoverable environmental failure, then built a pool that ran dry, quietly made another arena
+      and incremented a counter nobody read. It now dies like everything else and the orchestrator
+      grows the depth. Two 0.2 comments were also wrong and are now proved by static assertion:
+      alignof(max_align_t) is 8 here, not 16, and the documented alignment contract was never
+      enforced. No defect was found by a failing test this sprint — the floor found dead weight and
+      one untestable branch — but a surviving mutation found a weak assertion the branch count could
+      not see.
+    carry_over: []

@@ -2,12 +2,22 @@
 
 #include "mf/panic.h"
 
+#include <stdalign.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* This file and this file alone may call the libc allocator. Everything else
    takes an arena. `make check` greps for violations. */
+
+/* The alignment contract, proved rather than commented. All three are things a
+   port to another machine could break silently, and none of them is worth a
+   runtime branch. */
+_Static_assert(MF_ARENA_ALIGN >= alignof(max_align_t),
+               "the default grain must satisfy every fundamental type");
+_Static_assert((MF_ARENA_ALIGN & (MF_ARENA_ALIGN - 1)) == 0, "the grain must be a power of two");
+_Static_assert(MF_ARENA_MAX_ALIGN % MF_ARENA_ALIGN == 0,
+               "the strongest grain must be a multiple of the default one");
 
 struct mf_arena {
     unsigned char *base;
@@ -68,9 +78,17 @@ mf_arena *mf_arena_create(const char *name, size_t capacity) {
 /* free(NULL) is a no-op, so destroying nothing needs no branch of its own. */
 void mf_arena_destroy(mf_arena *a) { free(a); }
 
-/* `align` must be a power of two no larger than MF_CACHE_LINE — which is what
-   the aligned payload start makes it safe to answer in offsets alone. */
 void *mf_arena_alloc_aligned(mf_arena *a, size_t n, size_t align) {
+    /* Answering in offsets is only sound up to the payload's own alignment, and
+       the masking arithmetic below is only sound for a power of two. Neither is
+       a shortfall: growing the arena would not make a request for 24-byte
+       alignment meaningful, and diagnosing it as one would send the
+       orchestrator off relaunching over a defect in the caller. */
+    if (align == 0 || (align & (align - 1)) != 0 || align > MF_ARENA_MAX_ALIGN) {
+        mf_panic(MF_EXIT_PANIC, "arena '%s': alignment %zu is not a power of two in 1..%d",
+                 a->name, align, MF_ARENA_MAX_ALIGN);
+    }
+
     size_t base = round_up(a->used, align);
     size_t size = round_up(n, MF_ARENA_ALIGN);
 

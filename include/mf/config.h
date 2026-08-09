@@ -20,15 +20,21 @@ typedef struct {
     char artifact_path[MF_PATH_MAX];
     char card_table_path[MF_PATH_MAX];
 
-    /* Memory. arena_bytes is a starting guess, not a specification: the worker
-       dies when it is too small and the orchestrator relaunches at a larger
-       one, so the value converges over a few runs rather than having to be
-       right up front (design §10.7). */
-    size_t arena_bytes;        /* worker arena capacity */
-    size_t arena_max_bytes;    /* growth ceiling; past this, the run fails */
-    size_t arena_pool_depth;   /* arenas kept zeroed and warm */
-    int max_relaunch;          /* retries the orchestrator will spend growing */
-    bool persist_arena_growth; /* write a grown size back to the config file */
+    /* Memory. None of these is a specification — each is a starting guess the
+       worker dies against and the orchestrator grows, so they converge over a
+       few runs rather than having to be right up front (design §10.7).
+
+       Every pooled arena is `arena_bytes`. One capacity rather than one per
+       pool: two would need the fatal report to say which arena it was, which is
+       a name table between the worker and the orchestrator, and nothing yet
+       needs the distinction. */
+    size_t arena_bytes;      /* capacity of each pooled arena */
+    size_t arena_max_bytes;  /* growth ceiling; past this, the run fails */
+    size_t heap_pool_depth;  /* arenas returned in any order */
+    size_t stack_pool_depth; /* arenas returned in the mirror of the order taken */
+    size_t pool_max_depth;   /* growth ceiling for both depths */
+    int max_relaunch;        /* retries the orchestrator will spend growing */
+    bool persist_growth;     /* write a grown size or depth back to the config file */
 } mf_config;
 
 void mf_config_defaults(mf_config *c);

@@ -19,7 +19,7 @@
 | `err` | The `mf_err` code set and its messages |
 | `panic` | Fail-fast: exit codes, the human message, the machine-readable fatal report |
 | `arena` | Bump allocator with stack frames. The only file that may call the libc allocator |
-| `pool` | A stock of pre-zeroed arenas |
+| `pool` | A fixed stock of pre-zeroed arenas, heap-ordered or stack-ordered |
 | `mem` | Arena-aware replacements for the allocating parts of libc |
 | `json` | Minimal JSON reader and writer. Written in-tree, not vendored |
 | `config` | Run configuration: defaults, load, validate, serialise |
@@ -74,6 +74,10 @@ Two rules, both enforced rather than trusted:
   a `strdup` or an `asprintf`? `mf/mem.h` has the arena-backed version
 - **Allocation cannot fail**, so do not check for `NULL`. An exhausted arena kills the process with
   a report the orchestrator uses to relaunch at a larger size
+- **Acquire a pooled arena at a phase boundary, not inside one.** A release pays for the reset and
+  the re-zeroing, so claiming per item pays it per item. The run artifact reports the acquire count
+  for exactly this reason. A pool that runs out is fatal too — the depth grows the same way a size
+  does
 
 Arena memory arrives zeroed — on first use *and* after a pop — so never `memset` what you were just
 handed. A struct taken from an arena starts with every field zero, which is usually the whole

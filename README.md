@@ -62,19 +62,20 @@ nothing is a run that quietly measured the wrong thing.
 
 ### Two processes, and why
 
-`mfsim` owns the configuration; `mfsim-worker` does the work. The worker runs with the arena size
-it was given and **dies** when that is not enough, writing a report saying by how much. The
-orchestrator reads it, grows `arena_bytes`, writes the new value back to your config file, and
-launches again.
+`mfsim` owns the configuration; `mfsim-worker` does the work. The worker runs with the sizes it was
+given and **dies** when they are not enough, writing a report saying which one and by how much. The
+orchestrator reads it, grows that one, writes the new value back to your config file, and launches
+again. The same loop covers an arena that is too small and a pool with too few arenas in it.
 
 This exists because the memory an evaluation needs is not knowable before the evaluation is
-written. Rather than a number you have to guess right, the arena size is a cache that converges:
+written. Rather than numbers you have to guess right, they are a cache that converges:
 
 ```
 $ mfsim validate --config run.json
 mfsim: arena of 65536 bytes was too small; relaunching with 131072
+mfsim: stack pool of 1 arenas ran dry; relaunching with 2
 ...
-mfsim: updated arena_bytes in run.json
+mfsim: updated run.json with the sizes this run discovered
 ```
 
 The second run fits first time. `--no-spawn` does the same work in one process, without the

@@ -37,8 +37,16 @@ void mf_orch_read_report(mf_arena *a, const char *path, mf_fatal *out) {
     if (!reason) return; /* not a report we understand */
     snprintf(out->reason, sizeof out->reason, "%s", reason);
 
+    /* One field, two keys: an arena names itself under "arena" and a pool under
+       "pool", because a reader that has to guess which one is a reader that
+       eventually guesses wrong. */
     const char *arena = mf_json_string(mf_json_member(doc, "arena"));
-    if (arena) snprintf(out->arena, sizeof out->arena, "%s", arena);
+    const char *pool = mf_json_string(mf_json_member(doc, "pool"));
+    if (arena) snprintf(out->resource, sizeof out->resource, "%s", arena);
+    if (pool) snprintf(out->resource, sizeof out->resource, "%s", pool);
+
+    const char *kind = mf_json_string(mf_json_member(doc, "kind"));
+    if (kind) snprintf(out->kind, sizeof out->kind, "%s", kind);
 
     /* Absent numbers read as zero, which is the right answer for both. */
     out->code = (int)mf_json_number(mf_json_member(doc, "code"));
@@ -46,33 +54,63 @@ void mf_orch_read_report(mf_arena *a, const char *path, mf_fatal *out) {
     out->present = true;
 }
 
-mf_orch_verdict mf_orch_plan_next(const mf_config *c, int exit_code, const mf_fatal *f,
-                                  int attempts_used, size_t *next_arena) {
-    *next_arena = 0;
+/* At least a doubling, at least `need`, never past `ceiling`. The doubling is
+   there because a report describes the one request that did not fit, not the
+   run: sizing exactly to it buys a second death a few requests later. Refuses
+   only when there is no larger value left to try. */
+static mf_orch_verdict grow(size_t *slot, size_t ceiling, size_t need) {
+    size_t current = *slot;
+    size_t doubled = current > ceiling / 2 ? ceiling : current * 2;
+    size_t target = need > doubled ? need : doubled;
+    if (target > ceiling) target = ceiling;
+    if (target <= current) return MF_ORCH_CEILING;
 
-    if (exit_code != MF_EXIT_ARENA) return MF_ORCH_DONE;
-    /* A broken invariant carries the same family of codes but is not a sizing
-       problem; relaunching it larger would just fail again, more slowly. */
-    if (f->present && strcmp(f->reason, "arena_exhausted") != 0) return MF_ORCH_DONE;
-
-    if (attempts_used >= c->max_relaunch) return MF_ORCH_EXHAUSTED;
-
-    size_t need = f->present ? f->need : 0;
-    if (need > c->arena_max_bytes) return MF_ORCH_CEILING;
-    if (need > 0) need = need / MF_ORCH_HEADROOM_DEN * MF_ORCH_HEADROOM_NUM;
-
-    /* Always at least a doubling: the report describes one allocation, not the
-       run. Clamped so the doubling itself cannot overshoot the ceiling. */
-    size_t grown = c->arena_bytes > c->arena_max_bytes / 2 ? c->arena_max_bytes
-                                                           : c->arena_bytes * 2;
-    size_t target = need > grown ? need : grown;
-    if (target > c->arena_max_bytes) target = c->arena_max_bytes;
-
-    /* Already at the ceiling: there is no larger size to try. */
-    if (target <= c->arena_bytes) return MF_ORCH_CEILING;
-
-    *next_arena = target;
+    *slot = target;
     return MF_ORCH_RETRY;
+}
+
+/* Which depth a pool report is about. Nothing is grown for a kind this does not
+   recognise — including the empty kind of a report that never arrived — because
+   the alternative is relaunching a run that fails in exactly the same place. */
+static size_t *depth_for(mf_orch_growth *g, const mf_fatal *f) {
+    if (strcmp(f->kind, "heap") == 0) return &g->heap_pool_depth;
+    if (strcmp(f->kind, "stack") == 0) return &g->stack_pool_depth;
+    return NULL;
+}
+
+mf_orch_verdict mf_orch_plan_next(const mf_config *c, int exit_code, const mf_fatal *f,
+                                  int attempts_used, mf_orch_growth *next) {
+    /* Filled whatever happens, so the caller applies the whole struct and never
+       has to know which field moved. */
+    next->arena_bytes = c->arena_bytes;
+    next->heap_pool_depth = c->heap_pool_depth;
+    next->stack_pool_depth = c->stack_pool_depth;
+
+    if (exit_code == MF_EXIT_ARENA) {
+        /* A broken invariant carries the same family of codes but is not a
+           sizing problem; relaunching it larger would fail again, more slowly. */
+        if (f->present && strcmp(f->reason, "arena_exhausted") != 0) return MF_ORCH_DONE;
+        if (attempts_used >= c->max_relaunch) return MF_ORCH_EXHAUSTED;
+
+        size_t need = f->present ? f->need : 0;
+        if (need > c->arena_max_bytes) return MF_ORCH_CEILING;
+        /* Headroom on top of the reported need, applied after the ceiling test
+           so a need that only just fits is trimmed rather than refused. */
+        if (need > 0) need = need / MF_ORCH_HEADROOM_DEN * MF_ORCH_HEADROOM_NUM;
+        return grow(&next->arena_bytes, c->arena_max_bytes, need);
+    }
+
+    if (exit_code == MF_EXIT_POOL) {
+        size_t *depth = depth_for(next, f);
+        if (!depth) return MF_ORCH_DONE;
+        if (attempts_used >= c->max_relaunch) return MF_ORCH_EXHAUSTED;
+        /* No headroom here: a depth is a count of concurrent borrowers, and the
+           doubling below already covers the ones the report did not see. */
+        if (f->need > c->pool_max_depth) return MF_ORCH_CEILING;
+        return grow(depth, c->pool_max_depth, f->need);
+    }
+
+    return MF_ORCH_DONE;
 }
 
 bool mf_orch_write_config(mf_arena *a, const mf_config *c, const char *path) {
@@ -98,6 +136,23 @@ bool mf_orch_write_config(mf_arena *a, const mf_config *c, const char *path) {
     return ok;
 }
 
+/* Names whichever knob moved. Exactly one does per relaunch, but saying so in
+   three independent lines keeps the message honest if that ever stops holding. */
+static void say_growth(FILE *log, const mf_config *c, const mf_orch_growth *n) {
+    if (n->arena_bytes != c->arena_bytes) {
+        fprintf(log, "mfsim: arena of %zu bytes was too small; relaunching with %zu\n",
+                c->arena_bytes, n->arena_bytes);
+    }
+    if (n->heap_pool_depth != c->heap_pool_depth) {
+        fprintf(log, "mfsim: heap pool of %zu arenas ran dry; relaunching with %zu\n",
+                c->heap_pool_depth, n->heap_pool_depth);
+    }
+    if (n->stack_pool_depth != c->stack_pool_depth) {
+        fprintf(log, "mfsim: stack pool of %zu arenas ran dry; relaunching with %zu\n",
+                c->stack_pool_depth, n->stack_pool_depth);
+    }
+}
+
 int mf_orch_run(mf_orch *o, mf_config *c) {
     FILE *log = o->log ? o->log : stderr;
 
@@ -109,34 +164,45 @@ int mf_orch_run(mf_orch *o, mf_config *c) {
         mf_fatal f;
         mf_orch_read_report(o->arena, o->report_path, &f);
 
-        size_t next = 0;
+        mf_orch_growth next;
         mf_orch_verdict v = mf_orch_plan_next(c, rc, &f, attempt, &next);
         mf_arena_pop(o->arena, m);
 
         if (v == MF_ORCH_DONE) return rc;
 
+        /* The worker's own code is propagated rather than flattened to one
+           "out of memory": an arena shortfall and a pool shortfall are
+           different failures, and a caller reading 70 for a pool would go
+           looking for the wrong thing. */
         if (v == MF_ORCH_CEILING) {
-            fprintf(log, "mfsim: worker needs more than arena_max_bytes (%zu); giving up\n",
-                    c->arena_max_bytes);
-            return MF_EXIT_ARENA;
+            if (rc == MF_EXIT_POOL) {
+                fprintf(log, "mfsim: worker needs more than pool_max_depth (%zu) arenas; "
+                             "giving up\n",
+                        c->pool_max_depth);
+            } else {
+                fprintf(log, "mfsim: worker needs more than arena_max_bytes (%zu); giving up\n",
+                        c->arena_max_bytes);
+            }
+            return rc;
         }
         if (v == MF_ORCH_EXHAUSTED) {
             fprintf(log, "mfsim: worker still out of memory after %d relaunches; giving up\n",
                     c->max_relaunch);
-            return MF_EXIT_ARENA;
+            return rc;
         }
 
-        fprintf(log, "mfsim: arena of %zu bytes was too small; relaunching with %zu\n",
-                c->arena_bytes, next);
-        c->arena_bytes = next;
+        say_growth(log, c, &next);
+        c->arena_bytes = next.arena_bytes;
+        c->heap_pool_depth = next.heap_pool_depth;
+        c->stack_pool_depth = next.stack_pool_depth;
 
-        if (o->config_path && c->persist_arena_growth) {
+        if (o->config_path && c->persist_growth) {
             /* Without this, "fixed by the next retry" would hold only inside
-               one invocation, and tomorrow's run would rediscover the same size
-               the same expensive way. */
+               one invocation, and tomorrow's run would rediscover the same
+               numbers the same expensive way. */
             bool ok = mf_orch_write_config(o->arena, c, o->config_path);
-            fprintf(log, ok ? "mfsim: updated arena_bytes in %s\n"
-                            : "mfsim: could not update %s; the new size applies to this run only\n",
+            fprintf(log, ok ? "mfsim: updated %s with the sizes this run discovered\n"
+                            : "mfsim: could not update %s; the new sizes apply to this run only\n",
                     o->config_path);
         }
     }

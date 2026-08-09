@@ -8,12 +8,16 @@
 #include <stdio.h>
 #include <string.h>
 
-/* How much a single `validate` work item asks of its arena. Fixed rather than
-   derived, because the point is to have something whose appetite is known: an
-   arena_bytes below this exhausts, which is how the relaunch path gets
-   exercised end to end rather than only in tests. */
+/* What a `validate` run asks of the memory layer. Fixed rather than derived,
+   because the point is to have an appetite that is known: an arena_bytes below
+   the work size exhausts, and a stack_pool_depth below the nesting runs the pool
+   dry, which is how both relaunch paths get exercised end to end rather than
+   only in tests. */
 #define MF_VALIDATE_WORK_BYTES (1u << 20)
 #define MF_VALIDATE_ITEMS 4
+#define MF_VALIDATE_HEAP_ARENAS 2
+#define MF_VALIDATE_FRAMES 3
+#define MF_VALIDATE_FRAME_BYTES 4096
 
 /* A record this code builds is well-formed or the code is wrong, so there is
    nothing to check about the text. Whether it reaches the disk is a different
@@ -29,32 +33,60 @@ static void write_record(mf_artifact *art, mf_jw *w) {
    enough to run out, which makes it the honest end-to-end test of the
    orchestrator's growth loop. */
 static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
-    mf_pool *pool = mf_pool_create(root, "eval", c->arena_bytes, c->arena_pool_depth);
+    mf_pool *heap = mf_pool_create(root, "eval", MF_POOL_HEAP, c->arena_bytes, c->heap_pool_depth);
+    mf_pool *stack =
+        mf_pool_create(root, "frame", MF_POOL_STACK, c->arena_bytes, c->stack_pool_depth);
 
+    /* Two arenas held at once and given back oldest first — what a heap pool is
+       for, and what the stack pool below would refuse. Claimed once for the
+       whole loop rather than once per item: a release pays for the reset and the
+       re-zeroing, so claiming per item is exactly the churn to avoid. */
+    mf_arena *even = mf_pool_acquire(heap);
+    mf_arena *odd = mf_pool_acquire(heap);
     for (int i = 0; i < MF_VALIDATE_ITEMS; i++) {
-        mf_arena *work = mf_pool_acquire(pool);
-
-        mf_arena_mark frame = mf_arena_push(work);
+        mf_arena *work = i % 2 ? odd : even;
+        mf_arena_mark item = mf_arena_push(work);
         unsigned char *buf = mf_arena_alloc(work, MF_VALIDATE_WORK_BYTES);
         memset(buf, (unsigned char)(i + 1), MF_VALIDATE_WORK_BYTES);
-        mf_arena_pop(work, frame);
-
-        mf_pool_release(pool, work);
+        mf_arena_pop(work, item);
     }
+    mf_pool_release(heap, even);
+    mf_pool_release(heap, odd);
+
+    /* And a call stack, one arena per level, unwound in the mirror of the order
+       it was built. */
+    mf_arena *frames[MF_VALIDATE_FRAMES];
+    for (size_t d = 0; d < MF_VALIDATE_FRAMES; d++) {
+        frames[d] = mf_pool_acquire(stack);
+        mf_arena_alloc(frames[d], MF_VALIDATE_FRAME_BYTES);
+    }
+    for (size_t d = MF_VALIDATE_FRAMES; d-- > 0;) mf_pool_release(stack, frames[d]);
 
     mf_jw *w = mf_jw_new(root);
     mf_jw_obj_begin(w);
-    mf_jw_key(w, "record");          mf_jw_str(w, "memcheck");
-    mf_jw_key(w, "items");           mf_jw_int(w, MF_VALIDATE_ITEMS);
-    mf_jw_key(w, "arena_bytes");     mf_jw_int(w, (long long)c->arena_bytes);
-    mf_jw_key(w, "arena_high_water");mf_jw_int(w, (long long)mf_pool_high_water(pool));
-    mf_jw_key(w, "pool_depth");      mf_jw_int(w, (long long)mf_pool_depth(pool));
-    mf_jw_key(w, "pool_misses");     mf_jw_int(w, (long long)mf_pool_misses(pool));
-    mf_jw_key(w, "root_high_water"); mf_jw_int(w, (long long)mf_arena_high_water(root));
+    mf_jw_key(w, "record");              mf_jw_str(w, "memcheck");
+    mf_jw_key(w, "items");               mf_jw_int(w, MF_VALIDATE_ITEMS);
+    mf_jw_key(w, "arena_bytes");         mf_jw_int(w, (long long)c->arena_bytes);
+    /* One capacity sizes both pools, so both peaks are reported rather than
+       just the larger: which pool wanted the room is the useful half, and
+       taking a maximum here would throw it away — and add a branch no run can
+       take both ways. */
+    mf_jw_key(w, "heap_arena_peak");     mf_jw_int(w, (long long)mf_pool_high_water(heap));
+    mf_jw_key(w, "stack_arena_peak");    mf_jw_int(w, (long long)mf_pool_high_water(stack));
+    mf_jw_key(w, "heap_pool_depth");     mf_jw_int(w, (long long)mf_pool_depth(heap));
+    mf_jw_key(w, "heap_pool_peak");      mf_jw_int(w, (long long)mf_pool_live_high_water(heap));
+    /* Emitted, not merely counted: a caller that churns the pool is visible in
+       the artifact rather than left to review (design §10.8). */
+    mf_jw_key(w, "heap_pool_acquires");  mf_jw_int(w, (long long)mf_pool_acquires(heap));
+    mf_jw_key(w, "stack_pool_depth");    mf_jw_int(w, (long long)mf_pool_depth(stack));
+    mf_jw_key(w, "stack_pool_peak");     mf_jw_int(w, (long long)mf_pool_live_high_water(stack));
+    mf_jw_key(w, "stack_pool_acquires"); mf_jw_int(w, (long long)mf_pool_acquires(stack));
+    mf_jw_key(w, "root_high_water");     mf_jw_int(w, (long long)mf_arena_high_water(root));
     mf_jw_obj_end(w);
     write_record(art, w);
 
-    mf_pool_destroy(pool);
+    mf_pool_destroy(stack);
+    mf_pool_destroy(heap);
     return MF_EXIT_OK;
 }
 
