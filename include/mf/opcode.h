@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "mf/arena.h"
+
 /* What a card does, as far as the simulated phases can see.
  *
  * **This is not a model of Magic**, and design §1 never claimed one. The
@@ -69,5 +71,34 @@ void mf_opcode_scan_text(const char *oracle_text, mf_opcode_scan *out);
 
 /* True when nothing the simulated phases can see was left unmodelled. */
 bool mf_opcode_representable(const mf_opcode_scan *s);
+
+/* ---- the unmatched tail --------------------------------------------------
+ * G1's fraction says how much of the pool is modelled. This says what to build
+ * next, which is a different question and the more useful one once the gate has
+ * passed. It came out of a throwaway script twice before it came out of the
+ * tool, which is exactly how a number gets quoted that nobody can reproduce. */
+
+typedef struct mf_opcode_report mf_opcode_report;
+
+typedef struct {
+    const char *clause;
+    size_t count;
+} mf_opcode_shape;
+
+mf_opcode_report *mf_opcode_report_new(mf_arena *a);
+
+/* mf_opcode_scan_text, and additionally records each unmatched clause against
+   its shape. `r` may be NULL: the gate measurement does not want the tail, and
+   collecting it for all 37,553 cards would be a cost with nothing to show. */
+void mf_opcode_scan_report(const char *oracle_text, mf_opcode_scan *out, mf_opcode_report *r);
+
+size_t mf_opcode_report_shapes(const mf_opcode_report *r);
+size_t mf_opcode_report_clauses(const mf_opcode_report *r);
+
+/* Ranked by count descending, then clause ascending. The tie-break is not
+   cosmetic: ~1,600 of the ~1,700 real shapes appear exactly once, so almost the
+   whole list is ties, and without it the report would be a different document
+   every run — emitted beside a digest that promises it is not. */
+const mf_opcode_shape *mf_opcode_report_ranked(mf_opcode_report *r);
 
 #endif

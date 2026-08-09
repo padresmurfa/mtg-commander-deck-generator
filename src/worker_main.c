@@ -50,6 +50,7 @@ int main(int argc, char **argv) {
     if (cli.bulk_path) {
         snprintf(cfg.bulk_path, sizeof cfg.bulk_path, "%s", cli.bulk_path);
     }
+    if (cli.report_unmatched) cfg.report_unmatched = true;
     if (cli.game) {
         /* An unrecognised value leaves the game unset, which the worker reports
            as the usage error it is. The orchestrator has already rejected it. */

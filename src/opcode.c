@@ -1,6 +1,7 @@
 #include "mf/opcode.h"
 
 #include <ctype.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char *const g_names[MF_OP_COUNT] = {
@@ -159,9 +160,113 @@ static size_t strip_reminders(const char *src, size_t len, char *dst, size_t cap
     return out;
 }
 
+/* ---- the unmatched tail --------------------------------------------------
+   Open addressing over shape indices, at twice capacity so probes stay short —
+   the same arrangement mf/card uses for oracle ids, and for the same reason. */
+
+#define MF_REPORT_INITIAL 256
+
+struct mf_opcode_report {
+    mf_arena *arena;
+    mf_opcode_shape *shapes;
+    size_t count;
+    size_t cap;
+    size_t *index;
+    size_t index_cap;
+    size_t clauses;
+    bool ranked;
+};
+
+static uint64_t shape_hash(const char *s, size_t n) {
+    uint64_t h = 1469598103934665603u; /* FNV-1a */
+    for (size_t i = 0; i < n; i++) {
+        h ^= (unsigned char)s[i];
+        h *= 1099511628211u;
+    }
+    return h;
+}
+
+static void reindex_shapes(mf_opcode_report *r) {
+    for (size_t i = 0; i < r->index_cap; i++) r->index[i] = SIZE_MAX;
+    for (size_t i = 0; i < r->count; i++) {
+        const char *s = r->shapes[i].clause;
+        size_t slot = shape_hash(s, strlen(s)) & (r->index_cap - 1);
+        while (r->index[slot] != SIZE_MAX) slot = (slot + 1) & (r->index_cap - 1);
+        r->index[slot] = i;
+    }
+}
+
+mf_opcode_report *mf_opcode_report_new(mf_arena *a) {
+    mf_opcode_report *r = mf_arena_alloc(a, sizeof *r);
+    r->arena = a;
+    r->cap = MF_REPORT_INITIAL;
+    r->shapes = mf_arena_array(a, r->cap, sizeof *r->shapes);
+    r->index_cap = r->cap * 2;
+    r->index = mf_arena_array(a, r->index_cap, sizeof *r->index);
+    reindex_shapes(r);
+    return r;
+}
+
+static void report_add(mf_opcode_report *r, const char *clause, size_t len) {
+    size_t slot = shape_hash(clause, len) & (r->index_cap - 1);
+    while (r->index[slot] != SIZE_MAX) {
+        mf_opcode_shape *have = &r->shapes[r->index[slot]];
+        if (strlen(have->clause) == len && strncmp(have->clause, clause, len) == 0) {
+            have->count++;
+            r->clauses++;
+            return;
+        }
+        slot = (slot + 1) & (r->index_cap - 1);
+    }
+
+    if (r->count == r->cap) {
+        size_t cap = r->cap * 2;
+        mf_opcode_shape *grown = mf_arena_array(r->arena, cap, sizeof *grown);
+        memcpy(grown, r->shapes, r->count * sizeof *grown);
+        r->shapes = grown;
+        r->cap = cap;
+        r->index_cap = cap * 2;
+        r->index = mf_arena_array(r->arena, r->index_cap, sizeof *r->index);
+        reindex_shapes(r);
+        slot = shape_hash(clause, len) & (r->index_cap - 1);
+        while (r->index[slot] != SIZE_MAX) slot = (slot + 1) & (r->index_cap - 1);
+    }
+
+    char *owned = mf_arena_alloc(r->arena, len + 1);
+    memcpy(owned, clause, len);
+    r->shapes[r->count].clause = owned;
+    r->shapes[r->count].count = 1;
+    r->index[slot] = r->count;
+    r->count++;
+    r->clauses++;
+    r->ranked = false;
+}
+
+size_t mf_opcode_report_shapes(const mf_opcode_report *r) { return r->count; }
+size_t mf_opcode_report_clauses(const mf_opcode_report *r) { return r->clauses; }
+
+static int by_rank(const void *x, const void *y) {
+    const mf_opcode_shape *a = x, *b = y;
+    if (a->count != b->count) return a->count < b->count ? 1 : -1;
+    return strcmp(a->clause, b->clause);
+}
+
+const mf_opcode_shape *mf_opcode_report_ranked(mf_opcode_report *r) {
+    if (!r->ranked) {
+        qsort(r->shapes, r->count, sizeof *r->shapes, by_rank);
+        reindex_shapes(r);
+        r->ranked = true;
+    }
+    return r->shapes;
+}
+
 #define MF_CLAUSE_MAX 1024
 
 void mf_opcode_scan_text(const char *oracle_text, mf_opcode_scan *out) {
+    mf_opcode_scan_report(oracle_text, out, NULL);
+}
+
+void mf_opcode_scan_report(const char *oracle_text, mf_opcode_scan *out, mf_opcode_report *r) {
     memset(out, 0, sizeof *out);
     if (!oracle_text || !*oracle_text) return; /* a vanilla card says nothing */
 
@@ -188,7 +293,10 @@ void mf_opcode_scan_text(const char *oracle_text, mf_opcode_scan *out) {
             out->clauses++;
             out->by_op[op]++;
             if (op == MF_OP_INERT) out->inert++;
-            if (op == MF_OP_UNMATCHED) out->unmatched++;
+            if (op == MF_OP_UNMATCHED) {
+                out->unmatched++;
+                if (r) report_add(r, text + start, clause_len);
+            }
         }
         start = i + 1;
     }

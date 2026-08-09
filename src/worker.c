@@ -189,9 +189,12 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
        (design §13.5), so it is measured here rather than asserted anywhere. */
     size_t representable = 0, legal = 0, legal_representable = 0;
     size_t by_op[MF_OP_COUNT] = {0};
+    /* Only when asked: the tail is ~1,700 distinct shapes and every one of them
+       is a string this arena would have to keep. */
+    mf_opcode_report *tail = c->report_unmatched ? mf_opcode_report_new(durable) : NULL;
     for (size_t i = 0; i < count; i++) {
         mf_opcode_scan sc;
-        mf_opcode_scan_text(cards[i].oracle_text, &sc);
+        mf_opcode_scan_report(cards[i].oracle_text, &sc, tail);
         for (int op = 0; op < MF_OP_COUNT; op++) by_op[op] += sc.by_op[op];
         bool ok = mf_opcode_representable(&sc);
         if (ok) representable++;
@@ -200,6 +203,20 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
         if (cards[i].commander_legal) {
             legal++;
             if (ok) legal_representable++;
+        }
+    }
+
+    /* To stdout, not the artifact. This is a document for whoever decides what
+       to build next, and the artifact is a record of what a run did — a ranked
+       list of 1,700 strings in every run's machine-readable output would be
+       neither read nor cheap. */
+    if (tail) {
+        const mf_opcode_shape *ranked = mf_opcode_report_ranked(tail);
+        size_t shapes = mf_opcode_report_shapes(tail);
+        printf("unmatched clauses: %zu in %zu distinct shapes\n",
+               mf_opcode_report_clauses(tail), shapes);
+        for (size_t i = 0; i < shapes; i++) {
+            printf("%6zu  %s\n", ranked[i].count, ranked[i].clause);
         }
     }
 

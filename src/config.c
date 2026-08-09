@@ -41,6 +41,7 @@ void mf_config_defaults(mf_config *c) {
     c->pool_max_depth = MF_POOL_MAX_DEPTH;
     c->max_relaunch = 4;
     c->persist_growth = true;
+    c->report_unmatched = false;
 }
 
 static void say(char *buf, size_t len, const char *fmt, const char *a) {
@@ -172,6 +173,8 @@ mf_err mf_config_load_json(mf_arena *a, mf_config *c, const char *text, char *eb
             if (e == MF_OK) c->max_relaunch = (int)num;
         } else if (strcmp(key, "persist_growth") == 0) {
             e = want_bool(v, key, &c->persist_growth, eb, el);
+        } else if (strcmp(key, "report_unmatched") == 0) {
+            e = want_bool(v, key, &c->report_unmatched, eb, el);
         } else {
             /* Never ignored: a typo'd key that silently does nothing is a run
                that quietly measured the wrong thing. */
@@ -223,5 +226,6 @@ void mf_config_write(const mf_config *c, mf_jw *w) {
     mf_jw_key(w, "pool_max_depth");       mf_jw_int(w, (long long)c->pool_max_depth);
     mf_jw_key(w, "max_relaunch");         mf_jw_int(w, c->max_relaunch);
     mf_jw_key(w, "persist_growth");       mf_jw_bool(w, c->persist_growth);
+    mf_jw_key(w, "report_unmatched");     mf_jw_bool(w, c->report_unmatched);
     mf_jw_obj_end(w);
 }

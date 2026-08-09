@@ -1,8 +1,12 @@
 #include "harness.h"
 
+#include "mf/arena.h"
 #include "mf/opcode.h"
 
+#include <stdio.h>
 #include <string.h>
+
+static mf_arena *A;
 
 static mf_opcode of(const char *clause) { return mf_opcode_classify(clause, strlen(clause)); }
 
@@ -336,6 +340,93 @@ MF_TEST(text_that_is_not_text_is_survivable) {
     MF_EQ_INT(t.clauses, 1);
 }
 
+/* ---- the unmatched tail, as data the tool produces ----------------------- */
+
+MF_TEST(the_unmatched_tail_is_collected_by_shape) {
+    mf_opcode_report *r = mf_opcode_report_new(A);
+    mf_opcode_scan s;
+    mf_opcode_scan_report("If you do, draw a card.", &s, r);
+    mf_opcode_scan_report("If you do, draw a card.", &s, r);
+    mf_opcode_scan_report("Draw cards equal to the number of creatures you control.", &s, r);
+
+    MF_EQ_INT(mf_opcode_report_shapes(r), 2);
+    MF_EQ_INT(mf_opcode_report_clauses(r), 3);
+
+    const mf_opcode_shape *top = mf_opcode_report_ranked(r);
+    MF_EQ_STR(top[0].clause, "If you do, draw a card");
+    MF_EQ_INT(top[0].count, 2);
+    MF_EQ_INT(top[1].count, 1);
+}
+
+MF_TEST(only_unmatched_clauses_reach_the_report) {
+    /* Inert is not a failure to model and must not appear in a list whose whole
+       purpose is "what should be built next". */
+    mf_opcode_report *r = mf_opcode_report_new(A);
+    mf_opcode_scan s;
+    mf_opcode_scan_report("Flying.\nDestroy target creature.\n{T}: Add {G}.", &s, r);
+    MF_EQ_INT(mf_opcode_report_shapes(r), 0);
+    MF_EQ_INT(mf_opcode_report_clauses(r), 0);
+}
+
+MF_TEST(the_ranking_does_not_depend_on_the_order_cards_arrived_in) {
+    /* 1,600 of the ~1,700 real shapes appear exactly once, so almost the whole
+       list is ties. Without a tie-break the report would be a different document
+       every run, and it is emitted beside a digest that promises it is not. */
+    const char *a[] = {"Draw X cards.", "Skip your draw step.", "Draw cards equal to your life total."};
+    const char *b[] = {"Draw cards equal to your life total.", "Draw X cards.", "Skip your draw step."};
+
+    mf_opcode_report *r1 = mf_opcode_report_new(A);
+    mf_opcode_report *r2 = mf_opcode_report_new(A);
+    mf_opcode_scan s;
+    for (size_t i = 0; i < 3; i++) mf_opcode_scan_report(a[i], &s, r1);
+    for (size_t i = 0; i < 3; i++) mf_opcode_scan_report(b[i], &s, r2);
+
+    const mf_opcode_shape *x = mf_opcode_report_ranked(r1);
+    const mf_opcode_shape *y = mf_opcode_report_ranked(r2);
+    MF_EQ_INT(mf_opcode_report_shapes(r1), 3);
+    for (size_t i = 0; i < 3; i++) MF_EQ_STR(x[i].clause, y[i].clause);
+    /* And the tie-break is ascending, not merely stable. */
+    MF_EQ_STR(x[0].clause, "Draw X cards");
+}
+
+MF_TEST(the_report_grows_past_its_initial_capacity) {
+    /* The real tail is ~1,900 distinct shapes against an initial 256, so the
+       growth path is the normal case rather than an edge one — and a rehash that
+       loses entries would show up as a shorter list, which is exactly the kind
+       of quiet wrong answer nobody notices. */
+    enum { N = 400 };
+    mf_opcode_report *r = mf_opcode_report_new(A);
+    mf_opcode_scan s;
+    char clause[64];
+    for (int i = 0; i < N; i++) {
+        snprintf(clause, sizeof clause, "Draw cards equal to %d.", i);
+        mf_opcode_scan_report(clause, &s, r);
+        MF_EQ_INT(s.unmatched, 1);
+    }
+    MF_EQ_INT(mf_opcode_report_shapes(r), N);
+    MF_EQ_INT(mf_opcode_report_clauses(r), N);
+
+    /* Every one still findable after the rehashes: adding them again must raise
+       counts rather than invent duplicates. */
+    for (int i = 0; i < N; i++) {
+        snprintf(clause, sizeof clause, "Draw cards equal to %d.", i);
+        mf_opcode_scan_report(clause, &s, r);
+    }
+    MF_EQ_INT(mf_opcode_report_shapes(r), N);
+    MF_EQ_INT(mf_opcode_report_clauses(r), 2 * N);
+
+    const mf_opcode_shape *top = mf_opcode_report_ranked(r);
+    for (int i = 0; i < N; i++) MF_EQ_INT(top[i].count, 2);
+}
+
+MF_TEST(a_report_is_optional) {
+    /* The gate measurement does not want the tail, and paying for it on every
+       card of a 37,553-card table would be a cost with nothing to show. */
+    mf_opcode_scan s;
+    mf_opcode_scan_report("If you do, draw a card.", &s, NULL);
+    MF_EQ_INT(s.unmatched, 1);
+}
+
 MF_TEST(every_opcode_has_a_name) {
     for (int op = 0; op < MF_OP_COUNT; op++) {
         const char *n = mf_opcode_name((mf_opcode)op);
@@ -346,6 +437,8 @@ MF_TEST(every_opcode_has_a_name) {
 }
 
 void run_opcode_tests(void) {
+    A = mf_arena_create("opcode-test", 1u << 20);
+
     MF_RUN(mana_production_is_recognised_in_the_shapes_it_is_printed_in);
     MF_RUN(a_producer_whose_quantity_depends_on_the_board_counts_against_the_gate);
     MF_RUN(a_choice_from_a_printed_set_is_representable_and_kept_apart);
@@ -369,5 +462,12 @@ void run_opcode_tests(void) {
     MF_RUN(one_unmatched_clause_makes_the_whole_card_unrepresentable);
     MF_RUN(every_wording_the_rule_names_is_a_wording_it_was_tested_on);
     MF_RUN(text_that_is_not_text_is_survivable);
+    MF_RUN(the_unmatched_tail_is_collected_by_shape);
+    MF_RUN(only_unmatched_clauses_reach_the_report);
+    MF_RUN(the_ranking_does_not_depend_on_the_order_cards_arrived_in);
+    MF_RUN(the_report_grows_past_its_initial_capacity);
+    MF_RUN(a_report_is_optional);
     MF_RUN(every_opcode_has_a_name);
+
+    mf_arena_destroy(A);
 }

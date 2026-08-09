@@ -71,6 +71,7 @@ int main(int argc, char **argv) {
         }
         snprintf(cfg.bulk_path, sizeof cfg.bulk_path, "%s", cli.bulk_path);
     }
+    if (cli.report_unmatched) cfg.report_unmatched = true;
     if (cli.game) {
         cfg.game = mf_game_parse(cli.game);
         if (cfg.game == MF_GAME_NONE) {

@@ -149,9 +149,32 @@ MF_TEST(cli_parses_the_diagnostic_options) {
     MF_CHECK(strstr(eb, "--report") != NULL);
 }
 
+MF_TEST(cli_parses_report_unmatched_as_a_flag_not_a_path) {
+    /* It sits one character away from --report, which does take a path. Getting
+       them confused would silently eat the subcommand as a filename. */
+    char eb[128];
+    mf_cli c;
+    char *argv[] = {"mfsim", "--report-unmatched", "preprocess", NULL};
+    MF_EQ_INT(mf_cli_parse(3, argv, &c, eb, sizeof eb), MF_OK);
+    MF_EQ_INT(c.cmd, MF_CMD_PREPROCESS);
+    MF_CHECK(c.report_unmatched == true);
+    MF_CHECK(c.report_path == NULL);
+
+    char *bare[] = {"mfsim", "preprocess", NULL};
+    MF_EQ_INT(mf_cli_parse(2, bare, &c, eb, sizeof eb), MF_OK);
+    MF_CHECK(c.report_unmatched == false);
+
+    /* And --report still takes its value. */
+    char *both[] = {"mfsim", "--report", "/tmp/f.json", "--report-unmatched", "preprocess", NULL};
+    MF_EQ_INT(mf_cli_parse(5, both, &c, eb, sizeof eb), MF_OK);
+    MF_EQ_STR(c.report_path, "/tmp/f.json");
+    MF_CHECK(c.report_unmatched == true);
+}
+
 void run_cli_tests(void) {
     MF_RUN(cli_tolerates_an_errbuf_with_no_room);
     MF_RUN(cli_parses_the_diagnostic_options);
+    MF_RUN(cli_parses_report_unmatched_as_a_flag_not_a_path);
     MF_RUN(cli_dispatches_every_subcommand);
     MF_RUN(cli_handles_help_and_version);
     MF_RUN(cli_requires_a_subcommand);

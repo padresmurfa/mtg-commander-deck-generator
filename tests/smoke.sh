@@ -145,6 +145,29 @@ grep -q '"no_oracle_id":1' "$WORK/pre.jsonl" || fail "the unusable printing was 
 grep -q '"price_cents":175' "$WORK/cards.jsonl" || fail "the cheapest printing did not win"
 ok "preprocess merged the fixture into 6 cards"
 
+# --- the unmatched tail is a document the tool produces -------------------
+# Its own fixture rather than the one above: adding oracle text there would
+# change the card digest and mean regenerating a golden file to test a report.
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
+    --bulk tests/fixtures/bulk-unmatched.jsonl --report-unmatched \
+    > "$WORK/tail.txt" 2>/dev/null || fail "preprocess --report-unmatched failed"
+grep -q 'unmatched clauses: 3 in 2 distinct shapes' "$WORK/tail.txt" ||
+    fail "the tail summary is wrong: $(head -1 "$WORK/tail.txt")"
+# Two cards share "If you do, draw a card"; the checkland's condition is its own
+# shape. Ranked by count, so the shared one leads.
+sed -n '2p' "$WORK/tail.txt" | grep -q '^ *2  If you do, draw a card$' ||
+    fail "the ranking did not put the commonest shape first: $(sed -n '2p' "$WORK/tail.txt")"
+grep -q 'This land enters tapped unless you control a Mountain or a Plains' "$WORK/tail.txt" ||
+    fail "the conditional land did not reach the report"
+# And the vanilla bear contributes nothing: inert is not a failure to model.
+grep -q 'Vigilance' "$WORK/tail.txt" && fail "inert text reached the unmatched report"
+# Off by default, so a normal run does not pay for it.
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
+    --bulk tests/fixtures/bulk-unmatched.jsonl > "$WORK/quiet.txt" 2>/dev/null ||
+    fail "preprocess without the flag failed"
+grep -q 'unmatched clauses' "$WORK/quiet.txt" && fail "the report printed without being asked"
+ok "--report-unmatched ranks the unmodelled shapes, and is off by default"
+
 # --- a truncated bulk file is not a smaller card table --------------------
 head -c 400 tests/fixtures/bulk-sample.json > "$WORK/cut.json"
 rc=0

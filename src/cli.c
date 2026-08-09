@@ -61,6 +61,14 @@ mf_err mf_cli_parse(int argc, char **argv, mf_cli *out, char *eb, size_t el) {
             out->no_spawn = true;
             continue;
         }
+        /* A flag, not a path — and one character from --report, which is not.
+           Safe only because every comparison here is an exact strcmp; a switch
+           to prefix matching would make this swallow the subcommand as a
+           filename, which is what the test pins. */
+        if (strcmp(arg, "--report-unmatched") == 0) {
+            out->report_unmatched = true;
+            continue;
+        }
         if (arg[0] == '-') {
             say(eb, el, "unknown option '%s'", arg);
             return MF_ERR_ARGS;
@@ -112,6 +120,8 @@ void mf_cli_usage(FILE *f) {
         "\n"
         "diagnostics:\n"
         "  --no-spawn        run the work in this process instead of a worker\n"
-        "  --report <path>   where a fatal report is written\n",
+        "  --report <path>   where a fatal report is written\n"
+        "  --report-unmatched\n"
+        "                    rank the clause shapes the opcode set cannot model\n",
         f);
 }

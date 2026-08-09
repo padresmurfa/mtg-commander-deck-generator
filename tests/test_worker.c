@@ -94,6 +94,39 @@ MF_TEST(the_unimplemented_subcommands_fail_rather_than_pretending) {
     remove(PATH);
 }
 
+MF_TEST(preprocess_reports_the_unmatched_tail_only_when_asked) {
+    /* The report goes to stdout — it is a document for whoever decides what to
+       build next, not a record of what the run did. Capturing it means taking
+       stdout away from the harness for the duration and giving it back. */
+    const char *out = "build/test-worker-tail.txt";
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-unmatched.jsonl");
+    c.game = MF_GAME_PAPER;
+    c.report_unmatched = true;
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.jsonl");
+
+    int saved = dup(fileno(stdout));
+    MF_CHECK(freopen(out, "w", stdout) != NULL);
+    int rc = mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL);
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+    MF_EQ_INT(rc, MF_EXIT_OK);
+
+    char *tail = mf_mem_read_file(A, out, NULL);
+    MF_CHECK(tail != NULL);
+    MF_CHECK(strstr(tail, "unmatched clauses: 3 in 2 distinct shapes") != NULL);
+    MF_CHECK(strstr(tail, "If you do, draw a card") != NULL);
+    MF_CHECK(strstr(tail, "unless you control a Mountain or a Plains") != NULL);
+    /* Inert text is not a failure to model, so it has no business in a list
+       whose entire purpose is "what should be built next". */
+    MF_CHECK(strstr(tail, "Vigilance") == NULL);
+
+    remove(out);
+    remove("build/test-worker-cards.jsonl");
+    remove(PATH);
+}
+
 MF_TEST(preprocess_without_a_game_is_a_usage_error) {
     /* There is no default, on purpose: paper, Arena and Magic Online are
        different card pools, so picking one silently would answer a question
@@ -252,6 +285,7 @@ void run_worker_tests(void) {
     MF_RUN_A(preprocess_without_a_game_is_a_usage_error);
     MF_RUN_A(preprocess_without_a_bulk_file_is_a_usage_error_not_a_failure);
     MF_RUN_A(preprocess_reads_a_bulk_file_and_writes_a_card_table);
+    MF_RUN_A(preprocess_reports_the_unmatched_tail_only_when_asked);
     MF_RUN_A(a_bulk_file_that_is_not_there_is_a_plain_failure);
     MF_RUN_A(a_card_table_that_cannot_be_written_stops_the_run);
     MF_RUN_A(a_truncated_bulk_file_is_not_a_smaller_card_table);

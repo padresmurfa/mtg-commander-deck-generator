@@ -170,6 +170,25 @@ MF_TEST(config_round_trips_through_json) {
     MF_EQ_INT(back.pool_max_depth, c.pool_max_depth);
     MF_EQ_INT(back.max_relaunch, c.max_relaunch);
     MF_CHECK(back.persist_growth == c.persist_growth);
+    /* The worker is a separate process, so a diagnostic mode only reaches it if
+       it survives the round trip through the resolved config. */
+    MF_CHECK(back.report_unmatched == c.report_unmatched);
+}
+
+MF_TEST(config_carries_report_unmatched_to_the_worker) {
+    mf_config c;
+    MF_EQ_INT(load(&c, "{\"report_unmatched\":true}"), MF_OK);
+    MF_CHECK(c.report_unmatched == true);
+
+    mf_jw *w = mf_jw_new(A);
+    mf_config_write(&c, w);
+    mf_config back;
+    MF_EQ_INT(load(&back, mf_jw_text(w)), MF_OK);
+    MF_CHECK(back.report_unmatched == true);
+
+    mf_config d;
+    mf_config_defaults(&d);
+    MF_CHECK(d.report_unmatched == false);
 }
 
 
@@ -291,6 +310,7 @@ void run_config_tests(void) {
     MF_RUN_A(config_loads_from_a_file);
     MF_RUN_A(config_reports_a_missing_file);
     MF_RUN_A(config_round_trips_through_json);
+    MF_RUN_A(config_carries_report_unmatched_to_the_worker);
     MF_RUN_A(config_reads_a_file_larger_than_the_read_buffer);
     MF_RUN_A(config_accepts_boundary_values);
     MF_RUN_A(config_reports_errors_without_an_errbuf);

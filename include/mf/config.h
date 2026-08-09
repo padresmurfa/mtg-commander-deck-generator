@@ -45,6 +45,12 @@ typedef struct {
     size_t pool_max_depth;   /* growth ceiling for both depths */
     int max_relaunch;        /* retries the orchestrator will spend growing */
     bool persist_growth;     /* write a grown size or depth back to the config file */
+    /* Diagnostic. Collects the unmatched clause shapes and prints them ranked.
+       Off by default: the gate wants the fraction, and holding ~1,700 distinct
+       shapes for all 37,553 cards is a cost with nothing to show on a normal
+       run. It lives in the config rather than the CLI alone because the worker
+       is a separate process and this is the only channel that reaches it. */
+    bool report_unmatched;
 } mf_config;
 
 void mf_config_defaults(mf_config *c);
