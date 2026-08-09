@@ -14,7 +14,7 @@ a reason — never "done".
 
 | Gate | Sprint | Question | Threshold | Outcome |
 | ---- | ------ | -------- | --------- | ------- |
-| **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | *pending* |
+| **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9357**, conditional ([retro](retros/1.2-opcode-model.md)) |
 | **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | Within Monte Carlo error of the exact value | *pending* |
 | **G3** Policy gap discriminates | 2.3 | Does naive-vs-careful separate known-forgiving from known-demanding decks? | Separation exceeding measurement noise | *pending* |
 | **G4** Precon rank correlation | 3.3 | Does the objective rank real decks in the right order? | Spearman above threshold, precons with n≥100 | *pending* |
@@ -27,7 +27,13 @@ a reason — never "done".
 These are real branches, written down in advance so that failing a gate is a decision rather
 than a crisis.
 
-**G1 — opcode coverage.** Unrepresentable cards are excluded from the pool
+**G1 — opcode coverage.** **Measured 0.9357 in sprint 1.2 — passed, with a condition.** The figure
+is coverage of what the *currently simulated* phases can observe, and those are only the turn-1–4
+feasibility gate: 89.4% of all clauses are inert rather than modelled. It must be re-measured when
+E3 widens what is observed, and it will fall. A number quoted without that condition answers a
+different question.
+
+Unrepresentable cards are excluded from the pool
 ([spec §13.5](../simulator-spec.yaml)), so coverage is a hard ceiling on how meaningful any
 output is. At ~30% the "optimal" deck is an artefact of what happened to be modellable.
 *On failure:* grow the opcode set and re-measure, or stop the project. Do not proceed and hope.

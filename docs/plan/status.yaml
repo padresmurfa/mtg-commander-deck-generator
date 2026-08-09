@@ -13,8 +13,8 @@
 
 meta:
   status: in_progress
-  current_sprint: "1.2"
-  task_split_valid_for: "1.2"     # task-splitting any other sprint is speculative
+  current_sprint: "1.3"
+  task_split_valid_for: "1.3"     # task-splitting any other sprint is speculative
   baseline: greenfield
   language: c
   deliverable: cli
@@ -226,7 +226,16 @@ epics:
           - legality and colour identity resolved
       - id: "1.2"
         name: Opcode model
-        status: not_started
+        status: done
+        gate: G1
+        retro: docs/plan/retros/1.2-opcode-model.md
+        tasks_doc: docs/plan/sprints/1.2-opcode-model.md
+        result:
+          checks: 3245
+          line_coverage: 100.00
+          branch_coverage: 96.44
+          g1_coverage: 0.9357
+          g1_verdict: pass_conditional
         gate: G1
         exit_criteria:
           - card struct <= 32 bytes
@@ -405,43 +414,46 @@ epics:
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
 tasks:
-  sprint: "1.2"
-  doc: docs/plan/sprints/1.2-opcode-model.md
+  sprint: "1.3"
+  doc: docs/plan/sprints/1.3-classes-dominance.md
   goal: >
-    Oracle text becomes opcodes for the modelled subset, and the card struct fits in 32 bytes.
-    Ends with G1, the project's first kill-switch.
+    Equivalence classes, dominance chains merged into tiered classes, skill floors, precon
+    membership, price imputation, and the binary card table with a content hash.
   why_now: >
-    The card set exists and has nothing in it the simulator can act on. G1 asks whether enough of a
-    real commander's pool can be modelled at all, and it cannot be asked until there is a pool.
-  gate: G1
-  ready_to_split: true
-  first_real_export_run:
-    done: 2026-08-09
-    records: 116694
-    cards: 37553
-    rejected: 0
-    found: >
-      Scryfall no longer publishes a JSON array — only gzipped JSONL — so mf/jstream could not read
-      a line of the real file despite twenty passing tests. Also that 8% of the export is
-      digital-only, and that reversible_card promos carry oracle_id and type_line on their faces.
+    The card set exists and G1 says enough of it can be modelled. What is missing is the reduction
+    that makes the search space tractable: 37,553 cards is far too many to optimise over directly,
+    and §7 turns them into a few thousand metacard classes.
+  carried_in:
+    - id: card_struct_32_bytes
+      from: "1.2 T2"
+      why_here: >
+        It constrains a runtime card nothing executes yet, and the emitted table is still the JSONL
+        intermediate this sprint replaces. Packing bits before the binary layout is decided would
+        mean packing them twice.
+    - id: unmatched_report
+      from: "1.2 T6"
+      why_here: >
+        The G1 number is in the artifact; the ranked list of unmatched clause shapes that would
+        guide growing the opcode set is not, and was produced by a script. Small, and it is what
+        makes "grow the opcode set" actionable.
   input_from_previous_retro:
     - >
-      The real export has now been read: 116,694 records into 37,553 cards, nothing rejected. It
-      immediately found that the file is JSONL rather than a JSON array, which twenty passing tests
-      had agreed was wrong. For any sprint that reads an external format, run against the real thing
-      FIRST, not last — a test suite agrees with the assumption it was written under.
+      G1 is 0.9357 but conditional: 89.4% of clauses are inert because only the turn-1-4 feasibility
+      gate is simulated. Do not quote the figure without the condition, and re-measure at E3.
     - >
-      37,553 cards is the pool G1 measures opcode coverage against, and 10 MB of JSONL is what the
-      32-byte card struct has to replace.
-    - The card table is JSONL until this sprint's opcode encoding decides the 32-byte layout.
-    - Prices that are absent stay absent; imputation is 1.3, not a guess.
+      A classifier agrees with itself. The dual-land error was invisible to every test because the
+      tests shared the code's reading of the text — interrogate the real data, not the code.
     - >
-      Real uncovered branches went from 1 to 10, all in the two new parsers. The floor has headroom
-      but this is the first sprint the number moved the wrong way.
+      Conditional and triggered draw is the head of the unmatched distribution by a wide margin;
+      past the top ten shapes the tail is essentially unique.
     - >
-      A rule worth having is worth a test even when today's data cannot distinguish it. mf_types_parse
-      stops at the subtype dash and no printed subtype is spelled like a type; the test is synthetic
-      and says so.
+      Price imputation lands here, and 1.1 deliberately left absent prices absent. 3,849 of the
+      37,553 paper cards have no price; an Arena table has none at all.
+  task_split_deferred_until:
+    reason: >
+      The class reduction's shape depends on how many classes 37,553 cards actually collapse into,
+      which is a measurement nobody has taken. Split after the first dominance pass reports it.
+    blockers: [class_count_measured]
 retros:
   - sprint: "0.1"
     doc: docs/plan/retros/0.1-greenfield-skeleton.md
@@ -490,6 +502,20 @@ retros:
       both weaken the digest's internal mixing without changing anything its contract exposes, which
       is the nature of a hash.
     carry_over: []
+  - sprint: "1.2"
+    doc: docs/plan/retros/1.2-opcode-model.md
+    gates: [G1]
+    design_amendments: 3
+    headline: >
+      G1 passed at 0.9357 against the real pool — and the condition matters more than the number.
+      89.4% of clauses are INERT rather than modelled, because the simulated phases are only the
+      turn-1-4 feasibility gate; the figure must be re-measured when E3 widens what is observed, and
+      it will fall. The first measurement read 0.9249 and was wrong in a way review would have
+      missed: 481 dual-land clauses, "{T}: Add {W} or {U}", were being read as fixed {W} — colour
+      flexibility on turn two being close to the entire thing the opening phase measures. Found by
+      interrogating the data rather than the code, which is the same lesson 1.1 learned about JSONL
+      arriving in a different disguise.
+    carry_over: [card_struct_32_bytes, unmatched_report]
   - sprint: "1.1"
     doc: docs/plan/retros/1.1-acquisition.md
     gates: []

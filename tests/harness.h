@@ -109,6 +109,7 @@ void run_trial_tests(void);
 void run_jstream_tests(void);
 void run_card_tests(void);
 void run_scryfall_tests(void);
+void run_opcode_tests(void);
 void run_panic_tests(void);
 void run_arena_tests(void);
 void run_pool_tests(void);

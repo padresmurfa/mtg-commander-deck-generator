@@ -28,6 +28,7 @@
 | `jstream` | One value at a time out of a JSON array too large to hold |
 | `card` | The card record, its normalisation, and the printing merge rules |
 | `scryfall` | Bulk-export field names, and nothing else |
+| `opcode` | What a card does, as far as the simulated phases can see |
 | `json` | Minimal JSON reader and writer. Written in-tree, not vendored |
 | `config` | Run configuration: defaults, load, validate, serialise |
 | `artifact` | Append-only buffered JSONL run artifact |

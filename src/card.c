@@ -263,6 +263,7 @@ void mf_cardset_add(mf_cardset *s, const mf_printing *p) {
         mf_card *c = &s->cards[s->count];
         snprintf(c->oracle_id, sizeof c->oracle_id, "%s", p->oracle_id);
         c->name = p->name;
+        c->oracle_text = p->oracle_text;
         c->identity = p->identity;
         c->types = p->types;
         c->cmc = p->cmc;

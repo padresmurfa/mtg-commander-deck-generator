@@ -103,6 +103,13 @@ mf_scry_reject mf_scryfall_printing(mf_arena *a, const mf_json *obj, mf_game gam
     const char *cost = mana_cost_of(obj);
     if (cost) out->pips = mf_pips_parse(cost);
 
+    /* Copied for the same reason the name is: the document dies with the frame.
+       Absent for a vanilla card, which is not the same as an empty string on a
+       card whose text this code failed to find. */
+    const char *text = str_member(obj, "oracle_text");
+    if (!text) text = face_member(obj, "oracle_text");
+    out->oracle_text = text ? mf_mem_strdup(a, text) : "";
+
     const mf_json *cmc = mf_json_member(obj, "cmc");
     if (mf_json_type_of(cmc) == MF_JSON_NUMBER) {
         double v = mf_json_number(cmc);

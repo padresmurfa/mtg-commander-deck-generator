@@ -986,6 +986,38 @@ validation:
       Deliberately a separate command. A harness that refreshed its own expectation on failure
       would agree with every change ever made, including the wrong ones.
 
+  opcode_coverage:
+    ref: "13.5"
+    added: sprint 1.2
+    gate: G1
+    threshold: {sound: 0.60, compromised: 0.30}
+    measured:
+      value: 0.9357
+      date: 2026-08-09
+      pool: commander-legal paper cards from the Scryfall export
+      representable: 29783
+      legal: 31829
+      verdict: pass
+    definition: >
+      A card is representable when everything it does THAT THE SIMULATED PHASES CAN OBSERVE is
+      modelled. The opening phase (design §3) simulates turns 1-4 and asks whether a deck can cast
+      its spells and reach turn 5 functional, so the observables are mana produced, cost, cards
+      drawn, lands fetched and cost reduction. A vanilla creature is fully representable: a cost, a
+      colour requirement and a body is all of it that turn four can see.
+    condition: >
+      MUST be re-measured when a later epic widens what is simulated. 89.4% of clauses are inert
+      rather than modelled, and inertia is relative to the phases being run. The figure will fall
+      as the model widens; that is expected and is not a regression. Quoting it bare answers a
+      different question than the one it was measured for.
+    clause_mix:
+      total: 77348
+      inert: 69169
+      unmatched: 2392
+    largest_lever: >
+      Conditional and triggered draw — "If you do, draw a card" and its relatives — is the head of
+      the unmatched distribution by a wide margin. Past the top ten shapes the tail is essentially
+      unique, so the remaining work is diminishing rather than blocked.
+
   self_consistency:
     ref: "13.4"
     assertion: end-of-opening score correlates with end-of-game outcome within the simulator

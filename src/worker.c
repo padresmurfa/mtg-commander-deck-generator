@@ -7,6 +7,7 @@
 #include "mf/panic.h"
 #include "mf/pool.h"
 #include "mf/jstream.h"
+#include "mf/opcode.h"
 #include "mf/scryfall.h"
 #include "mf/trial.h"
 
@@ -184,6 +185,24 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
     const mf_card *cards = mf_cardset_sorted(set);
     size_t count = mf_cardset_count(set);
 
+    /* Gate G1. Coverage is a hard ceiling on how meaningful any later output is
+       (design §13.5), so it is measured here rather than asserted anywhere. */
+    size_t representable = 0, legal = 0, legal_representable = 0;
+    size_t by_op[MF_OP_COUNT] = {0};
+    for (size_t i = 0; i < count; i++) {
+        mf_opcode_scan sc;
+        mf_opcode_scan_text(cards[i].oracle_text, &sc);
+        for (int op = 0; op < MF_OP_COUNT; op++) by_op[op] += sc.by_op[op];
+        bool ok = mf_opcode_representable(&sc);
+        if (ok) representable++;
+        /* The pool the optimiser actually chooses from is the legal one, so
+           that is the fraction the gate is about. */
+        if (cards[i].commander_legal) {
+            legal++;
+            if (ok) legal_representable++;
+        }
+    }
+
     int rc = stream_err == MF_OK ? MF_EXIT_OK : MF_EXIT_FAILURE;
     if (rc == MF_EXIT_OK) {
         mf_artifact *table = NULL;
@@ -233,6 +252,22 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
         mf_jw_key(w, mf_scry_reject_name((mf_scry_reject)r));
         mf_jw_int(w, (long long)rejected[r]);
     }
+    mf_jw_obj_end(w);
+    mf_jw_key(w, "coverage");
+    mf_jw_obj_begin(w);
+    mf_jw_key(w, "cards");               mf_jw_int(w, (long long)count);
+    mf_jw_key(w, "representable");       mf_jw_int(w, (long long)representable);
+    mf_jw_key(w, "commander_legal");     mf_jw_int(w, (long long)legal);
+    mf_jw_key(w, "legal_representable"); mf_jw_int(w, (long long)legal_representable);
+    mf_jw_key(w, "legal_fraction");
+    mf_jw_num(w, legal ? (double)legal_representable / (double)legal : 0.0);
+    mf_jw_key(w, "clauses");
+    mf_jw_obj_begin(w);
+    for (int op = 1; op < MF_OP_COUNT; op++) {
+        mf_jw_key(w, mf_opcode_name((mf_opcode)op));
+        mf_jw_int(w, (long long)by_op[op]);
+    }
+    mf_jw_obj_end(w);
     mf_jw_obj_end(w);
     mf_jw_key(w, "layers");        mf_digests_write(&g, w);
     mf_jw_obj_end(w);

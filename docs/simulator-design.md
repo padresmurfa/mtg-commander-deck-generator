@@ -1178,6 +1178,16 @@ opcode set needs to grow, or the project needs rethinking.
 
 **Measure this in the first slice.** It is a couple of hours of work and it can invalidate months.
 
+*(Amended sprint 1.2, when it turned out this section never said what coverage is coverage **of**.)*
+**Inert is not unrepresentable.** A card is representable when everything it does *that the
+simulated phases can observe* is modelled. The opening phase watches turns 1–4 and asks one
+question — can this deck cast its spells and reach turn 5 — so a vanilla 4/4 is fully modelled:
+cost, colour requirement, body. Its combat text is **inert**, not missing.
+
+That distinction is the whole of the number, and it means the number is **conditional on which
+phases run**. G1 measured **0.9357** in sprint 1.2 with 89.4% of clauses inert. Re-measure when E3
+widens what is observed; the figure will fall, and that is the model growing rather than breaking.
+
 ---
 
 ## 14. Implementation hazards

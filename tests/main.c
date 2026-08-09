@@ -16,6 +16,7 @@ int main(void) {
     run_jstream_tests();
     run_card_tests();
     run_scryfall_tests();
+    run_opcode_tests();
     run_config_tests();
     run_artifact_tests();
     run_cli_tests();

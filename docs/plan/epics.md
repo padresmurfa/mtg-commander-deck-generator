@@ -35,7 +35,7 @@ The `preprocess` subcommand. Ends with the project's first kill-switch.
 | Sprint | Goal | Exit criteria | Status |
 | ------ | ---- | ------------- | ------ |
 | **1.1** | Acquisition & oracle normalisation | Scryfall bulk ingested; grouped by `oracle_id`; min price across paper non-foil printings; legality and colour identity resolved | `done` |
-| **1.2** | Opcode model — **gate G1** | Card struct ≤32 B; oracle text → opcodes for the modelled subset; coverage measured on a real commander's pool | `not started` |
+| **1.2** | Opcode model — **gate G1** | Card struct ≤32 B; oracle text → opcodes for the modelled subset; coverage measured on a real commander's pool | `done` — **G1 0.9357, conditional pass** |
 | **1.3** | Classes, dominance, enrichment | Equivalence classes; dominance chains merged into tiered classes; skill floors; precon membership; price imputation; binary card table emitted with content hash | `not started` |
 
 ## E2 — Opening phase · `not started`

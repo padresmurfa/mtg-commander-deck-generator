@@ -89,7 +89,8 @@ typedef struct {
 /* One printing, as read from the bulk export. */
 typedef struct {
     char oracle_id[MF_ORACLE_ID_MAX];
-    const char *name; /* arena-owned, and shared with the card it merges into */
+    const char *name;        /* arena-owned, and shared with the card it merges into */
+    const char *oracle_text; /* arena-owned; "" for a vanilla card */
     mf_colours identity;
     mf_types types;
     uint8_t cmc;
@@ -104,6 +105,7 @@ typedef struct {
 typedef struct {
     char oracle_id[MF_ORACLE_ID_MAX];
     const char *name;
+    const char *oracle_text;
     mf_colours identity;
     mf_types types;
     uint8_t cmc;
