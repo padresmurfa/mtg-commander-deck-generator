@@ -21,6 +21,30 @@
  * likely to be wrong, so they are testable without a fixture — which is also
  * what lets each one have a test that fails when the rule is inverted. */
 
+/* Which game's card set is being built.
+ *
+ * **They are genuinely different games.** Measured on the 2026-08-09 export:
+ * 37,553 cards on paper, 30,950 on Magic Online, 16,223 on Arena — with 976
+ * cards existing *only* on Arena and 22,306 existing only off it. A card table
+ * is for one of them, and there is no sensible default: picking paper silently
+ * would answer a question that belongs to whoever is building the table.
+ *
+ * The price field differs with the game too, which is the other half of why
+ * this cannot be assumed — see mf/scryfall. */
+typedef enum {
+    MF_GAME_NONE = 0, /* nobody said, which is an error rather than a default */
+    MF_GAME_PAPER,
+    MF_GAME_ARENA,
+    MF_GAME_MTGO
+} mf_game;
+
+/* MF_GAME_NONE for anything unrecognised. Scryfall also labels a handful of
+   printings `sega` and `astral` — 22 of them in the whole export, curiosities
+   from games that never had a card pool worth optimising — and they are not
+   offered rather than silently accepted. */
+mf_game mf_game_parse(const char *name);
+const char *mf_game_name(mf_game g);
+
 /* Colour identity, and the colours a mana pip demands. */
 enum {
     MF_COLOUR_W = 1u << 0,
@@ -70,9 +94,9 @@ typedef struct {
     mf_types types;
     uint8_t cmc;
     mf_pips pips;
-    bool paper;           /* sold as a physical card */
+    bool available;       /* published in the game this table is being built for */
     bool commander_legal; /* per this printing; see the merge rule below */
-    bool has_price;       /* a non-foil paper price was quoted */
+    bool has_price;       /* a price was quoted in this game's currency */
     uint32_t price_cents;
 } mf_printing;
 
@@ -127,12 +151,13 @@ mf_cardset *mf_cardset_new(mf_arena *a);
 
 /* Merges one printing into the card it belongs to.
  *
- *   - **Non-paper printings are ignored entirely.** A digital-only printing is
- *     not a card anyone can buy, and its price is not a price.
- *   - **Price is the minimum** over paper printings that quoted one.
+ *   - **Printings not published in the chosen game are ignored entirely.** A
+ *     card that exists only on Arena is not a card a paper deck can contain,
+ *     and its price is not a price anyone can pay.
+ *   - **Price is the minimum** over available printings that quoted one.
  *   - **Colour identity is the union.** It should not vary, and a union cannot
  *     lose a colour if it ever does.
- *   - **Commander-legal if any paper printing says so**, with disagreements
+ *   - **Commander-legal if any available printing says so**, with disagreements
  *     counted. Legality is a property of the oracle card, so a disagreement is
  *     a stale record rather than a real distinction — but a count that is
  *     silently non-zero is how a stale record becomes a wrong answer.
@@ -140,7 +165,7 @@ mf_cardset *mf_cardset_new(mf_arena *a);
 void mf_cardset_add(mf_cardset *s, const mf_printing *p);
 
 size_t mf_cardset_count(const mf_cardset *s);
-/* Paper printings merged, and non-paper printings dropped. */
+/* Printings merged, and printings dropped for belonging to another game. */
 size_t mf_cardset_merged(const mf_cardset *s);
 size_t mf_cardset_dropped(const mf_cardset *s);
 /* Cards whose printings did not agree about commander legality. */

@@ -9,7 +9,7 @@ hand_total 46060
 score_total 1390456210
 cards.cards 6
 cards.printings 8
-cards.non_paper 2
+cards.other_games 2
 cards.legality_disagreements 1
-cards.digest ac91be901676bda84f303a6c9def2c0a
+cards.digest e9f9e682f7277a8d437a10623a9ad98d
 cards.rows 6

@@ -23,7 +23,7 @@ static mf_printing paper(const char *id, const char *name) {
     mf_printing p = {0};
     snprintf(p.oracle_id, sizeof p.oracle_id, "%s", id);
     p.name = name;
-    p.paper = true;
+    p.available = true;
     p.commander_legal = true;
     return p;
 }
@@ -237,12 +237,12 @@ MF_TEST(a_price_on_any_printing_beats_no_price_at_all) {
     MF_EQ_INT(c->price_cents, 300);
 }
 
-MF_TEST(a_digital_only_printing_is_not_a_card) {
-    /* Its price is not a price — Arena and Magic Online quote numbers that no
-       paper buyer can pay. */
+MF_TEST(a_printing_from_another_game_is_not_a_card) {
+    /* Its price is not a price anyone here can pay — Arena and Magic Online
+       quote in currencies a paper buyer has no access to. */
     mf_cardset *s = mf_cardset_new(A);
     mf_printing digital = priced("id", "Card", 1);
-    digital.paper = false;
+    digital.available = false;
     add(s, digital);
     add(s, priced("id", "Card", 500));
 
@@ -253,10 +253,29 @@ MF_TEST(a_digital_only_printing_is_not_a_card) {
     MF_EQ_INT(c->printings, 1);
 }
 
+MF_TEST(the_three_games_are_named_and_nothing_else_is) {
+    /* Scryfall also labels 22 printings `sega` and `astral`. They are not
+       offered rather than silently accepted: a card pool nobody can build a
+       deck from is not a card pool. */
+    MF_EQ_INT(mf_game_parse("paper"), MF_GAME_PAPER);
+    MF_EQ_INT(mf_game_parse("arena"), MF_GAME_ARENA);
+    MF_EQ_INT(mf_game_parse("mtgo"), MF_GAME_MTGO);
+    MF_EQ_INT(mf_game_parse("sega"), MF_GAME_NONE);
+    MF_EQ_INT(mf_game_parse("Paper"), MF_GAME_NONE);
+    MF_EQ_INT(mf_game_parse(""), MF_GAME_NONE);
+    MF_EQ_INT(mf_game_parse(NULL), MF_GAME_NONE);
+
+    MF_EQ_STR(mf_game_name(MF_GAME_PAPER), "paper");
+    MF_EQ_STR(mf_game_name(MF_GAME_ARENA), "arena");
+    MF_EQ_STR(mf_game_name(MF_GAME_MTGO), "mtgo");
+    /* Unset has no name, so it cannot be written out as though it were one. */
+    MF_EQ_STR(mf_game_name(MF_GAME_NONE), "");
+}
+
 MF_TEST(a_card_that_is_only_ever_digital_does_not_exist_at_all) {
     mf_cardset *s = mf_cardset_new(A);
     mf_printing digital = priced("id", "Alchemy Card", 1);
-    digital.paper = false;
+    digital.available = false;
     add(s, digital);
 
     MF_EQ_INT(mf_cardset_count(s), 0);
@@ -415,7 +434,8 @@ void run_card_tests(void) {
     MF_RUN_A(the_price_is_the_cheapest_printing_anybody_sells);
     MF_RUN_A(a_card_nobody_prices_is_flagged_and_not_free);
     MF_RUN_A(a_price_on_any_printing_beats_no_price_at_all);
-    MF_RUN_A(a_digital_only_printing_is_not_a_card);
+    MF_RUN_A(a_printing_from_another_game_is_not_a_card);
+    MF_RUN_A(the_three_games_are_named_and_nothing_else_is);
     MF_RUN_A(a_card_that_is_only_ever_digital_does_not_exist_at_all);
     MF_RUN_A(colour_identity_is_the_union_of_every_printing);
     MF_RUN_A(printings_that_disagree_about_legality_are_counted_not_hidden);

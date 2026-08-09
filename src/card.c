@@ -5,6 +5,28 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* ---- the game ------------------------------------------------------------ */
+
+static const struct {
+    mf_game game;
+    const char *name;
+} g_games[] = {{MF_GAME_PAPER, "paper"}, {MF_GAME_ARENA, "arena"}, {MF_GAME_MTGO, "mtgo"}};
+
+mf_game mf_game_parse(const char *name) {
+    if (!name) return MF_GAME_NONE;
+    for (size_t i = 0; i < sizeof g_games / sizeof g_games[0]; i++) {
+        if (strcmp(g_games[i].name, name) == 0) return g_games[i].game;
+    }
+    return MF_GAME_NONE;
+}
+
+const char *mf_game_name(mf_game g) {
+    for (size_t i = 0; i < sizeof g_games / sizeof g_games[0]; i++) {
+        if (g_games[i].game == g) return g_games[i].name;
+    }
+    return "";
+}
+
 /* ---- normalisation ------------------------------------------------------- */
 
 mf_colours mf_colour_letter(char letter) {
@@ -218,9 +240,10 @@ static size_t slot_of(const mf_cardset *s, const char *oracle_id) {
 }
 
 void mf_cardset_add(mf_cardset *s, const mf_printing *p) {
-    /* A digital-only printing is not a card anyone can buy, and its price is
-       not a price. Dropping it here means no later rule has to remember. */
-    if (!p->paper) {
+    /* A printing from another game is not a card this table can contain, and
+       its price is not a price anyone here can pay. Dropping it at the door
+       means no later rule has to remember. */
+    if (!p->available) {
         s->dropped++;
         return;
     }

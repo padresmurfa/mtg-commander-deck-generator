@@ -133,6 +133,14 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
                         "export rather than downloading one\n");
         return MF_EXIT_USAGE;
     }
+    if (c->game == MF_GAME_NONE) {
+        /* No default, on purpose. Paper, Arena and Magic Online are different
+           card pools, and picking one silently would answer a question that
+           belongs to whoever is building the table. */
+        fprintf(stderr, "mfsim: preprocess needs --game <paper|arena|mtgo>; the three are "
+                        "different card sets, so there is no default\n");
+        return MF_EXIT_USAGE;
+    }
 
     mf_pool *heap = mf_pool_create(root, "eval", MF_POOL_HEAP, c->arena_bytes, c->heap_pool_depth);
     mf_arena *durable = mf_pool_acquire(heap);
@@ -156,7 +164,7 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
             break;
         }
         mf_printing p;
-        mf_scry_reject why = mf_scryfall_printing(durable, doc, &p);
+        mf_scry_reject why = mf_scryfall_printing(durable, doc, c->game, &p);
         mf_arena_pop(scratch, frame);
 
         if (why != MF_SCRY_OK) {
@@ -199,6 +207,10 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
        is the first real data the harness has ever measured. */
     mf_digests g;
     mf_digests_init(&g, c->seed);
+    /* The game goes in first: two tables built from the same file for different
+       games are different inputs, and their digests must say so even where the
+       card sets happen to overlap. */
+    mf_digest_str(mf_digests_layer(&g, MF_LAYER_PREPROCESS), mf_game_name(c->game));
     mf_cardset_digest(set, mf_digests_layer(&g, MF_LAYER_PREPROCESS));
     mf_digests_seal(&g);
 
@@ -206,9 +218,10 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
     mf_jw_obj_begin(w);
     mf_jw_key(w, "record");        mf_jw_str(w, "preprocess");
     mf_jw_key(w, "bulk_path");     mf_jw_str(w, c->bulk_path);
+    mf_jw_key(w, "game");          mf_jw_str(w, mf_game_name(c->game));
     mf_jw_key(w, "cards");         mf_jw_int(w, (long long)count);
     mf_jw_key(w, "printings");     mf_jw_int(w, (long long)mf_cardset_merged(set));
-    mf_jw_key(w, "non_paper");     mf_jw_int(w, (long long)mf_cardset_dropped(set));
+    mf_jw_key(w, "other_games");   mf_jw_int(w, (long long)mf_cardset_dropped(set));
     mf_jw_key(w, "legality_disagreements");
     mf_jw_int(w, (long long)mf_cardset_disagreements(set));
     mf_jw_key(w, "rejected");

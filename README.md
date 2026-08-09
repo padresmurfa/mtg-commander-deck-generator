@@ -14,13 +14,17 @@ optimises them by search.
 $ curl -sL "$(curl -s https://api.scryfall.com/bulk-data/default-cards |
       sed -n 's/.*"jsonl_download_uri":"\([^"]*\)".*/\1/p')" -o data/scryfall.jsonl.gz
 $ gzip -d data/scryfall.jsonl.gz
-$ mfsim preprocess --config run.json --bulk data/scryfall.jsonl
+$ mfsim preprocess --config run.json --bulk data/scryfall.jsonl --game paper
 mfsim: arena of 8388608 bytes was too small; relaunching with 16777216
 mfsim: updated run.json with the sizes this run discovered
 ```
 
 116,694 records in, **37,553 cards** out, in about five seconds — and the arena size worked itself
 out on the way.
+
+`--game` has no default. Paper, Arena and Magic Online are different card sets — 37,553, 16,223 and
+30,950 cards, with 976 of Arena's existing nowhere else — and they are priced in different
+currencies, so the choice is yours to make rather than ours to assume.
 
 `preprocess` **consumes** that file; it never downloads one. The card table is an input to a
 deterministic core, so a subcommand that fetched would make the output depend on the day it ran.

@@ -711,7 +711,25 @@ preprocessing:
       The card table is an input to a deterministic core, so a subcommand that downloaded would be
       a subcommand whose output depended on the day it ran. Fetching is one documented command run
       outside the tool.
-    invocation: "mfsim preprocess --bulk <file>"
+    invocation: "mfsim preprocess --bulk <file> --game <paper|arena|mtgo>"
+    game:
+      required: true
+      default: none
+      rationale: >
+        Paper, Arena and Magic Online are different card sets — 37,553, 16,223 and 30,950 cards on
+        the 2026-08-09 export, with 976 existing only on Arena and 22,306 only off it. Choosing one
+        silently would answer a question that belongs to whoever is building the table.
+      price_field:
+        paper: usd
+        mtgo: tix
+        arena: none — Arena has no economy, so the table is priceless by construction
+      not_offered: >
+        Scryfall also labels 22 printings `sega` and `astral`. A card pool nobody can build a deck
+        from is not a card pool.
+      measured:
+        paper: {cards: 37553, printings: 107337, priced: 33704}
+        mtgo: {cards: 30950, printings: 67847, priced: 30598}
+        arena: {cards: 16223, printings: 21418, priced: 0}
     source: "Scryfall default-cards bulk export"
     format: JSONL, one card object per line
     format_note: >
@@ -726,8 +744,8 @@ preprocessing:
       records: 116694
       bytes: 624000000
       paper_printings: 107337
-      digital_only_dropped: 9357
-      cards: 37553
+      other_game_printings_dropped: 9357   # for a paper table
+      cards: 37553                          # for a paper table
       rejected: 0
       legality_disagreements: 0
       arena_converged_bytes: 16777216

@@ -71,6 +71,14 @@ int main(int argc, char **argv) {
         }
         snprintf(cfg.bulk_path, sizeof cfg.bulk_path, "%s", cli.bulk_path);
     }
+    if (cli.game) {
+        cfg.game = mf_game_parse(cli.game);
+        if (cfg.game == MF_GAME_NONE) {
+            /* A value the command line got wrong, not a run that went wrong. */
+            fprintf(stderr, "mfsim: --game must be paper, arena or mtgo, not '%s'\n", cli.game);
+            return MF_EXIT_USAGE;
+        }
+    }
 
     /* One process, for debugging and for anyone who would rather not have a
        child. Nothing is retried here: a worker that cannot ask for a bigger

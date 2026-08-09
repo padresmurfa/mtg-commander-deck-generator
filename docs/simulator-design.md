@@ -521,7 +521,7 @@ Fetching is one documented command, run deliberately, outside the tool:
 curl -sL "$(curl -s https://api.scryfall.com/bulk-data/default-cards |
       sed -n 's/.*"jsonl_download_uri":"\([^"]*\)".*/\1/p')" -o data/scryfall.jsonl.gz
 gzip -d data/scryfall.jsonl.gz
-mfsim preprocess --bulk data/scryfall.jsonl
+mfsim preprocess --bulk data/scryfall.jsonl --game paper
 ```
 
 Decompression is part of the fetch, not part of the tool: reading gzip would mean a third-party
@@ -549,6 +549,31 @@ plus the accumulating card set. This is exactly the shape arenas and `mf_arena_p
 for, and it means the preprocessing stage's memory is a function of the *output* size rather than
 the input's.
 
+### The game is a required argument, not a default
+
+**Paper, Arena and Magic Online are different card sets**, and `--game` has no default because
+choosing one silently would answer a question that belongs to whoever is building the table.
+Measured on the 2026-08-09 export, all three built from the same file:
+
+| `--game` | cards | printings | priced |
+| -------- | ----: | --------: | -----: |
+| `paper` | **37,553** | 107,337 | 33,704 |
+| `mtgo` | 30,950 | 67,847 | 30,598 |
+| `arena` | 16,223 | 21,418 | **0** |
+
+They are not subsets of one another: **976 cards exist only on Arena** — Alchemy, and the rebalanced
+versions — and 22,306 paper cards exist nowhere else. A paper deck cannot contain the first, and an
+Arena deck cannot contain the second.
+
+**The currency differs with the game too**, which is the other half of why it cannot be assumed.
+`usd` is a paper price; Magic Online is quoted in event tickets under `tix`; **Arena has no economy
+Scryfall prices at all**, so an Arena table is priceless by construction and the imputation of §8
+will have nothing to work from. Attaching `usd` to an Arena card would put the cost of a physical
+object on something no paper buyer can obtain.
+
+Scryfall also labels 22 printings `sega` and `astral`. They are not offered rather than silently
+accepted: a card pool nobody can build a deck from is not a card pool.
+
 ### What the real export contains
 
 Measured, not estimated — the first run against the live file, sprint 1.1:
@@ -556,16 +581,13 @@ Measured, not estimated — the first run against the live file, sprint 1.1:
 | | |
 | --- | --- |
 | Records | 116,694 |
-| Paper printings | 107,337 |
-| Digital-only printings, dropped | 9,357 |
-| **Distinct cards** | **37,553** |
 | Printings rejected as unreadable | 0 |
 | Printings whose legality disagreed | 0 |
 | Evaluation arena, converged | 16 MiB, from an 8 MiB guess, in one relaunch |
 | Wall clock | ~4.6 s |
 
-The two shapes that needed handling: **digital-only printings**, which are 8% of the file and whose
-prices no paper buyer can pay; and the `reversible_card` promos, which carry no top-level
+The two shapes that needed handling: **printings from another game**, which are 8% of the file for a
+paper table and 82% for an Arena one; and the `reversible_card` promos, which carry no top-level
 `oracle_id` or `type_line` — both live on the faces, and both faces name the same oracle.
 
 ### Cards are oracle_ids, never printings

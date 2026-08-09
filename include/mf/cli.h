@@ -23,6 +23,7 @@ typedef struct {
     const char *out_path;    /* --out, overrides config.artifact_path */
     const char *report_path; /* --report, where a fatal report is written */
     const char *bulk_path;   /* --bulk, overrides config.bulk_path */
+    const char *game;        /* --game, overrides config.game. Required by preprocess */
     bool no_spawn;           /* --no-spawn, do the work in this process */
 } mf_cli;
 

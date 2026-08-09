@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "mf/arena.h"
+#include "mf/card.h"
 #include "mf/err.h"
 #include "mf/json.h"
 
@@ -23,6 +24,11 @@ typedef struct {
        `preprocess` reports as a usage error — it consumes a file, it does not
        fetch one (design §8). */
     char bulk_path[MF_PATH_MAX];
+    /* Which game's card set to build. **No default**, deliberately: paper,
+       Arena and Magic Online are different card pools — 37,553, 16,223 and
+       30,950 cards, with 976 of Arena's existing nowhere else — so choosing one
+       silently would answer a question that belongs to whoever runs the tool. */
+    mf_game game;
 
     /* Memory. None of these is a specification — each is a starting guess the
        worker dies against and the orchestrator grows, so they converge over a

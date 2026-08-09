@@ -31,6 +31,10 @@ MF_TEST(config_defaults_match_the_spec) {
     MF_EQ_INT(c.seed, 0);
     MF_CHECK(c.artifact_path[0] != '\0');
     MF_CHECK(c.card_table_path[0] != '\0');
+    /* No default game: the three card pools are different, so the choice is
+       the caller's to make and never ours to assume. */
+    MF_EQ_INT(c.game, MF_GAME_NONE);
+    MF_CHECK(c.bulk_path[0] == '\0');
 
     /* spec: parameters.memory. A drifting spec fails the build rather than
        silently changing what a run costs. */
@@ -240,6 +244,10 @@ MF_TEST(config_enforces_memory_ranges) {
     MF_EQ_INT(load(&c, "{\"stack_pool_depth\":257}"), MF_ERR_RANGE);
     MF_EQ_INT(load(&c, "{\"pool_max_depth\":0}"), MF_ERR_RANGE);
     MF_EQ_INT(load(&c, "{\"pool_max_depth\":257}"), MF_ERR_RANGE);
+    MF_EQ_INT(load(&c, "{\"game\":\"paper\"}"), MF_OK);
+    MF_EQ_INT(c.game, MF_GAME_PAPER);
+    MF_EQ_INT(load(&c, "{\"game\":\"sega\"}"), MF_ERR_RANGE);
+    MF_EQ_INT(load(&c, "{\"game\":7}"), MF_ERR_TYPE);
     MF_EQ_INT(load(&c, "{\"max_relaunch\":-1}"), MF_ERR_RANGE);
     MF_EQ_INT(load(&c, "{\"max_relaunch\":17}"), MF_ERR_RANGE);
     MF_EQ_INT(load(&c, "{\"max_relaunch\":0}"), MF_OK);

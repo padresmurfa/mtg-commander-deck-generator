@@ -112,21 +112,33 @@ cat > "$WORK/pre.json" <<EOF
 EOF
 
 rc=0
-"$BIN" --no-spawn preprocess --config "$WORK/pre.json" >/dev/null 2>&1 || rc=$?
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 2 ] || fail "preprocess without --bulk should exit 2, got $rc"
 ok "preprocess without a bulk file is a usage error"
 
+# Paper, Arena and Magic Online are different card sets, so there is no default.
 rc=0
-"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --bulk "$WORK/no-such-bulk.json" \
-    >/dev/null 2>&1 || rc=$?
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" \
+    --bulk tests/fixtures/bulk-sample.json >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "preprocess without --game should exit 2, got $rc"
+rc=0
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game xbox \
+    --bulk tests/fixtures/bulk-sample.json >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "an unknown --game should exit 2, got $rc"
+ok "preprocess without a game, or with one nobody plays, is a usage error"
+
+rc=0
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
+    --bulk "$WORK/no-such-bulk.json" >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 1 ] || fail "a missing bulk file should exit 1, got $rc"
 ok "a bulk file that is not there is a plain failure"
 
-"$BIN" --no-spawn preprocess --config "$WORK/pre.json" \
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
     --bulk tests/fixtures/bulk-sample.json >/dev/null 2>&1 ||
     fail "preprocess on the fixture failed"
 grep -q '"cards":6' "$WORK/pre.jsonl" || fail "wrong card count"
-grep -q '"non_paper":2' "$WORK/pre.jsonl" || fail "digital printings were not dropped"
+grep -q '"game":"paper"' "$WORK/pre.jsonl" || fail "the game was not recorded"
+grep -q '"other_games":2' "$WORK/pre.jsonl" || fail "other games were not dropped"
 grep -q '"legality_disagreements":1' "$WORK/pre.jsonl" || fail "the disagreement was not counted"
 grep -q '"no_oracle_id":1' "$WORK/pre.jsonl" || fail "the unusable printing was not counted"
 [ "$(wc -l < "$WORK/cards.jsonl")" -eq 6 ] || fail "the card table has the wrong number of rows"
@@ -136,10 +148,18 @@ ok "preprocess merged the fixture into 6 cards"
 # --- a truncated bulk file is not a smaller card table --------------------
 head -c 400 tests/fixtures/bulk-sample.json > "$WORK/cut.json"
 rc=0
-"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --bulk "$WORK/cut.json" \
-    >/dev/null 2>&1 || rc=$?
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
+    --bulk "$WORK/cut.json" >/dev/null 2>&1 || rc=$?
 [ "$rc" -eq 1 ] || fail "a truncated bulk file should exit 1, got $rc"
 ok "a half-downloaded bulk file fails instead of quietly shrinking"
+
+# --- the same file, a different game, a different card set -----------------
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game arena \
+    --bulk tests/fixtures/bulk-sample.json >/dev/null 2>&1 ||
+    fail "preprocess --game arena failed"
+grep -q '"game":"arena"' "$WORK/pre.jsonl" || fail "the game was not recorded"
+grep -q '"cards":1' "$WORK/pre.jsonl" || fail "arena should see only its own card"
+ok "the same file yields a different card set per game"
 
 # --- single-process mode does the same work without a child ---------------
 cat > "$WORK/solo.json" <<EOF

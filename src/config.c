@@ -28,6 +28,7 @@ void mf_config_defaults(mf_config *c) {
        before the opcode encoding exists. */
     snprintf(c->card_table_path, sizeof c->card_table_path, "data/cards.jsonl");
     c->bulk_path[0] = '\0';
+    c->game = MF_GAME_NONE;
 
     /* Eight megabytes rather than sixty-four: the pools are stocked eagerly, so
        this number is multiplied by every depth below it before a run does any
@@ -134,6 +135,16 @@ mf_err mf_config_load_json(mf_arena *a, mf_config *c, const char *text, char *eb
             e = want_string(v, key, c->card_table_path, sizeof c->card_table_path, eb, el);
         } else if (strcmp(key, "bulk_path") == 0) {
             e = want_string(v, key, c->bulk_path, sizeof c->bulk_path, eb, el);
+        } else if (strcmp(key, "game") == 0) {
+            char name[16] = {0};
+            e = want_string(v, key, name, sizeof name, eb, el);
+            if (e == MF_OK && name[0] != '\0') {
+                c->game = mf_game_parse(name);
+                if (c->game == MF_GAME_NONE) e = range_err(key, eb, el);
+            }
+            /* An empty string is how "nobody has chosen yet" survives a
+               round trip through the resolved config the worker is handed. A
+               *wrong* name is still an error. */
         } else if (strcmp(key, "arena_bytes") == 0) {
             e = want_number(v, key, &num, eb, el);
             if (e == MF_OK && (num < MF_ARENA_MIN || num > MF_ARENA_LIMIT)) {
@@ -204,6 +215,7 @@ void mf_config_write(const mf_config *c, mf_jw *w) {
     mf_jw_key(w, "artifact_path");        mf_jw_str(w, c->artifact_path);
     mf_jw_key(w, "card_table_path");      mf_jw_str(w, c->card_table_path);
     mf_jw_key(w, "bulk_path");            mf_jw_str(w, c->bulk_path);
+    mf_jw_key(w, "game");                 mf_jw_str(w, mf_game_name(c->game));
     mf_jw_key(w, "arena_bytes");          mf_jw_int(w, (long long)c->arena_bytes);
     mf_jw_key(w, "arena_max_bytes");      mf_jw_int(w, (long long)c->arena_max_bytes);
     mf_jw_key(w, "heap_pool_depth");      mf_jw_int(w, (long long)c->heap_pool_depth);

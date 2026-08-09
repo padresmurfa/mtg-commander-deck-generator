@@ -23,10 +23,14 @@ static mf_arena *A;
 
 /* A fixture that does not parse leaves `doc` NULL and comes back as
    NOT_AN_OBJECT, which is a loud enough way for a broken test to fail. */
-static mf_scry_reject read(const char *text, mf_printing *out) {
+static mf_scry_reject read_for(const char *text, mf_game game, mf_printing *out) {
     mf_json *doc = NULL;
     mf_json_parse(A, text, &doc);
-    return mf_scryfall_printing(A, doc, out);
+    return mf_scryfall_printing(A, doc, game, out);
+}
+
+static mf_scry_reject read(const char *text, mf_printing *out) {
+    return read_for(text, MF_GAME_PAPER, out);
 }
 
 MF_TEST(every_field_this_sprint_needs_is_read) {
@@ -38,7 +42,7 @@ MF_TEST(every_field_this_sprint_needs_is_read) {
     MF_EQ_INT(p.identity, 0);
     MF_EQ_INT(p.cmc, 1);
     MF_EQ_INT(p.pips.generic, 1);
-    MF_CHECK(p.paper);
+    MF_CHECK(p.available);
     MF_CHECK(p.commander_legal);
     MF_CHECK(p.has_price);
     MF_EQ_INT(p.price_cents, 175);
@@ -52,7 +56,7 @@ MF_TEST(the_name_outlives_the_document_it_came_from) {
     mf_json_parse(frame, WHOLE, &doc);
 
     mf_printing p;
-    MF_EQ_INT(mf_scryfall_printing(A, doc, &p), MF_SCRY_OK);
+    MF_EQ_INT(mf_scryfall_printing(A, doc, MF_GAME_PAPER, &p), MF_SCRY_OK);
     mf_arena_destroy(frame); /* the document is gone */
 
     MF_EQ_STR(p.name, "Sol Ring");
@@ -99,15 +103,43 @@ MF_TEST(a_card_with_no_cost_anywhere_is_still_a_card) {
     MF_EQ_INT(p.types, MF_SUPER_BASIC | MF_TYPE_LAND);
 }
 
-MF_TEST(a_digital_only_printing_is_read_and_marked_as_such) {
+MF_TEST(availability_is_decided_by_the_game_that_was_asked_for) {
     /* Read, not rejected: dropping it here would lose the count of how many
-       there were, and mf/card is where the rule about them belongs. */
+       belonged to another game, and mf/card is where the rule belongs. */
+    const char *arena_only = "{\"oracle_id\":\"a\",\"name\":\"n\",\"type_line\":\"Creature\","
+                             "\"games\":[\"arena\",\"mtgo\"],\"prices\":{\"usd\":\"1.00\","
+                             "\"tix\":\"0.05\"}}";
     mf_printing p;
-    MF_EQ_INT(read("{\"oracle_id\":\"a\",\"name\":\"n\",\"type_line\":\"Creature\","
-                   "\"games\":[\"arena\",\"mtgo\"],\"prices\":{\"usd\":\"1.00\"}}",
-                   &p),
-              MF_SCRY_OK);
-    MF_CHECK(!p.paper);
+    MF_EQ_INT(read_for(arena_only, MF_GAME_PAPER, &p), MF_SCRY_OK);
+    MF_CHECK(!p.available);
+
+    MF_EQ_INT(read_for(arena_only, MF_GAME_ARENA, &p), MF_SCRY_OK);
+    MF_CHECK(p.available);
+
+    MF_EQ_INT(read_for(arena_only, MF_GAME_MTGO, &p), MF_SCRY_OK);
+    MF_CHECK(p.available);
+}
+
+MF_TEST(each_game_is_priced_in_its_own_currency) {
+    /* `usd` is a paper price and Magic Online is quoted in event tickets. Using
+       dollars for an MTGO table would attach the cost of a physical card to a
+       digital object nobody can trade for it — and Arena has no economy at all,
+       so an Arena table is priceless by construction. */
+    const char *both = "{\"oracle_id\":\"a\",\"name\":\"n\",\"type_line\":\"Creature\","
+                       "\"games\":[\"paper\",\"arena\",\"mtgo\"],"
+                       "\"prices\":{\"usd\":\"12.00\",\"tix\":\"0.05\"}}";
+    mf_printing p;
+    MF_EQ_INT(read_for(both, MF_GAME_PAPER, &p), MF_SCRY_OK);
+    MF_CHECK(p.has_price);
+    MF_EQ_INT(p.price_cents, 1200);
+
+    MF_EQ_INT(read_for(both, MF_GAME_MTGO, &p), MF_SCRY_OK);
+    MF_CHECK(p.has_price);
+    MF_EQ_INT(p.price_cents, 5);
+
+    MF_EQ_INT(read_for(both, MF_GAME_ARENA, &p), MF_SCRY_OK);
+    MF_CHECK(!p.has_price);
+    MF_EQ_INT(p.price_cents, 0);
 }
 
 MF_TEST(a_foil_only_printing_has_no_price) {
@@ -255,7 +287,8 @@ void run_scryfall_tests(void) {
     MF_RUN_A(colour_identity_comes_from_the_letters_not_the_mana_cost);
     MF_RUN_A(a_double_faced_card_takes_its_cost_from_the_front_face);
     MF_RUN_A(a_card_with_no_cost_anywhere_is_still_a_card);
-    MF_RUN_A(a_digital_only_printing_is_read_and_marked_as_such);
+    MF_RUN_A(availability_is_decided_by_the_game_that_was_asked_for);
+    MF_RUN_A(each_game_is_priced_in_its_own_currency);
     MF_RUN_A(a_foil_only_printing_has_no_price);
     MF_RUN_A(anything_but_legal_is_not_legal);
     MF_RUN_A(an_absent_legalities_block_is_not_legal);

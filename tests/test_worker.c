@@ -94,6 +94,16 @@ MF_TEST(the_unimplemented_subcommands_fail_rather_than_pretending) {
     remove(PATH);
 }
 
+MF_TEST(preprocess_without_a_game_is_a_usage_error) {
+    /* There is no default, on purpose: paper, Arena and Magic Online are
+       different card pools, so picking one silently would answer a question
+       that belongs to whoever is building the table. */
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_USAGE);
+    remove(PATH);
+}
+
 MF_TEST(preprocess_without_a_bulk_file_is_a_usage_error_not_a_failure) {
     /* It consumes a file and does not fetch one, so "you did not say which"
        is a mistake in the command line rather than something that went wrong
@@ -108,6 +118,7 @@ MF_TEST(preprocess_reads_a_bulk_file_and_writes_a_card_table) {
     remove(PATH);
     mf_config c = worker_cfg(4u << 20);
     snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    c.game = MF_GAME_PAPER;
     snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.jsonl");
 
     MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_OK);
@@ -115,7 +126,8 @@ MF_TEST(preprocess_reads_a_bulk_file_and_writes_a_card_table) {
     char *run = mf_mem_read_file(A, PATH, NULL);
     MF_CHECK(strstr(run, "\"record\":\"preprocess\"") != NULL);
     MF_CHECK(strstr(run, "\"cards\":6") != NULL);
-    MF_CHECK(strstr(run, "\"non_paper\":2") != NULL);
+    MF_CHECK(strstr(run, "\"other_games\":2") != NULL);
+    MF_CHECK(strstr(run, "\"game\":\"paper\"") != NULL);
     MF_CHECK(strstr(run, "\"no_oracle_id\":1") != NULL);
 
     char *table = mf_mem_read_file(A, "build/test-worker-cards.jsonl", NULL);
@@ -130,6 +142,7 @@ MF_TEST(a_bulk_file_that_is_not_there_is_a_plain_failure) {
     /* A path the user typed wrongly is theirs to fix. */
     mf_config c = worker_cfg(4u << 20);
     snprintf(c.bulk_path, sizeof c.bulk_path, "build/definitely-no-such-bulk.json");
+    c.game = MF_GAME_PAPER;
     MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_FAILURE);
     remove(PATH);
 }
@@ -137,6 +150,7 @@ MF_TEST(a_bulk_file_that_is_not_there_is_a_plain_failure) {
 MF_TEST(a_card_table_that_cannot_be_written_stops_the_run) {
     mf_config c = worker_cfg(4u << 20);
     snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    c.game = MF_GAME_PAPER;
     snprintf(c.card_table_path, sizeof c.card_table_path, "build/no/such/dir/cards.jsonl");
     MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_FAILURE);
     remove(PATH);
@@ -154,6 +168,7 @@ MF_TEST(a_truncated_bulk_file_is_not_a_smaller_card_table) {
 
     mf_config c = worker_cfg(4u << 20);
     snprintf(c.bulk_path, sizeof c.bulk_path, "%s", cut);
+    c.game = MF_GAME_PAPER;
     snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cut-cards.jsonl");
     MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_FAILURE);
 
@@ -234,6 +249,7 @@ void run_worker_tests(void) {
     MF_RUN_A(validate_exercises_the_memory_layer_and_records_what_it_used);
     MF_RUN_A(validate_exercises_both_pool_disciplines);
     MF_RUN_A(the_unimplemented_subcommands_fail_rather_than_pretending);
+    MF_RUN_A(preprocess_without_a_game_is_a_usage_error);
     MF_RUN_A(preprocess_without_a_bulk_file_is_a_usage_error_not_a_failure);
     MF_RUN_A(preprocess_reads_a_bulk_file_and_writes_a_card_table);
     MF_RUN_A(a_bulk_file_that_is_not_there_is_a_plain_failure);

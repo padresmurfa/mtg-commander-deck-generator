@@ -30,7 +30,14 @@ typedef enum {
 const char *mf_scry_reject_name(mf_scry_reject r);
 
 /* Strings the printing keeps are copied into `a`, which must outlive the card
-   set — the element frame they arrived in does not. */
-mf_scry_reject mf_scryfall_printing(mf_arena *a, const mf_json *obj, mf_printing *out);
+   set — the element frame they arrived in does not.
+
+   `game` decides two things, not one: whether the printing counts at all, and
+   which price field is its price. `usd` is a paper price; Magic Online is
+   quoted in event tickets under `tix`; Arena has no economy Scryfall prices, so
+   an Arena table is priceless by construction and 1.3's imputation will have
+   nothing to work from. */
+mf_scry_reject mf_scryfall_printing(mf_arena *a, const mf_json *obj, mf_game game,
+                                    mf_printing *out);
 
 #endif

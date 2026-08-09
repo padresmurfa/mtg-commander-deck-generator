@@ -50,6 +50,11 @@ int main(int argc, char **argv) {
     if (cli.bulk_path) {
         snprintf(cfg.bulk_path, sizeof cfg.bulk_path, "%s", cli.bulk_path);
     }
+    if (cli.game) {
+        /* An unrecognised value leaves the game unset, which the worker reports
+           as the usage error it is. The orchestrator has already rejected it. */
+        cfg.game = mf_game_parse(cli.game);
+    }
 
     int rc = mf_worker_run(root, &cfg, cli.cmd, NULL);
     mf_arena_destroy(root);

@@ -62,7 +62,19 @@ static const char *mana_cost_of(const mf_json *obj) {
     return cost ? cost : face_member(obj, "mana_cost");
 }
 
-mf_scry_reject mf_scryfall_printing(mf_arena *a, const mf_json *obj, mf_printing *out) {
+/* Paper is quoted in dollars, Magic Online in event tickets, and Arena not at
+   all — its cards cannot be bought or sold. Using `usd` for an Arena table
+   would attach a paper price to a card no paper buyer can obtain. */
+static const char *price_field(mf_game game) {
+    switch (game) {
+    case MF_GAME_PAPER: return "usd";
+    case MF_GAME_MTGO: return "tix";
+    default: return NULL;
+    }
+}
+
+mf_scry_reject mf_scryfall_printing(mf_arena *a, const mf_json *obj, mf_game game,
+                                    mf_printing *out) {
     memset(out, 0, sizeof *out);
     if (mf_json_type_of(obj) != MF_JSON_OBJECT) return MF_SCRY_NOT_AN_OBJECT;
 
@@ -102,15 +114,18 @@ mf_scry_reject mf_scryfall_printing(mf_arena *a, const mf_json *obj, mf_printing
         out->cmc = (uint8_t)v;
     }
 
-    out->paper = array_contains(games, "paper");
+    out->available = array_contains(games, mf_game_name(game));
     out->commander_legal = false;
     const char *legal = str_member(mf_json_member(obj, "legalities"), "commander");
     if (legal && strcmp(legal, "legal") == 0) out->commander_legal = true;
 
-    /* `usd` is the non-foil paper price. `usd_foil` and `usd_etched` are
-       deliberately not read: a foil is a printing nobody has to buy. */
-    const char *usd = str_member(mf_json_member(obj, "prices"), "usd");
-    if (usd) out->has_price = mf_price_cents(usd, &out->price_cents);
+    /* The non-foil price only. `usd_foil` and `usd_etched` are deliberately not
+       read: a foil is a printing nobody has to buy. */
+    const char *field = price_field(game);
+    if (field) {
+        const char *quoted = str_member(mf_json_member(obj, "prices"), field);
+        if (quoted) out->has_price = mf_price_cents(quoted, &out->price_cents);
+    }
 
     return MF_SCRY_OK;
 }

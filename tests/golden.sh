@@ -55,13 +55,13 @@ cat > "$WORK/pre.json" <<EOF
  "arena_bytes":4194304,"seed":7,"persist_growth":false}
 EOF
 
-"$BIN" --no-spawn preprocess --config "$WORK/pre.json" \
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
     --bulk tests/fixtures/bulk-sample.json >/dev/null 2>&1 ||
     fail "the preprocess run did not succeed"
 
 pre=$(grep '"record":"preprocess"' "$WORK/pre.jsonl") || fail "no preprocess record"
 {
-    for field in cards printings non_paper legality_disagreements; do
+    for field in cards printings other_games legality_disagreements; do
         val=$(printf '%s' "$pre" | sed -n "s/.*\"$field\":\([0-9-]*\).*/\1/p")
         [ -n "$val" ] || fail "the preprocess record has no '$field'"
         echo "cards.$field $val"
