@@ -695,6 +695,61 @@ gauntlet:
   coevolution_note: More robust but a moving fitness target and much harder debugging. Start fixed.
 
 # ---------------------------------------------------------------------------
+# Preprocessing. Runs weekly, not per evaluation.
+# ---------------------------------------------------------------------------
+preprocessing:
+  ref: "8"
+  added: sprint 1.1
+  language: c
+  language_rationale: >
+    Design §8 originally specified Node, because a Node app existed around the project. Sprint 0.1
+    replaced it with a C CLI, so the only argument for a second toolchain went with it. A second
+    toolchain is a second thing to install, pin and keep deterministic.
+  acquisition:
+    fetches: false
+    rationale: >
+      The card table is an input to a deterministic core, so a subcommand that downloaded would be
+      a subcommand whose output depended on the day it ran. Fetching is one documented command run
+      outside the tool.
+    invocation: "mfsim preprocess --bulk <file>"
+    source: "Scryfall default-cards bulk export"
+  reading:
+    strategy: one top-level array element at a time
+    rationale: >
+      The bulk export is one JSON array of ~110,000 printings and several hundred megabytes.
+      Parsing it into a document would cost gigabytes for a result read once, field by field.
+    peak_memory: one card object plus the accumulating card set
+    mechanism: >
+      A buffered, string-aware scanner finds each element's extent; the ordinary parser reads that
+      one element into a stack frame, which is popped once the fields are out.
+  oracle_normalisation:
+    key: oracle_id
+    rule: printings are never entities
+    price:
+      unit: integer cents
+      unit_rationale: >
+        Prices arrive as decimal strings. Cents are exact, order-independent to sum, and sidestep
+        float comparison in a pipeline whose whole point is bit-identical output.
+      minimum_over: paper-legal non-foil printings
+      absent: left absent and flagged; imputation is sprint 1.3, not a guess here
+    colour_identity: union across printings
+    commander_legality:
+      rule: legal if any paper printing says legal
+      disagreement: counted and reported in the run artifact, never silently resolved
+      rationale: >
+        Scryfall reports legality per printing but it is a property of the oracle card, so a
+        disagreement is a stale record rather than a real distinction. Being permissive is the
+        lower-risk error while G1 is a coverage question.
+  emission:
+    order: ascending oracle_id
+    order_rationale: >
+      Input order must not reach the output. Sorting on a unique key gives a total order whatever
+      the sort algorithm does.
+    format_now: JSONL, inspectable
+    format_later: flat binary card table (sprint 1.3)
+    digest: the set is fed to the preprocess digest layer — the first real data through the harness
+
+# ---------------------------------------------------------------------------
 # Data schemas.
 # ---------------------------------------------------------------------------
 schemas:

@@ -13,6 +13,7 @@ int main(void) {
     run_trial_tests();
     run_mem_tests();
     run_json_tests();
+    run_jstream_tests();
     run_config_tests();
     run_artifact_tests();
     run_cli_tests();

@@ -408,25 +408,77 @@ tasks:
     E0 is finished and the determinism harness has nothing but a stand-in to measure. This is the
     first sprint that produces something real, and G1 in 1.2 cannot be asked until there is a real
     card pool to ask it about.
-  task_split_deferred_until:
-    reason: >
-      Two open decisions change what the tasks are. Splitting before they are answered would be the
-      speculative planning the update contract forbids.
-    blockers: [preprocessing_language, fetch_or_consume]
-  open_decisions:
+  decisions:
     - id: preprocessing_language
-      question: Does preprocessing run in C or in Node?
-      conflict: >
-        simulator-design.md §8 says "a Node stage, run weekly", written when a Node app surrounded
-        the project. CLAUDE.md §6 says the acquisition logic is ported in E1 and the reference tree
-        deleted afterwards. Both cannot be right; §8 changes either way.
-      recommendation: >
-        C — a second toolchain is a second thing to install, version and keep deterministic.
+      decided: c
+      why: >
+        A second toolchain is a second thing to install, pin and keep deterministic. The only
+        argument for Node was that a Node app existed around the project; sprint 0.1 removed it.
+        Design §8 amended in the same change, with the superseded paragraph quoted rather than
+        rewritten.
     - id: fetch_or_consume
-      question: "Does `mfsim preprocess` download the bulk file or consume a local one?"
-      recommendation: >
-        Consume. The card table is an input to a deterministic core, so a subcommand that downloads
-        is a subcommand whose output depends on the day it ran.
+      decided: consume
+      why: >
+        The card table is an input to a deterministic core, so a subcommand that downloaded would
+        condition the determinism invariant on the network and on the day it ran.
+      invocation: "mfsim preprocess --bulk <file>"
+    - id: reading_strategy
+      decided: stream one array element at a time
+      why: >
+        ~110,000 printings and several hundred megabytes. A parsed document would cost gigabytes
+        for a result read once, field by field, and discarded.
+    - id: price_representation
+      decided: integer cents
+      why: exact, order-independent to sum, and no float comparison in a bit-identical pipeline
+    - id: legality_disagreement
+      decided: legal if any paper printing says so; count the disagreements
+      why: >
+        Legality is a property of the oracle card, so a disagreement is a stale record rather than
+        a real distinction. The count goes in the run artifact so a non-zero one is noticed.
+  list:
+    - id: T0
+      name: Apply the two decisions to the design of record
+      done_when: [design §8 and a new spec preprocessing block agree with each other and with the build]
+      note: First, not last — every task below contradicted §8 as it stood.
+    - id: T1
+      name: "mf/jstream: one value at a time out of a huge array"
+      done_when:
+        - the arena high-water mark is bounded by the largest element, not by the file
+        - braces, brackets and escaped quotes inside strings do not confuse the scanner
+        - a truncated array is an mf_err, not a crash
+        - an element larger than the buffer still works
+    - id: T2
+      name: "mf/scryfall: one bulk object to one printing"
+      done_when:
+        - every field is read, and a missing or wrongly-typed field rejects the printing with a reason
+        - the module has no opinion about merging
+    - id: T3
+      name: "mf/cards: the merge rules"
+      done_when:
+        - every rule has a test that fails when the rule is inverted
+        - an oracle with no priced printing is flagged rather than priced at zero
+        - the merge is testable without any JSON
+    - id: T4
+      name: "Normalisation: mana pips, type bitmask, CMC"
+      done_when:
+        - hybrid, Phyrexian, X and colourless pips are each a decided case with a test
+        - a type line with a subtype section parses the same as one without
+    - id: T5
+      name: Deterministic emission and content hash
+      done_when:
+        - shuffling the input order leaves the output and the digest byte-identical
+        - the golden file gains a row
+    - id: T6
+      name: "mfsim preprocess --bulk, end to end"
+      done_when:
+        - a fixture with the awkward cases runs end to end in a real process
+        - a missing --bulk is a usage error rather than a crash
+    - id: T7
+      name: Retro and amendments
+      done_when: [retro filed, design and spec amended in the same change, status advanced]
+      note: >
+        Deleting reference/legacy-ts/ belongs to the E1 retro, not this one — EDHREC and Tagger are
+        still unported.
   input_from_previous_retro:
     - >
       The determinism harness is calibrated but unproven — the six-way matrix runs against mf/trial,

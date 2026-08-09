@@ -106,6 +106,7 @@ void run_rng_tests(void);
 void run_digest_tests(void);
 void run_reduce_tests(void);
 void run_trial_tests(void);
+void run_jstream_tests(void);
 void run_panic_tests(void);
 void run_arena_tests(void);
 void run_pool_tests(void);

@@ -494,12 +494,50 @@ that alone cuts the pool substantially. Anything surviving those stays in play h
 
 ## 8. Preprocessing
 
-A Node stage, run weekly, not per evaluation. `docker/data-sync/*.mjs` is already this shape and
-the EDHREC / Scryfall / Tagger clients are the only source of card data — **this layer survives the
-strip-down.** The React app does not.
+*(Amended sprint 1.1. This section said "a Node stage, run weekly, and `docker/data-sync/*.mjs` is
+already this shape — this layer survives the strip-down." It did not survive: sprint 0.1 replaced the
+Node app with a C CLI, and the acquisition logic is ported rather than kept. The paragraph is
+recorded here rather than quietly rewritten, because a design of record that reads as though it
+always said this is worse than one that says what changed.)*
+
+**In C, in the same binary, run weekly rather than per evaluation.** A second toolchain is a second
+thing to install, pin, and keep deterministic, and the only argument for Node was that a Node app
+already existed. `reference/legacy-ts/services` is read-only reference for the field semantics and
+nothing else; it is deleted at the E1 retro.
 
 Emits a flat binary card table plus a class table, fixed-size records, no strings, consumed directly
 by the C core.
+
+### Acquisition is not preprocessing
+
+**`mfsim preprocess` consumes a bulk file; it does not fetch one.** The card table is an *input* to a
+deterministic core — `same seed + config + card table ⇒ bit-identical output` (§17) — so a
+subcommand that downloaded would be a subcommand whose output depended on the day it ran, and the
+invariant would be quietly conditioned on the network.
+
+Fetching is one documented command, run deliberately, outside the tool:
+
+```
+curl -sL "$(curl -s https://api.scryfall.com/bulk-data/default-cards | ...download_uri)" \
+  -o data/scryfall-default-cards.json
+mfsim preprocess --bulk data/scryfall-default-cards.json
+```
+
+The bulk file is date-stamped and content-hashed with everything else, so which snapshot produced a
+run is a property of the artifact rather than of anyone's memory.
+
+### The bulk file does not fit in an arena
+
+Scryfall's `default-cards` export is one JSON array of roughly 110,000 printings and several hundred
+megabytes. Parsing it into a document would cost several gigabytes for a result that is read once,
+field by field, and thrown away.
+
+So it is read **one element at a time**: a buffered, string-aware scanner finds each top-level array
+element's extent, hands that one element's text to the ordinary parser in a stack frame, and pops
+the frame when the fields have been extracted. Peak memory is one card object — a few kilobytes —
+plus the accumulating card set. This is exactly the shape arenas and `mf_arena_push`/`pop` exist
+for, and it means the preprocessing stage's memory is a function of the *output* size rather than
+the input's.
 
 ### Cards are oracle_ids, never printings
 
