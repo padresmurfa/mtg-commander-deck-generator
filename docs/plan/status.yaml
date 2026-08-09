@@ -1,0 +1,429 @@
+# Deck simulator & optimiser — implementation plan, machine-readable
+#
+# Companion to docs/simulator-plan.md (narrative). This file is the living status
+# skeleton: epics, sprints, gates, and the task split of the CURRENT sprint only.
+#
+# Update contract:
+#   - epics/sprints: fixed up front; `status` changes, structure does not
+#   - `current_sprint`: advanced at each retro
+#   - `tasks`: replaced wholesale at each sprint planning; only ever the current sprint
+#   - `retros`: appended at each retro; never edited in place
+#
+# See docs/simulator-design.md for reasoning, docs/simulator-spec.yaml for values.
+
+meta:
+  status: in_progress
+  current_sprint: "0.2"
+  task_split_valid_for: "0.2"     # task-splitting any other sprint is speculative
+  baseline: greenfield
+  language: c
+  deliverable: cli
+
+# ---------------------------------------------------------------------------
+# What survives from the existing TypeScript app. Reference only, not a foundation.
+# ---------------------------------------------------------------------------
+baseline_disposition:
+  keep_as_reference:
+    - path: src/services/scryfall/
+      why: acquisition logic ported in E1
+    - path: src/services/edhrec/
+      why: acquisition logic ported in E1
+    - path: src/services/tagger/
+      why: role tags feed skill floors (spec ref 7.4)
+    - path: src/services/deckBuilder/deckAnalyzer.ts
+      why: hypergeometric functions are the analytic validation oracle (spec ref 13.1)
+  delete:
+    - src/components/
+    - src/pages/
+    - src/store/
+    - infra/
+  not_part_of_project:
+    - docker/mock-api/
+    - docker-compose.yml MSSQL services
+  note: Git history preserves everything; deletion is safe.
+
+# ---------------------------------------------------------------------------
+# Process. Three levels, asymmetric detail by design.
+# ---------------------------------------------------------------------------
+process:
+  levels:
+    epics:
+      decided: up_front
+      mutable: false
+      detail: goal + sprint split
+    sprints:
+      decided: up_front
+      detail: goal + exit criteria
+      tasks_included: false
+    tasks:
+      decided: at_sprint_start
+      detail: full split, each with a checkable definition of done
+      rule: only the current sprint is ever task-split
+      why: >
+        Task-splitting a future sprint is speculative work that the intervening retro
+        would invalidate.
+  cycle: [sprint_planning, implementation, retro]
+  sprint_planning:
+    inputs: [sprint_exit_criteria, previous_retro_output]
+    output: task list with checkable definitions of done
+  retro:
+    outputs:
+      - id: delivered_vs_exit_criteria
+        note: Includes what was NOT delivered, explicitly.
+      - id: design_amendments
+        note: >
+          Where reality contradicted simulator-design.md or simulator-spec.yaml, both are
+          corrected in the same pass. A design of record that drifts is worse than none.
+      - id: revised_risks
+        note: What got scarier, what stopped mattering.
+      - id: carry_over
+        note: Work moving into the next sprint, with the reason.
+    feeds: next_sprint_planning
+
+# ---------------------------------------------------------------------------
+# Go/no-go gates. Placed as early as the dependency graph allows.
+# ---------------------------------------------------------------------------
+gates:
+  - id: G1
+    sprint: "1.2"
+    name: opcode_coverage
+    question: Can the opcode set represent enough of a real candidate pool?
+    threshold: ">= 0.60 sound; <= 0.30 compromised"
+    spec_ref: "13.5"
+    on_failure: grow the opcode set, or stop
+  - id: G2
+    sprint: "2.1"
+    name: analytic_agreement
+    question: Does the sampler converge to closed-form hypergeometric truth?
+    spec_ref: "13.1"
+    on_failure: the simulation core is wrong; fix before anything builds on it
+  - id: G3
+    sprint: "2.3"
+    name: policy_gap_discriminates
+    question: Does naive-vs-careful separate known-forgiving from known-demanding decks?
+    spec_ref: "5"
+    on_failure: the skill ladder is unfounded; redesign section 5
+  - id: G4
+    sprint: "3.3"
+    name: precon_rank_correlation
+    question: Does the objective rank real decks in the right order?
+    method: spearman on precons with n >= 100
+    spec_ref: "13.2"
+    on_failure: the objective is wrong; redesign section 3
+  - id: G5
+    sprint: "4.3"
+    name: ga_beats_greedy
+    question: Is the landscape optimisable by population methods?
+    threshold: margin exceeding the GA's own noise
+    spec_ref: "12"
+    on_failure: ship greedy; drop the GA
+
+# ---------------------------------------------------------------------------
+# Epics. Fixed. Sprint-split, not task-split.
+# ---------------------------------------------------------------------------
+epics:
+  - id: E0
+    name: Foundations
+    status: active
+    note: >
+      Determinism is built before there is anything to be deterministic about, deliberately.
+      Retrofitting means auditing every accumulator written in the meantime.
+    sprints:
+      - id: "0.1"
+        name: Greenfield skeleton
+        status: done
+        retro: docs/plan/retros/0.1-greenfield-skeleton.md
+        result:
+          checks: 1409
+          line_coverage: 100.00
+          branch_coverage: 97.14
+          function_coverage: 100.00
+        exit_criteria:
+          - repo reset to greenfield
+          - make builds a binary
+          - subcommand shell dispatches
+          - config loads
+          - JSONL artifact writes
+          - one test passes under make test
+      - id: "0.2"
+        name: Determinism harness
+        status: active
+        tasks_doc: docs/plan/sprints/0.2-determinism-harness.md
+        exit_criteria:
+          - counter-based RNG
+          - layered digest emission
+          - golden-file comparison
+          - 6-way matrix (threads x fresh/resumed) passes on a trivial workload
+
+  - id: E1
+    name: Card pipeline
+    status: not_started
+    subcommand: preprocess
+    sprints:
+      - id: "1.1"
+        name: Acquisition & oracle normalisation
+        status: not_started
+        exit_criteria:
+          - Scryfall bulk ingested
+          - grouped by oracle_id
+          - min price across paper non-foil printings
+          - legality and colour identity resolved
+      - id: "1.2"
+        name: Opcode model
+        status: not_started
+        gate: G1
+        exit_criteria:
+          - card struct <= 32 bytes
+          - oracle text mapped to opcodes for the modelled subset
+          - coverage measured on a real commander's pool
+      - id: "1.3"
+        name: Classes, dominance, enrichment
+        status: not_started
+        exit_criteria:
+          - equivalence classes
+          - dominance chains merged into tiered classes
+          - skill floors assigned
+          - precon membership bitmask
+          - price imputation via dominance
+          - binary card table emitted with content hash
+
+  - id: E2
+    name: Opening phase
+    status: not_started
+    sprints:
+      - id: "2.1"
+        name: Shuffle, draw, mulligan
+        status: not_started
+        gate: G2
+        exit_criteria:
+          - unbiased Fisher-Yates
+          - London mulligan with per-policy keep and bottom rules
+          - Monte Carlo agrees with hypergeometric closed forms
+      - id: "2.2"
+        name: Exact turns 1-4
+        status: not_started
+        exit_criteria:
+          - land drops, mana availability, castability, sequencing
+          - end-of-phase state vector produced
+      - id: "2.3"
+        name: Policies & policy gap
+        status: not_started
+        gate: G3
+        exit_criteria:
+          - greedy and careful policies implemented
+          - gap measured
+          - known-forgiving and known-demanding decks separate
+
+  - id: E3
+    name: Solo evaluation
+    status: not_started
+    sprints:
+      - id: "3.1"
+        name: Aggregate phases 5+
+        status: not_started
+        exit_criteria:
+          - development and execution phases in aggregate
+          - full solo run produces a phase-end state
+      - id: "3.2"
+        name: Objective & sampling
+        status: not_started
+        exit_criteria:
+          - per-strategy scalarisation
+          - "mean + lambda * CVaR_10"
+          - stratified openers under Neyman allocation
+          - solo gate wired as pass/fail
+      - id: "3.3"
+        name: Fixture validation
+        status: not_started
+        gate: G4
+        exit_criteria:
+          - precon tables transcribed
+          - Spearman rank correlation above threshold on n>=100 precons
+          - synthetic known-bad decks ranked correctly
+
+  - id: E4
+    name: Search
+    status: not_started
+    note: >
+      Built against SOLO fitness deliberately — it is 10-100x faster than gauntlet fitness, so
+      the search machinery is derisked on a cheap objective. Swapping in gauntlet fitness later
+      is a fitness change, not a search rewrite.
+    sprints:
+      - id: "4.1"
+        name: Genome, constraints, mana solver
+        status: not_started
+        exit_criteria:
+          - integer vector over metacard classes
+          - singleton/multiplicity/cost constraints enforced
+          - Karsten-based mana base solver replaces land search
+      - id: "4.2"
+        name: Greedy baseline
+        status: not_started
+        exit_criteria:
+          - marginal-contribution forward selection
+          - backward elimination
+          - produces a legal, scored deck
+      - id: "4.3"
+        name: Genetic algorithm
+        status: not_started
+        gate: G5
+        exit_criteria:
+          - package-aware crossover over synergy-graph components
+          - elite re-evaluation with fresh seeds
+          - diversity niching by strategy
+          - racing and adaptive sampling
+          - GA beats greedy by a margin exceeding its own noise
+
+  - id: E5
+    name: Two-player
+    status: not_started
+    sprints:
+      - id: "5.1"
+        name: Gauntlet & matchups
+        status: not_started
+        exit_criteria:
+          - opponent decks generated per archetype
+          - matchups banded to same-bracket +/- 1
+          - common random numbers applied across the gauntlet
+      - id: "5.2"
+        name: Bracket-relative fitness & holdout
+        status: not_started
+        exit_criteria:
+          - train/test gauntlet split
+          - overfitting visible as train-test divergence
+          - fitness marked bracket-scoped so nothing averages across brackets
+
+  - id: E6
+    name: Operations & scale
+    status: not_started
+    note: Deferred until runs are long enough to need it.
+    sprints:
+      - id: "6.1"
+        name: Threading
+        status: not_started
+        exit_criteria:
+          - thread pool with configurable count
+          - QoS set to USER_INITIATED
+          - per-thread arenas
+          - lock-free per-game path verified
+          - determinism matrix passes at 1/4/8 threads
+      - id: "6.2"
+        name: Checkpoint & resume
+        status: not_started
+        exit_criteria:
+          - atomic write/retain/restore
+          - card-table hash validated on resume
+          - SIGINT/SIGTERM checkpoint cleanly
+          - resumed run bit-identical to uninterrupted
+      - id: "6.3"
+        name: Power & performance
+        status: not_started
+        exit_criteria:
+          - sleep assertion held for run duration
+          - LPM detect/pause/backoff
+          - SoA layout for per-game mutable state
+          - hot working set measured L1-resident
+          - syscalls per generation confirmed O(1)
+
+  - id: E7
+    name: Brackets & close
+    status: not_started
+    sprints:
+      - id: "7.1"
+        name: Skill brackets end-to-end
+        status: not_started
+        exit_criteria:
+          - all five policy sets
+          - per-bracket colour, radius, budget bounds
+          - precon seeding for low brackets
+          - per-bracket output selection and cardinality
+      - id: "7.2"
+        name: Forge validation & docs
+        status: not_started
+        exit_criteria:
+          - top-K decks validated against Forge (optional)
+          - full validation suite consolidated
+          - docs current
+
+# ---------------------------------------------------------------------------
+# CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
+# ---------------------------------------------------------------------------
+tasks:
+  sprint: "0.2"
+  doc: docs/plan/sprints/0.2-determinism-harness.md
+  goal: >
+    Counter-based RNG, layered output digests, and the golden-file regression harness, with the
+    6-way determinism matrix passing on a trivial workload. No simulation yet.
+  why_now: >
+    Determinism is built before there is anything to be deterministic about. Retrofitting means
+    auditing every accumulator written in the meantime, and the reduction-order bug it guards
+    against is silent — low-bit drift nobody notices until a result cannot be reproduced.
+  list:
+    - id: T1
+      name: Counter-based RNG (mf/rng)
+      done_when: [known-answer vectors pass, same (seed,stream,n) yields same value regardless of call order]
+    - id: T2
+      name: Unbiased bounded draw
+      done_when: [rejection sampling not modulo, chi-square shows no bias, rejection branch covered]
+    - id: T3
+      name: Fisher-Yates shuffle
+      done_when: [all 120 orderings of a 5-element deck within tolerance, same seed same permutation]
+    - id: T4
+      name: Digest primitive
+      done_when: [known-answer vectors pass, incremental hashing matches one-shot]
+    - id: T5
+      name: Layered digest emission
+      done_when: [arrival order does not change the digest, changing a value changes exactly one layer]
+    - id: T6
+      name: Deterministic reduction helper
+      done_when: [out-of-order submission reduces identically to in-order]
+    - id: T7
+      name: Golden-file harness
+      done_when: [deliberate change fails with a readable diff, make golden updates it]
+    - id: T8
+      name: Trivial deterministic workload
+      done_when: ["mfsim validate runs it and emits all five digests"]
+    - id: T9
+      name: The 6-way determinism matrix
+      done_when: [threads 1/4/8 x fresh/resumed produce byte-identical digests, run by make check]
+      note: >
+        Threading lands in 6.1; the thread axis here uses simulated work partitioning. The point is
+        that the digest is invariant to partition order, which is where the bug would be.
+    - id: T10
+      name: Decide CI
+      done_when: [decision and reason recorded in the sprint doc and the retro]
+
+  input_from_previous_retro:
+    - The allocation-seam pattern generalises — apply it to digest and checkpoint I/O rather than
+      discovering the gap at the coverage gate.
+    - _FORTIFY_SOURCE folded branches cap achievable branch coverage below 100%. Do not chase it.
+    - The CI decision is due this sprint; the digest check is now something CI could enforce.
+
+  open_decisions:
+    - id: ci
+      question: GitHub Actions running `make check`, or local-only?
+      status: due_this_sprint
+      carried_from: "0.1"
+      why_carried: The thing CI would enforce (output digests) did not exist until now.
+      blocks: []
+    - id: digest_algorithm
+      question: Which 128-bit non-cryptographic hash?
+      constraint: stable, fast, no dependency, written in-tree
+      candidates: [xxHash128, SplitMix-based construction]
+
+  not_in_this_sprint:
+    items: [real threading, real checkpointing]
+    note: >
+      Threading is 6.1 and checkpointing is 6.2. The "resumed" axis here replays a serialised
+      counter — the part determinism depends on — not the full checkpoint schema.
+
+retros:
+  - sprint: "0.1"
+    doc: docs/plan/retros/0.1-greenfield-skeleton.md
+    gates: []
+    design_amendments: 4
+    headline: >
+      The coverage floor changed the design rather than merely measuring it: OOM branches no test
+      could reach forced an allocation seam, which turned into a standing OOM sweep. Branch
+      coverage 84% -> 92% from that alone.
+    carry_over: [ci_decision]

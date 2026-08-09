@@ -1,0 +1,67 @@
+#ifndef MF_TEST_HARNESS_H
+#define MF_TEST_HARNESS_H
+
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+
+/* Minimal test runner. In-tree rather than vendored for the same reason as the
+   JSON module: no dependency is worth adding for sixty lines. Test files expose
+   run_<module>_tests(); tests/main.c calls them and reports. */
+
+extern int mf_t_pass, mf_t_fail;
+extern const char *mf_t_current;
+
+#define MF_TEST(name) static void name(void)
+
+#define MF_RUN(fn)              \
+    do {                        \
+        mf_t_current = #fn;     \
+        fn();                   \
+    } while (0)
+
+#define MF_FAILED(fmt, ...)                                                       \
+    do {                                                                          \
+        mf_t_fail++;                                                              \
+        fprintf(stderr, "  FAIL %s (%s:%d): " fmt "\n", mf_t_current, __FILE__,   \
+                __LINE__, __VA_ARGS__);                                           \
+        return;                                                                   \
+    } while (0)
+
+#define MF_CHECK(cond)                                    \
+    do {                                                  \
+        if (!(cond)) MF_FAILED("%s", #cond);              \
+        mf_t_pass++;                                      \
+    } while (0)
+
+#define MF_EQ_INT(a, b)                                                     \
+    do {                                                                    \
+        long long a_ = (long long)(a), b_ = (long long)(b);                 \
+        if (a_ != b_) MF_FAILED("%s == %s (%lld vs %lld)", #a, #b, a_, b_); \
+        mf_t_pass++;                                                        \
+    } while (0)
+
+#define MF_EQ_DBL(a, b)                                                       \
+    do {                                                                      \
+        double a_ = (double)(a), b_ = (double)(b);                            \
+        if (fabs(a_ - b_) > 1e-9) MF_FAILED("%s == %s (%g vs %g)", #a, #b, a_, b_); \
+        mf_t_pass++;                                                          \
+    } while (0)
+
+#define MF_EQ_STR(a, b)                                                    \
+    do {                                                                   \
+        const char *a_ = (a), *b_ = (b);                                   \
+        if (a_ == NULL || b_ == NULL || strcmp(a_, b_) != 0)               \
+            MF_FAILED("%s == %s (\"%s\" vs \"%s\")", #a, #b,               \
+                      a_ ? a_ : "(null)", b_ ? b_ : "(null)");             \
+        mf_t_pass++;                                                       \
+    } while (0)
+
+void run_err_tests(void);
+void run_alloc_tests(void);
+void run_json_tests(void);
+void run_config_tests(void);
+void run_artifact_tests(void);
+void run_cli_tests(void);
+
+#endif
