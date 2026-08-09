@@ -340,6 +340,81 @@ MF_TEST(text_that_is_not_text_is_survivable) {
     MF_EQ_INT(t.clauses, 1);
 }
 
+/* ---- what the mana actually is ------------------------------------------- */
+
+MF_TEST(a_producer_records_which_mana_it_makes) {
+    /* Without this the opcode is "taps for mana" and every land in Magic is one
+       class — which would make the class count this sprint measures a number
+       about nothing. Colour is most of what a land IS. */
+    mf_opcode_scan f = scan("{T}: Add {G}.");
+    MF_EQ_INT(f.produces, MF_MANA_G);
+    MF_EQ_INT(f.produces_max, 1);
+
+    mf_opcode_scan sol = scan("{T}: Add {C}{C}.");
+    MF_EQ_INT(sol.produces, MF_MANA_C);
+    MF_EQ_INT(sol.produces_max, 2);
+
+    mf_opcode_scan ritual = scan("Add {B}{B}{B}.");
+    MF_EQ_INT(ritual.produces, MF_MANA_B);
+    MF_EQ_INT(ritual.produces_max, 3);
+
+    /* A dual makes either, so it carries both bits and still makes one mana. */
+    mf_opcode_scan tundra = scan("{T}: Add {W} or {U}.");
+    MF_EQ_INT(tundra.produces, MF_MANA_W | MF_MANA_U);
+    MF_EQ_INT(tundra.produces_max, 1);
+}
+
+MF_TEST(any_colour_is_every_colour_and_is_not_colourless) {
+    /* Command Tower makes any of five, and specifically cannot make {C} — a
+       five-colour deck's commander tower is not a Wastes. */
+    mf_opcode_scan tower = scan("{T}: Add one mana of any color.");
+    MF_EQ_INT(tower.produces, MF_MANA_W | MF_MANA_U | MF_MANA_B | MF_MANA_R | MF_MANA_G);
+    MF_EQ_INT(tower.produces_max, 1);
+
+    mf_opcode_scan two = scan("Add two mana in any combination of colors.");
+    MF_EQ_INT(two.produces, MF_MANA_W | MF_MANA_U | MF_MANA_B | MF_MANA_R | MF_MANA_G);
+    MF_EQ_INT(two.produces_max, 2);
+}
+
+MF_TEST(mana_a_card_cannot_be_counted_on_for_is_not_counted) {
+    /* An unmatched producer's amount is exactly what the model cannot say, so
+       recording a number here would be inventing one. */
+    mf_opcode_scan v = scan("{T}: Add {G} for each creature you control.");
+    MF_EQ_INT(v.produces, 0);
+    MF_EQ_INT(v.produces_max, 0);
+
+    /* And a card that produces nothing produces nothing. */
+    mf_opcode_scan bear = scan("Vigilance");
+    MF_EQ_INT(bear.produces, 0);
+    MF_EQ_INT(bear.produces_max, 0);
+}
+
+MF_TEST(a_brace_that_is_not_a_colour_adds_no_colour) {
+    /* Real, and rarer than it looks: four printed clauses put a non-colour
+       symbol after the word "add". Generic mana is not a colour and must not
+       fall through to one — a card that reads as producing {W} because its
+       symbol happened to parse would be wrong in the direction that matters. */
+    mf_opcode_scan tk = scan("{TK}{TK} — {T}: Add {2}");
+    MF_EQ_INT(tk.by_op[MF_OP_TAP_FOR_MANA], 1);
+    MF_EQ_INT(tk.produces, 0);
+    /* Nothing countable was named, so the amount falls back to one rather than
+       to nothing: the clause does produce mana, and how much is not the
+       question this field answers. */
+    MF_EQ_INT(tk.produces_max, 1);
+
+    /* And a snow symbol inside the clause is a cost, not a colour. */
+    mf_opcode_scan s = scan("{S}: Add {G}");
+    MF_EQ_INT(s.produces, MF_MANA_G);
+}
+
+MF_TEST(a_card_with_two_mana_abilities_keeps_the_union_and_the_best) {
+    /* The colours are what it can make at all; the amount is the best single
+       activation, not the sum — a land with two abilities still taps once. */
+    mf_opcode_scan s = scan("{T}: Add {W}.\n{T}: Add {U}{U}.");
+    MF_EQ_INT(s.produces, MF_MANA_W | MF_MANA_U);
+    MF_EQ_INT(s.produces_max, 2);
+}
+
 /* ---- the unmatched tail, as data the tool produces ----------------------- */
 
 MF_TEST(the_unmatched_tail_is_collected_by_shape) {
@@ -462,6 +537,11 @@ void run_opcode_tests(void) {
     MF_RUN(one_unmatched_clause_makes_the_whole_card_unrepresentable);
     MF_RUN(every_wording_the_rule_names_is_a_wording_it_was_tested_on);
     MF_RUN(text_that_is_not_text_is_survivable);
+    MF_RUN(a_producer_records_which_mana_it_makes);
+    MF_RUN(any_colour_is_every_colour_and_is_not_colourless);
+    MF_RUN(mana_a_card_cannot_be_counted_on_for_is_not_counted);
+    MF_RUN(a_brace_that_is_not_a_colour_adds_no_colour);
+    MF_RUN(a_card_with_two_mana_abilities_keeps_the_union_and_the_best);
     MF_RUN(the_unmatched_tail_is_collected_by_shape);
     MF_RUN(only_unmatched_clauses_reach_the_report);
     MF_RUN(the_ranking_does_not_depend_on_the_order_cards_arrived_in);

@@ -95,6 +95,13 @@ typedef struct {
     mf_types types;
     uint8_t cmc;
     mf_pips pips;
+    /* Printed power and toughness. Zero for a noncreature, which is the right
+       answer rather than a missing one — nothing asks a Sol Ring how big it is.
+       `pt_variable` marks the ones the model cannot state: "*", "1+*" and the
+       rest are real printed values, and reading them as zero would put
+       Tarmogoyf in a class with the worst creature in Magic. */
+    uint8_t power, toughness;
+    bool pt_variable;
     bool available;       /* published in the game this table is being built for */
     bool commander_legal; /* per this printing; see the merge rule below */
     bool has_price;       /* a price was quoted in this game's currency */
@@ -110,6 +117,8 @@ typedef struct {
     mf_types types;
     uint8_t cmc;
     mf_pips pips;
+    uint8_t power, toughness;
+    bool pt_variable;
     bool commander_legal;
     /* False when no paper printing quoted a non-foil price. Left absent rather
        than guessed: imputation needs the dominance relation, which is sprint

@@ -73,6 +73,22 @@ static const char *price_field(mf_game game) {
     }
 }
 
+/* Scryfall quotes power and toughness as strings, because a great many of them
+   are not numbers: "*", "1+*", "2+*", "∞", "?" are all printed on real cards.
+   A non-numeric value is marked rather than guessed — reading "*" as zero would
+   describe Tarmogoyf as the worst creature in Magic. */
+static bool pt_of(const char *s, uint8_t *out) {
+    if (!s || !*s) return true; /* absent: a noncreature, and zero is correct */
+    uint32_t v = 0;
+    for (const char *p = s; *p; p++) {
+        if (*p < '0' || *p > '9') return false;
+        v = v * 10 + (uint32_t)(*p - '0');
+        if (v > 255) return false; /* nothing printed is this big */
+    }
+    *out = (uint8_t)v;
+    return true;
+}
+
 mf_scry_reject mf_scryfall_printing(mf_arena *a, const mf_json *obj, mf_game game,
                                     mf_printing *out) {
     memset(out, 0, sizeof *out);
@@ -119,6 +135,20 @@ mf_scry_reject mf_scryfall_printing(mf_arena *a, const mf_json *obj, mf_game gam
         if (v < 0) v = 0;
         if (v > 255) v = 255;
         out->cmc = (uint8_t)v;
+    }
+
+    /* On the faces for a transforming card, the same as the cost and the oracle
+       id. Either half being unstatable makes the pair unstatable: a creature
+       whose power is a star is not one this model can size, whatever its
+       toughness says. */
+    const char *power = str_member(obj, "power");
+    if (!power) power = face_member(obj, "power");
+    const char *toughness = str_member(obj, "toughness");
+    if (!toughness) toughness = face_member(obj, "toughness");
+    if (!pt_of(power, &out->power) || !pt_of(toughness, &out->toughness)) {
+        out->pt_variable = true;
+        out->power = 0;
+        out->toughness = 0;
     }
 
     out->available = array_contains(games, mf_game_name(game));

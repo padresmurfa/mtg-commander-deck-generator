@@ -3,6 +3,7 @@
 #include "mf/arena.h"
 #include "mf/scryfall.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static mf_arena *A;
@@ -31,6 +32,61 @@ static mf_scry_reject read_for(const char *text, mf_game game, mf_printing *out)
 
 static mf_scry_reject read(const char *text, mf_printing *out) {
     return read_for(text, MF_GAME_PAPER, out);
+}
+
+MF_TEST(power_and_toughness_are_read_as_numbers_where_they_are_numbers) {
+    /* Without these a 1/1 and a 7/7 with the same cost are the same class,
+       which would be an obviously wrong reduction of the pool. */
+    mf_printing p;
+    MF_EQ_INT(read("{\"oracle_id\":\"a\",\"name\":\"Bear\","
+                   "\"type_line\":\"Creature — Bear\",\"games\":[\"paper\"],"
+                   "\"power\":\"2\",\"toughness\":\"2\"}",
+                   &p),
+              MF_SCRY_OK);
+    MF_EQ_INT(p.power, 2);
+    MF_EQ_INT(p.toughness, 2);
+    MF_CHECK(p.pt_variable == false);
+
+    /* A noncreature has none, and zero is the right answer rather than a
+       missing one — nothing in the model asks a Sol Ring how big it is. */
+    mf_printing ring;
+    MF_EQ_INT(read(WHOLE, &ring), MF_SCRY_OK);
+    MF_EQ_INT(ring.power, 0);
+    MF_EQ_INT(ring.toughness, 0);
+    MF_CHECK(ring.pt_variable == false);
+}
+
+MF_TEST(a_power_that_is_not_a_number_is_marked_rather_than_guessed) {
+    /* "*", "1+*" and "∞" are real printed values. Reading them as zero would
+       make Tarmogoyf a 0/1 and put it in a class with the worst creature in
+       Magic; the honest answer is that this model cannot say. */
+    const char *cases[] = {"*", "1+*", "*+1", "∞", "?"};
+    for (size_t i = 0; i < sizeof cases / sizeof *cases; i++) {
+        char text[256];
+        snprintf(text, sizeof text,
+                 "{\"oracle_id\":\"a\",\"name\":\"Goyf\",\"type_line\":\"Creature\","
+                 "\"games\":[\"paper\"],\"power\":\"%s\",\"toughness\":\"2\"}",
+                 cases[i]);
+        mf_printing p;
+        mf_scry_reject r = read(text, &p);
+        if (r != MF_SCRY_OK || !p.pt_variable) {
+            MF_FAILED("power \"%s\" was not marked variable (reject %d)", cases[i], (int)r);
+        }
+        mf_t_pass++;
+    }
+}
+
+MF_TEST(power_and_toughness_come_off_the_face_when_the_card_has_faces) {
+    /* Same rule as the mana cost and the oracle id: a transforming card carries
+       them only on its faces. */
+    mf_printing p;
+    MF_EQ_INT(read("{\"oracle_id\":\"a\",\"name\":\"Flip\",\"games\":[\"paper\"],"
+                   "\"card_faces\":[{\"type_line\":\"Creature — Werewolf\","
+                   "\"power\":\"3\",\"toughness\":\"4\"}]}",
+                   &p),
+              MF_SCRY_OK);
+    MF_EQ_INT(p.power, 3);
+    MF_EQ_INT(p.toughness, 4);
 }
 
 MF_TEST(every_field_this_sprint_needs_is_read) {
@@ -282,6 +338,9 @@ MF_TEST(every_rejection_has_a_name) {
 void run_scryfall_tests(void) {
     A = mf_arena_create("scryfall-test", 1u << 20);
 
+    MF_RUN_A(power_and_toughness_are_read_as_numbers_where_they_are_numbers);
+    MF_RUN_A(a_power_that_is_not_a_number_is_marked_rather_than_guessed);
+    MF_RUN_A(power_and_toughness_come_off_the_face_when_the_card_has_faces);
     MF_RUN_A(every_field_this_sprint_needs_is_read);
     MF_RUN_A(the_name_outlives_the_document_it_came_from);
     MF_RUN_A(colour_identity_comes_from_the_letters_not_the_mana_cost);

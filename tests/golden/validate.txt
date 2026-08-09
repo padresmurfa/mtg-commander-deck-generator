@@ -11,5 +11,5 @@ cards.cards 6
 cards.printings 8
 cards.other_games 2
 cards.legality_disagreements 1
-cards.digest e9f9e682f7277a8d437a10623a9ad98d
+cards.digest 02756043db62232f974472aac7c48897
 cards.rows 6

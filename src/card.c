@@ -268,6 +268,9 @@ void mf_cardset_add(mf_cardset *s, const mf_printing *p) {
         c->types = p->types;
         c->cmc = p->cmc;
         c->pips = p->pips;
+        c->power = p->power;
+        c->toughness = p->toughness;
+        c->pt_variable = p->pt_variable;
         c->commander_legal = p->commander_legal;
         c->has_price = p->has_price;
         c->price_cents = p->price_cents;
@@ -370,6 +373,9 @@ void mf_cardset_digest(mf_cardset *s, mf_digest *d) {
         mf_digest_u64(d, c->pips.g);
         mf_digest_u64(d, c->pips.colourless);
         mf_digest_u64(d, c->pips.variable);
+        mf_digest_u64(d, c->power);
+        mf_digest_u64(d, c->toughness);
+        mf_digest_u64(d, c->pt_variable);
         mf_digest_u64(d, c->commander_legal);
         mf_digest_u64(d, c->has_price);
         mf_digest_u64(d, c->price_cents);

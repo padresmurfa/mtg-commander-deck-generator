@@ -2,6 +2,7 @@
 
 #include "mf/artifact.h"
 #include "mf/card.h"
+#include "mf/classes.h"
 #include "mf/digest.h"
 #include "mf/json.h"
 #include "mf/panic.h"
@@ -206,6 +207,25 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
         }
     }
 
+    /* The reduction (design §7.1). Classing runs over the pool the optimiser
+       can actually choose from — legal and representable — because §7.9 prunes
+       by both before anything searches, and classing the excluded cards would
+       report a reduction of a pool nobody uses. */
+    mf_card *pool = mf_arena_array(durable, count ? count : 1, sizeof *pool);
+    size_t pool_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        mf_opcode_scan sc;
+        mf_opcode_scan_text(cards[i].oracle_text, &sc);
+        if (cards[i].commander_legal && mf_opcode_representable(&sc)) pool[pool_count++] = cards[i];
+    }
+
+    mf_classset *classes = mf_classes_build(durable, pool, pool_count);
+    size_t classes_raw = mf_classes_count(classes);
+    size_t unpriced_before = mf_classes_unpriced(classes);
+    mf_classes_merge_chains(classes);
+    size_t classes_merged = mf_classes_count(classes);
+    mf_classes_impute_prices(classes);
+
     /* To stdout, not the artifact. This is a document for whoever decides what
        to build next, and the artifact is a record of what a run did — a ranked
        list of 1,700 strings in every run's machine-readable output would be
@@ -285,6 +305,26 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
         mf_jw_int(w, (long long)by_op[op]);
     }
     mf_jw_obj_end(w);
+    mf_jw_obj_end(w);
+    /* The measurement this sprint exists to take: how many distinct behaviours
+       37,553 cards actually collapse into. Everything the search does is sized
+       by this number, and nobody had ever taken it. */
+    mf_jw_key(w, "classes");
+    mf_jw_obj_begin(w);
+    mf_jw_key(w, "pool");            mf_jw_int(w, (long long)pool_count);
+    mf_jw_key(w, "equivalence");     mf_jw_int(w, (long long)classes_raw);
+    mf_jw_key(w, "after_dominance"); mf_jw_int(w, (long long)classes_merged);
+    mf_jw_key(w, "tiered");
+    {
+        long long tiered = 0;
+        for (size_t i = 0; i < classes_merged; i++) {
+            if (mf_classes_at(classes, i)->tiered) tiered++;
+        }
+        mf_jw_int(w, tiered);
+    }
+    mf_jw_key(w, "unpriced_before"); mf_jw_int(w, (long long)unpriced_before);
+    mf_jw_key(w, "imputed");         mf_jw_int(w, (long long)mf_classes_imputed(classes));
+    mf_jw_key(w, "unpriced_after");  mf_jw_int(w, (long long)mf_classes_unpriced(classes));
     mf_jw_obj_end(w);
     mf_jw_key(w, "layers");        mf_digests_write(&g, w);
     mf_jw_obj_end(w);

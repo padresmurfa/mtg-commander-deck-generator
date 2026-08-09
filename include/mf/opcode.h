@@ -51,6 +51,22 @@ typedef enum {
 
 const char *mf_opcode_name(mf_opcode op);
 
+/* Mana this card's text can produce.
+ *
+ * Same bit order as `mf_colours` in mf/card.h, which mf/metacard asserts
+ * statically. This module reads text and deliberately does not depend on the
+ * card module; two enumerations that must agree should be made to prove it
+ * rather than trusted to. */
+enum {
+    MF_MANA_W = 1u << 0,
+    MF_MANA_U = 1u << 1,
+    MF_MANA_B = 1u << 2,
+    MF_MANA_R = 1u << 3,
+    MF_MANA_G = 1u << 4,
+    MF_MANA_C = 1u << 5 /* {C}, which is not a colour and not generic */
+};
+#define MF_MANA_ANY_COLOUR (MF_MANA_W | MF_MANA_U | MF_MANA_B | MF_MANA_R | MF_MANA_G)
+
 /* How one card came out. `unmatched` is what decides representability: a card
    with none is modelled as well as these phases require. */
 typedef struct {
@@ -58,6 +74,15 @@ typedef struct {
     uint16_t inert;
     uint16_t unmatched;
     uint16_t by_op[MF_OP_COUNT];
+    /* What it can produce at all — the union over its producing clauses. A land
+       reported as making mana without saying which would put every land in
+       Magic in one equivalence class, and colour is most of what a land is. */
+    uint8_t produces;
+    /* The best single activation, not the sum: a land with two mana abilities
+       still only taps once. Zero when nothing produces mana this model can
+       count on — an unmatched producer's amount is exactly the thing the model
+       cannot say, so recording a number would be inventing one. */
+    uint8_t produces_max;
 } mf_opcode_scan;
 
 /* Classifies one clause. Exposed so the rule can be tested one clause at a

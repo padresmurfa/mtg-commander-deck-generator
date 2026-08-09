@@ -160,6 +160,79 @@ static size_t strip_reminders(const char *src, size_t len, char *dst, size_t cap
     return out;
 }
 
+/* ---- what the mana actually is -------------------------------------------
+ * Only ever called for a clause already classified as a producer this model can
+ * count on, so there is no condition to worry about here — the rule that
+ * decides that is above, and it decides it once. */
+
+static uint8_t mana_letter(char c) {
+    switch (tolower((unsigned char)c)) {
+    case 'w': return MF_MANA_W;
+    case 'u': return MF_MANA_U;
+    case 'b': return MF_MANA_B;
+    case 'r': return MF_MANA_R;
+    case 'g': return MF_MANA_G;
+    case 'c': return MF_MANA_C;
+    default: return 0; /* {1}, {T}, {X} and the hybrids: not a produced colour */
+    }
+}
+
+/* A word-count, for the producers that spell the amount instead of printing
+   symbols — "Add two mana in any combination of colors". */
+static uint8_t spelled_amount(const char *s, size_t n) {
+    if (has(s, n, "two mana")) return 2;
+    if (has(s, n, "three mana")) return 3;
+    return 1;
+}
+
+/* `choice` changes what the symbols mean, and getting it wrong makes every dual
+   land a two-mana source. "{T}: Add {W} or {U}" prints two symbols and produces
+   one mana: they enumerate the alternatives. "{T}: Add {C}{C}" prints two and
+   produces two. Same syntax, opposite arithmetic — which is why the caller,
+   which already knows the opcode, is the one that decides. */
+static void mana_of(const char *s, size_t n, bool choice, uint8_t *colours, uint8_t *amount) {
+    *colours = 0;
+    *amount = 0;
+
+    /* Symbols before "add" belong to the cost — "{T}" and the like — so the
+       count starts after it or a tap ability would produce its own tap. */
+    size_t start = 0;
+    for (size_t i = 0; i + 4 <= n; i++) {
+        if (tolower((unsigned char)s[i]) == 'a' && tolower((unsigned char)s[i + 1]) == 'd' &&
+            tolower((unsigned char)s[i + 2]) == 'd' && s[i + 3] == ' ') {
+            start = i + 4;
+            break;
+        }
+    }
+
+    uint8_t count = 0;
+    for (size_t i = start; i < n; i++) {
+        if (s[i] != '{') continue;
+        size_t close = i + 1;
+        while (close < n && s[close] != '}') close++;
+        if (close >= n) break;
+        /* One letter between the braces, or it is a hybrid or a number and not
+           a colour this counts. */
+        if (close == i + 2) {
+            uint8_t bit = mana_letter(s[i + 1]);
+            if (bit) {
+                *colours |= bit;
+                count++;
+            }
+        }
+        i = close;
+    }
+
+    if (has(s, n, "any color") || has(s, n, "any colour") || has(s, n, "any type") ||
+        has(s, n, "any combination")) {
+        /* Any *colour* is five, and specifically not {C}: a Command Tower is
+           not a Wastes. */
+        *colours |= MF_MANA_ANY_COLOUR;
+    }
+
+    *amount = (choice || !count) ? spelled_amount(s, n) : count;
+}
+
 /* ---- the unmatched tail --------------------------------------------------
    Open addressing over shape indices, at twice capacity so probes stay short —
    the same arrangement mf/card uses for oracle ids, and for the same reason. */
@@ -296,6 +369,15 @@ void mf_opcode_scan_report(const char *oracle_text, mf_opcode_scan *out, mf_opco
             if (op == MF_OP_UNMATCHED) {
                 out->unmatched++;
                 if (r) report_add(r, text + start, clause_len);
+            }
+            if (op == MF_OP_TAP_FOR_MANA || op == MF_OP_ADD_MANA ||
+                op == MF_OP_TAP_FOR_MANA_CHOICE || op == MF_OP_ADD_MANA_CHOICE) {
+                bool choice =
+                    op == MF_OP_TAP_FOR_MANA_CHOICE || op == MF_OP_ADD_MANA_CHOICE;
+                uint8_t colours = 0, amount = 0;
+                mana_of(text + start, clause_len, choice, &colours, &amount);
+                out->produces |= colours;
+                if (amount > out->produces_max) out->produces_max = amount;
             }
         }
         start = i + 1;
