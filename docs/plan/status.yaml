@@ -13,8 +13,8 @@
 
 meta:
   status: in_progress
-  current_sprint: "1.3"
-  task_split_valid_for: "1.3"     # task-splitting any other sprint is speculative
+  current_sprint: "2.1"
+  task_split_valid_for: "2.1"     # task-splitting any other sprint is speculative
   baseline: greenfield
   language: c
   deliverable: cli
@@ -270,7 +270,18 @@ epics:
           - every changed 1.2 assertion listed with its argument
       - id: "1.3"
         name: Classes, dominance, enrichment
-        status: not_started
+        status: done
+        retro: docs/plan/retros/1.3-classes-dominance.md
+        tasks_doc: docs/plan/sprints/1.3-classes-dominance.md
+        result:
+          checks: 7449
+          line_coverage: 100.00
+          branch_coverage: 95.34
+          card_struct_bytes: 20
+          pool: 29681
+          equivalence_classes: 8524
+          classes_after_dominance: 2698
+          card_table_bytes: 2923619
         exit_criteria:
           - equivalence classes
           - dominance chains merged into tiered classes
@@ -281,7 +292,7 @@ epics:
 
   - id: E2
     name: Opening phase
-    status: not_started
+    status: active
     sprints:
       - id: "2.1"
         name: Shuffle, draw, mulligan
@@ -441,92 +452,68 @@ epics:
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
 tasks:
-  sprint: "1.3"
-  doc: docs/plan/sprints/1.3-classes-dominance.md
+  sprint: "2.1"
+  doc: docs/plan/sprints/2.1-shuffle-draw-mulligan.md
+  gate: G2
   goal: >
-    Equivalence classes, dominance chains merged into tiered classes, skill floors, precon
-    membership, price imputation, and the binary card table with a content hash.
+    Unbiased Fisher-Yates, the London mulligan with per-policy keep and bottom rules, and Monte
+    Carlo agreement with the hypergeometric closed forms.
   why_now: >
-    The card set exists and G1 says enough of it can be modelled. What is missing is the reduction
-    that makes the search space tractable: 37,553 cards is far too many to optimise over directly,
-    and §7 turns them into a few thousand metacard classes.
-  carried_in:
-    - id: card_struct_32_bytes
-      from: "1.2 T2"
-      why_here: >
-        It constrains a runtime card nothing executes yet, and the emitted table is still the JSONL
-        intermediate this sprint replaces. Packing bits before the binary layout is decided would
-        mean packing them twice.
-    - id: unmatched_report
-      from: "1.2 T6"
-      why_here: >
-        The G1 number is in the artifact; the ranked list of unmatched clause shapes that would
-        guide growing the opcode set is not, and was produced by a script. Small, and it is what
-        makes "grow the opcode set" actionable.
+    E1 is complete: there is a card table, and nothing reads it. G2 is the next gate and the earliest
+    point at which the simulation core can be shown wrong — every later result inherits whatever
+    the shuffler and the draw step do, so it is validated against exact closed forms before anything
+    is built on top.
+  carried_in: []
   input_from_previous_retro:
     - >
-      G1 is 0.9325 and conditional: 90.3% of clauses are inert because only the turn-1-4 feasibility
-      gate is simulated. Do not quote the figure without the inert share beside it, and re-measure
-      at E3.
+      The class count is narrow for the same reason G1 is: 90.3% of clauses are inert, so much of the
+      11x collapse is cards becoming "a 2/2 that does nothing observable". Re-measure at E3.
     - >
-      G1 rises when less is simulated — moving a clause out of scope and modelling it both raise the
-      fraction. A rise in coverage accompanied by a rise in the inert share is not an improvement.
+      Simulator-equivalence is coarser than real equivalence, and it is now load-bearing: 29,681
+      cards became 2,698 choices. Expansion MUST re-validate or a deck handed to a player contains a
+      card the search never really considered. E4 owns it; do not treat the class as the card.
     - >
-      A classifier agrees with itself, confirmed twice. Every defect in 1.2 and 1.2.1 was found by
-      asking the real data what the classifier accepted; none by reading the code or by a failing
-      test. Interrogate the export before believing any classification.
+      Mutation testing found what tests written in advance did not, three sprints running. The first
+      dominance pass caught 7 of 11, and every survivor was a rule another rule happened to shadow.
     - >
-      A stale artifact nearly became the baseline: data/g1-run.jsonl was the 0.9249 run, not the
-      0.9357 one. Regenerate a baseline from the commit that produced it.
-    - >
-      Conditional lands are the largest actionable lever and a direct input to the opcode payload:
-      "unless you control a Mountain" is a predicate the simulator could evaluate against the
-      battlefield, but the payload has no room for one.
-    - >
-      Price imputation lands here, and 1.1 deliberately left absent prices absent. 3,849 of the
-      37,553 paper cards have no price; an Arena table has none at all.
-  blocker_resolved:
-    id: class_count_measured
-    by: user decision, 2026-08-09
-    decision: >
-      Classification is a tool that runs as part of the preprocessing step. The class count is then
-      a by-product of a pass that has to exist anyway, rather than a measurement someone has to take
-      before the sprint can be planned. T2 below produces the number that T3 onwards consume.
-  ordering_note: >
-    The 32-byte card struct carried out of 1.2 is now T1 rather than an afterthought: §7.1 does not
-    class cards BY the struct, the struct IS the class, so a byte of padding that varies between two
-    otherwise identical cards splits a class that should be one.
+      The analytic oracle for G2 is reference/legacy-ts deckAnalyzer.ts (design §13.1) — the one part
+      of the TypeScript tree with a job left to do.
   split:
-    - id: T0
-      name: --report-unmatched
-      carried_from: "1.2 T6"
     - id: T1
-      name: opcode payload and the 32-byte card struct
-      carried_from: "1.2 T2"
+      name: mf/deck — a deck as 99 uint8 indices into the card table
     - id: T2
-      name: equivalence classes, and the class count measured
+      name: unbiased Fisher-Yates over mf/rng, keyed by work item
     - id: T3
-      name: dominance and chain merging into tiered classes
+      name: the draw step, and an opening hand
     - id: T4
-      name: price imputation via dominance
+      name: London mulligan with per-policy keep and bottom rules
     - id: T5
-      name: skill floors
+      name: hypergeometric closed forms, ported from the legacy analyzer as the oracle
     - id: T6
-      name: precon membership side table
-      unblocked_by: "1.2.1 addendum"
-      data: data/precons.jsonl
-      acquisition: tools/fetch-precons.sh
-      note: >
-        No longer blocked. MTGJSON publishes precon contents as CC0 bulk JSON keyed by
-        scryfallOracleId — 190 decks, all exactly 100 cards, joining at 16,624 of 16,624 entries.
-        The task changed shape as a result: 190 bits will not fit a 32-byte card struct, so this is
-        a side table joined at deck-scoring granularity, NOT a per-card field, and membership must
-        not enter the equivalence-class key.
+      name: "G2 — Monte Carlo agreement within sampling error, measured and recorded"
     - id: T7
-      name: binary card table with content hash
-    - id: T8
-      name: retro and amendments
+      name: retro, amendments, and the E1 close-out decision on reference/legacy-ts
 retros:
+  - sprint: "1.3"
+    doc: docs/plan/retros/1.3-classes-dominance.md
+    gates: []
+    design_amendments: 4
+    headline: >
+      The measurement the sprint existed to take: 29,681 commander-legal representable cards collapse
+      to 8,524 equivalence classes and then to 2,698 after dominance chaining — 11x, against a design
+      estimate of 2.7x that described a single commander's candidate pool rather than the legal set.
+      The same condition G1 carries applies: 90.3% of clauses are inert, so much of the collapse is
+      cards becoming "a 2/2 that does nothing observable", and the count will RISE when E3 widens the
+      phases. The 32-byte struct carried out of 1.2 turned out to be the prerequisite for everything
+      rather than an afterthought, because §7.1 does not class cards BY the struct — the struct IS
+      the class; it lands at 20 bytes. Three defects, none found by a test written in advance: a
+      dominance roster built in class order rather than preference order, which would have put the
+      WORSE card first on expansion; a distinct-count that was 361 million strcmp calls behind a
+      comment claiming it was linear; and two wire-format constants that were simply miscounted.
+      Mutation testing did the real work — the first dominance pass caught 7 of 11, and every
+      survivor was a rule that another rule happened to shadow. The design also described two structs
+      as one: it listed oracle_id and name inside a 32-byte budget, which an oracle id alone exceeds.
+    carry_over: []
   - sprint: "1.2.1"
     doc: docs/plan/retros/1.2.1-clause-reachability.md
     gates: [G1]

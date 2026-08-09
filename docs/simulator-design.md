@@ -302,6 +302,18 @@ literally the same object. Deduplicate the pool by struct identity and search ov
 ~400-card pool typically collapses toward ~150 behaviours. Not an approximation: genuine redundancy
 removal, and it composes with the C port because the struct *is* the class.
 
+*(Measured, sprint 1.3.)* Over the whole commander-legal representable pool, **29,681 cards collapse
+to 8,524 equivalence classes and then to 2,698 tiered classes after dominance chaining (§7.6) — 11×
+in total**, of which 902 absorbed a dominated class. The "~150 from ~400" above described a single
+commander's *candidate* pool and should not be read as a general ratio; equivalence alone is 3.48×
+here.
+
+**The same condition attached to G1 applies to this number.** The key is what the model can see, and
+90.3% of clauses are inert (§13.5), so a large share of the collapse is cards becoming "a 2/2 for
+{1}{G} that does nothing observable". That is this section working as designed — and it means **the
+class count is a function of how narrow the simulated phases are, and will rise when E3 widens
+them.** Quote it beside the inert share, as with coverage.
+
 **Singleton means classes carry a multiplicity, not a bit.** You may run one Llanowar Elves, but you
 may run Llanowar *and* Fyndhorn *and* Elvish Mystic. A class is an integer count bounded by class
 size.
@@ -618,13 +630,31 @@ builder pays more for the unpriced card, so $2 is the correct *effective* cost o
 
 ### Per-card outputs
 
-- `oracle_id`, name, colour identity, CMC, mana cost, type
-- opcode struct (effects, produced mana, P/T)
-- equivalence class id (post-chaining, §7.6); class multiplicity limit
-- dominance edges
-- minimum price (imputed where absent) + imputation flag
-- skill floor (§7.4)
-- commander legality
+*(Amended sprint 1.3, when it turned out this list described two different structs as one.)* It named
+`oracle_id` and `name` inside a 32-byte budget, which cannot be done — an oracle id alone is 36
+bytes. **There are two things, and only the first has a size budget:**
+
+**The functional identity** — colour, converted and pip-wise cost, types, opcode mask, produced mana
+and amount, power, toughness, legality. **20 bytes**, asserted at compile time. This is what the
+simulation holds and what the L1 budget is about, and it **is** the equivalence class key (§7.1) —
+which is why price, skill floor, class id, name and oracle id are all deliberately absent from it.
+Llanowar Elves and Fyndhorn Elves differ in most of those while being the same card, so a key holding
+any of them would split the class it exists to demonstrate.
+
+**The table record** — the identity, plus the fields it excludes: oracle id, name, minimum price
+(imputed where absent) with its flag, equivalence class id, skill floor. Written to the binary card
+table (§8) with the strings held once in a blob and referenced by offset, so the record stays fixed
+width. No budget applies: this is read at startup and never in a loop.
+
+- ~~`oracle_id`, name, colour identity, CMC, mana cost, type~~
+- ~~opcode struct (effects, produced mana, P/T)~~
+- ~~equivalence class id (post-chaining, §7.6); class multiplicity limit~~
+- dominance edges — **as chain membership rather than as edges**: a dominated class is merged into
+  the dominating one's preference-ordered roster (§7.6), so what is emitted is which class a card
+  belongs to and where in its roster, not a graph
+- ~~minimum price (imputed where absent) + imputation flag~~
+- ~~skill floor (§7.4)~~
+- commander legality — a flag on the identity, and also a pruning criterion (§7.9)
 - ~~precon membership bitmask — which of the ~68 precons contain this card, for the acquisition-path
   cost model (§7.5)~~ — **superseded, sprint 1.2.1 addendum. See below.**
 

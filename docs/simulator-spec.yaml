@@ -786,8 +786,10 @@ preprocessing:
     order_rationale: >
       Input order must not reach the output. Sorting on a unique key gives a total order whatever
       the sort algorithm does.
-    format_now: JSONL, inspectable
-    format_later: flat binary card table (sprint 1.3)
+    format: flat binary card table, delivered sprint 1.3 — see schemas.card_table
+    format_was: >
+      JSONL through sprints 1.1 and 1.2, because the opcode encoding was undecided and packing bits
+      twice would have been worse than packing them late. Removed in 1.3 along with the writer.
     digest: the set is fed to the preprocess digest layer — the first real data through the harness
 
 # ---------------------------------------------------------------------------
@@ -795,31 +797,86 @@ preprocessing:
 # ---------------------------------------------------------------------------
 schemas:
 
+  # Amended sprint 1.3: this described two structs as one. It listed oracle_id
+  # and name inside a 32-byte budget, which cannot be done — an oracle id alone
+  # is 36 bytes. They are separated below, and only the first has a budget.
   card_struct:
     ref: "8, 10"
+    measured_bytes: 20          # sprint 1.3, _Static_assert'd
     size_target_bytes: 32
     size_hard_cap_bytes: 64
     size_rationale: >
       A real budget on the opcode encoding, not an aspiration. At 32 B a 99-card deck table is
       ~3.1 KB (25 cache lines) and stays L1-resident. At 128 B the table stops being free.
+    # The functional identity, and therefore the equivalence-class key (§7.1).
+    # What is ABSENT is the point: price, skill floor, class id, name and oracle
+    # id are what Llanowar Elves and Fyndhorn Elves differ in while being the
+    # same card, so a key holding any of them splits the class it demonstrates.
     fields:
-      - oracle_id
-      - name
       - colour_identity
       - cmc
-      - mana_cost
+      - mana_cost              # pip-wise, not converted: {W}{W} and {1}{W} differ
       - type
-      - opcode_struct          # effects, produced mana, P/T
-      - equivalence_class_id   # post dominance-chaining
-      - class_multiplicity_limit
-      - dominance_edges
-      - min_price              # imputed where absent
-      - price_imputed_flag
-      - skill_floor
-      - commander_legal
-      # precon_membership_bitmask REMOVED in 1.2.1 addendum — it is a side table, not a per-card field.
-      # 190 precons is 24 bytes of the struct's 32-byte budget, the set grows every release, and
-      # 83% of cards are in no precon at all. See side_tables.precon_membership.
+      - opcode_mask            # which opcodes, not how many of each
+      - produced_mana          # colours, and the best single activation
+      - power
+      - toughness
+      - flags                  # pt_variable, commander_legal
+    excluded_deliberately: [oracle_id, name, min_price, skill_floor, equivalence_class_id,
+                            precon_membership]
+    compared_by: memcmp
+    padding: >
+      Explicit. A struct with an implicit hole compares by whatever was in the hole, and this one is
+      the class key.
+
+  # What preprocess writes. No size budget applies: read once at startup, never
+  # in a loop. Strings are held once in a blob and referenced by offset, so the
+  # record stays fixed width.
+  card_table:
+    ref: "8, 14.2"
+    added: sprint 1.3
+    magic: MFCT
+    version: 1
+    endianness: little, explicit — written byte at a time rather than as a struct
+    header_bytes: 36
+    record_bytes: 44
+    header: [magic, version, game, cards, strings_len, hash_h1, hash_h2]
+    record: [oracle_id_offset, name_offset, identity, min_price, equivalence_class_id,
+             has_price, skill_floor]
+    content_hash:
+      bits: 128
+      covers: everything after the header
+      verified_on: read
+      why: >
+        §14.2 — prices move weekly and Scryfall data changes underneath, so a run is not reproducible
+        from (seed, config) alone. Every run artifact records the hash of the table it read, or you
+        eventually chase a "regression" that is a price update.
+    measured:
+      date: 2026-08-09
+      game: paper
+      cards: 29681
+      bytes: 2923619
+      seconds: 4.2
+
+  skill_floor:
+    ref: "7.4"
+    added: sprint 1.3
+    levels: [any, basic, careful, expert, master]
+    rule: >
+      The MAXIMUM over every marker that matches, never the first hit and never an average — a card
+      asks as much as its most demanding text, and averaging would hand a wheel to the bracket least
+      able to use one.
+    from_the_type_line_not_the_text:
+      - instant: played at a moment of your choosing, which is the whole of what makes timing a skill
+      - variable_cost: an X is a decision before the card is cast, and lives in the pips
+    marker_list: src/skill.c
+    marker_list_contract: >
+      A list with a reason per entry rather than a regex nobody can audit, and every entry has a test
+      that fires it on its own. A marker nobody exercised is a marker nobody has checked.
+    status: >
+      A search prior, exactly like mutation radius. Gate G3's policy-gap measurement is the ground
+      truth; if the two disagree, the measurement wins and this list changes. Tagger otags (§7.4)
+      would sharpen it and are not ported — see the E1 retro.
 
   side_tables:
     ref: "8, 13.2"
@@ -1083,6 +1140,33 @@ validation:
       Conditional and triggered draw — "If you do, draw a card" and its relatives — is the head of
       the unmatched distribution by a wide margin. Past the top ten shapes the tail is essentially
       unique, so the remaining work is diminishing rather than blocked.
+
+  class_reduction:
+    ref: "7.1, 7.6"
+    added: sprint 1.3
+    measured:
+      date: 2026-08-09
+      game: paper
+      pool: 29681               # commander-legal AND representable (§7.9)
+      equivalence_classes: 8524 # 3.48x
+      after_dominance: 2698     # 11.0x overall
+      tiered: 902               # classes that absorbed a dominated one
+      unpriced_classes_before: 36
+      imputed: 21
+      unpriced_after: 15
+    skill_floor_distribution: {any: 16346, basic: 3923, careful: 2917, expert: 5907, master: 588}
+    superseded_estimate: >
+      Design §7.1 said a ~400-card pool collapses toward ~150. That described a single commander's
+      CANDIDATE pool, not the legal set, and should not be read as a general ratio.
+    condition: >
+      The same condition as opcode_coverage, and for the same reason. The class key is what the model
+      can see, and 90.3% of clauses are inert — so much of the collapse is cards becoming "a 2/2 for
+      {1}{G} that does nothing observable". The count is a function of how narrow the simulated
+      phases are and WILL RISE when E3 widens them. Quote it beside the inert share.
+    expansion_hazard: >
+      Simulator-equivalence is coarser than real equivalence (§7.1). 29,681 cards became 2,698
+      choices, so expansion MUST re-validate: a deck handed to a player would otherwise contain a
+      card the search never really considered. E4 owns this and must not treat the class as the card.
 
   self_consistency:
     ref: "13.4"
