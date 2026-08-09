@@ -1326,6 +1326,54 @@ would break determinism, which is why the check is performed rather than assumed
 hashes, and no iteration over a hash map in bucket order where the order reaches the output — ASLR
 makes pointer-derived values vary per run. Sort before iterating when order is observable.
 
+### 17.1a How each of those is enforced
+
+*(Added sprint 0.3. Built before there was anything to be deterministic about, deliberately —
+retrofitting means auditing every accumulator written in the meantime.)*
+
+**`mf/rng` — counter-based, keyed by work item.** Every value is a pure function of
+`(seed, stream, counter)`; there is no sequential state to carry, so a draw cannot depend on what
+was drawn before it or on which worker drew it. Within a stream the sequence is splitmix64's,
+unchanged; only the *starting* state is derived from the pair, and mixing the stream before folding
+it into the seed is what keeps two streams from being shifts of one another — or, more embarrassingly,
+what keeps run 7 of seed 3 from being run 3 of seed 7.
+
+**The stream is keyed by work item, never by worker.** This is the whole of why the thread axis of
+the matrix passes: a worker-keyed stream would make the output a function of the thread count, which
+is precisely the bug.
+
+**Bounded draws reject, they do not fold.** `x % n` gives the low residues one extra preimage each,
+which at deck scale is a bias in which cards come up first. Values below `2^64 mod n` are discarded
+so that what remains is an exact multiple of `n`. The bias a fold leaves is one value in 2^64, which
+no sample size will ever detect — so the threshold is a public function and the property is asserted
+as arithmetic rather than as statistics.
+
+**`mf/reduce` — collect, then reduce.** Results are not accumulated while the work runs *at all*.
+Each item writes its own slot; arrival order is irrelevant by construction; the reduction happens
+once, at the end, in ascending index. And **every slot must be filled** before the reduction can be
+read: a dropped work item is a failure, not a slightly smaller total, and the difference between
+those two is the difference between a bug found today and a bug found never.
+
+**`mf/digest` — 128 bits, two lanes, five layers.** Absorbed a byte at a time, so incremental
+hashing equals one-shot hashing by construction rather than by a block-buffering argument nobody
+re-checks; big-endian, so the value does not depend on the machine. Semantic values only, never
+rendered text — hashing the artifact would make a formatting change look like a behaviour change and
+a behaviour change hidden by rounding look like nothing at all.
+
+The layers are `preprocess`, `opening`, `solo`, `gauntlet`, and a `run` layer that is the other four
+folded in ascending layer order. Layering is what makes a divergence say *where*: if the opening
+digest matches and the solo digest does not, the change is in the evaluation and not in the shuffle,
+and that is most of the debugging. The run layer is derived, never written directly, and readable
+only after the seal.
+
+**Golden files.** `tests/golden/validate.txt` holds the five digests and the trial totals; `make
+golden-check` compares, `make golden` records. Updating is deliberately a separate command — a
+harness that refreshed its own expectation on failure would agree with every change ever made.
+
+**What the matrix currently runs against.** `mf/trial`: a stand-in evaluation with no game semantics
+whatsoever — shuffle, draw, add — that has the *shape* of the real thing. It exists to be deleted
+when E2 produces a real opening phase, and the golden files are regenerated then.
+
 ### 17.2 The memo cache must be value-neutral
 
 A shared cache (§10) is populated in nondeterministic thread order, so **whether a lookup hits depends

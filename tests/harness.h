@@ -45,7 +45,17 @@ int mf_t_report(void);
         mf_t_pass++;                                                        \
     } while (0)
 
-#define MF_EQ_DBL(a, b)                                                       \
+/* Unsigned, and printed in hex: a mismatched digest or draw is a bit pattern,
+   and reading it as a signed decimal tells you nothing about which bit moved. */
+#define MF_EQ_U64(a, b)                                                         \
+    do {                                                                        \
+        unsigned long long a_ = (unsigned long long)(a);                        \
+        unsigned long long b_ = (unsigned long long)(b);                        \
+        if (a_ != b_) MF_FAILED("%s == %s (%#llx vs %#llx)", #a, #b, a_, b_);   \
+        mf_t_pass++;                                                            \
+    } while (0)
+
+#define MF_EQ_DBL(a, b)                                                     \
     do {                                                                      \
         double a_ = (double)(a), b_ = (double)(b);                            \
         if (fabs(a_ - b_) > 1e-9) MF_FAILED("%s == %s (%g vs %g)", #a, #b, a_, b_); \
@@ -92,6 +102,10 @@ void mf_t_panic_quiet(void);
     } while (0)
 
 void run_err_tests(void);
+void run_rng_tests(void);
+void run_digest_tests(void);
+void run_reduce_tests(void);
+void run_trial_tests(void);
 void run_panic_tests(void);
 void run_arena_tests(void);
 void run_pool_tests(void);

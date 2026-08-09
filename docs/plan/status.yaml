@@ -13,8 +13,8 @@
 
 meta:
   status: in_progress
-  current_sprint: "0.3"
-  task_split_valid_for: "0.3"     # task-splitting any other sprint is speculative
+  current_sprint: "1.1"
+  task_split_valid_for: "1.1"     # task-splitting any other sprint is speculative
   baseline: greenfield
   language: c
   deliverable: cli
@@ -124,7 +124,7 @@ gates:
 epics:
   - id: E0
     name: Foundations
-    status: active
+    status: done
     note: >
       Determinism is built before there is anything to be deterministic about, deliberately.
       Retrofitting means auditing every accumulator written in the meantime.
@@ -190,7 +190,13 @@ epics:
           - mf_arena_alloc_aligned rejects an alignment it cannot honour
       - id: "0.3"
         name: Determinism harness
-        status: active
+        status: done
+        retro: docs/plan/retros/0.3-determinism-harness.md
+        result:
+          checks: 2653
+          line_coverage: 100.00
+          branch_coverage: 97.25
+          function_coverage: 100.00
         tasks_doc: docs/plan/sprints/0.3-determinism-harness.md
         exit_criteria:
           - counter-based RNG
@@ -200,12 +206,13 @@ epics:
 
   - id: E1
     name: Card pipeline
-    status: not_started
+    status: active
     subcommand: preprocess
     sprints:
       - id: "1.1"
         name: Acquisition & oracle normalisation
-        status: not_started
+        status: planned
+        tasks_doc: docs/plan/sprints/1.1-acquisition.md
         exit_criteria:
           - Scryfall bulk ingested
           - grouped by oracle_id
@@ -392,84 +399,44 @@ epics:
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
 tasks:
-  sprint: "0.3"
-  doc: docs/plan/sprints/0.3-determinism-harness.md
+  sprint: "1.1"
+  doc: docs/plan/sprints/1.1-acquisition.md
   goal: >
-    Counter-based RNG, layered output digests, and the golden-file regression harness, with the
-    6-way determinism matrix passing on a trivial workload. No simulation yet.
+    Scryfall bulk data normalised into an oracle_id-keyed card set with resolved legality, colour
+    identity and a minimum paper price. The input every later epic treats as given.
   why_now: >
-    Determinism is built before there is anything to be deterministic about. Retrofitting means
-    auditing every accumulator written in the meantime, and the reduction-order bug it guards
-    against is silent — low-bit drift nobody notices until a result cannot be reproduced.
-  list:
-    - id: T0
-      name: Decide CI
-      done_when: [decision and reason recorded in the sprint doc and the retro]
-      note: >
-        First, not last. Deferred twice already (0.1, 0.2) for the same reason each time — the
-        digest it would enforce did not exist. It does now, so the reason is spent.
-    - id: T1
-      name: Counter-based RNG (mf/rng)
-      done_when: [known-answer vectors pass, same (seed,stream,n) yields same value regardless of call order]
-    - id: T2
-      name: Unbiased bounded draw
-      done_when: [rejection sampling not modulo, chi-square shows no bias, rejection branch covered]
-    - id: T3
-      name: Fisher-Yates shuffle
-      done_when: [all 120 orderings of a 5-element deck within tolerance, same seed same permutation]
-    - id: T4
-      name: Digest primitive
-      done_when: [known-answer vectors pass, incremental hashing matches one-shot]
-    - id: T5
-      name: Layered digest emission
-      done_when: [arrival order does not change the digest, changing a value changes exactly one layer]
-    - id: T6
-      name: Deterministic reduction helper
-      done_when: [out-of-order submission reduces identically to in-order]
-    - id: T7
-      name: Golden-file harness
-      done_when: [deliberate change fails with a readable diff, make golden updates it]
-    - id: T8
-      name: Trivial deterministic workload
-      done_when: ["mfsim validate emits all five digests alongside the memcheck record"]
-      note: >
-        `validate` already exercises the memory layer; the digest layers hang off the same
-        subcommand rather than inventing a second one.
-    - id: T9
-      name: The 6-way determinism matrix
-      done_when: [threads 1/4/8 x fresh/resumed produce byte-identical digests, run by make check]
-      note: >
-        Threading lands in 6.1; the thread axis here uses simulated work partitioning. The point is
-        that the digest is invariant to partition order, which is where the bug would be.
-
-  input_from_previous_retro:
-    - Arena allocation and fail-fast are in place, so the RNG and digest modules take an arena and
-      have no allocation failure paths to test. Expect fewer error branches than 0.1 would have had.
-    - Watch for branches a refactor has just made dead. Two survived the arena port by a sprint.
-    - Do not catch a fatal that owns memory the test cannot reach. MF_EXPECT_PANIC longjmps past
-      cleanup, and LeakSanitizer is right to complain. Put those cases in tests/smoke.sh.
-    - Green on the first compile proves nothing. Mutate the implementation and watch the test catch
-      it, if the red could not be observed first.
-    - The residual branch gap is almost entirely _FORTIFY_SOURCE folding (18 of 19). Do not chase it.
-
+    E0 is finished and the determinism harness has nothing but a stand-in to measure. This is the
+    first sprint that produces something real, and G1 in 1.2 cannot be asked until there is a real
+    card pool to ask it about.
+  task_split_deferred_until:
+    reason: >
+      Two open decisions change what the tasks are. Splitting before they are answered would be the
+      speculative planning the update contract forbids.
+    blockers: [preprocessing_language, fetch_or_consume]
   open_decisions:
-    - id: digest_algorithm
-      question: Which 128-bit non-cryptographic hash?
-      constraint: stable, fast, no dependency, written in-tree
-      candidates: [xxHash128, SplitMix-based construction]
-    - id: digest_of_control_files
-      question: Do the resolved-config and fatal-report files need to be digest-neutral?
-      status: answered_in_0_2
-      answer: >
-        No. They are transient control files carrying a pid, and nothing derived from them reaches
-        an artifact. Recorded in spec parameters.processes.control_files.
-
-  not_in_this_sprint:
-    items: [real threading, real checkpointing]
-    note: >
-      Threading is 6.1 and checkpointing is 6.2. The "resumed" axis here replays a serialised
-      counter — the part determinism depends on — not the full checkpoint schema.
-
+    - id: preprocessing_language
+      question: Does preprocessing run in C or in Node?
+      conflict: >
+        simulator-design.md §8 says "a Node stage, run weekly", written when a Node app surrounded
+        the project. CLAUDE.md §6 says the acquisition logic is ported in E1 and the reference tree
+        deleted afterwards. Both cannot be right; §8 changes either way.
+      recommendation: >
+        C — a second toolchain is a second thing to install, version and keep deterministic.
+    - id: fetch_or_consume
+      question: "Does `mfsim preprocess` download the bulk file or consume a local one?"
+      recommendation: >
+        Consume. The card table is an input to a deterministic core, so a subcommand that downloads
+        is a subcommand whose output depends on the day it ran.
+  input_from_previous_retro:
+    - >
+      The determinism harness is calibrated but unproven — the six-way matrix runs against mf/trial,
+      which has no game semantics. The card table is the first real data to reach the digest layers.
+    - A covered branch is not a tested branch. A parser is mostly branches, so the coverage number
+      will look reassuring long before the tests are. Budget for mutation testing.
+    - Mutation testing found four tests in 0.3 that passed for the wrong reason, and the coverage
+      floor found none of them.
+    - No CI, by decision. Run make check before every push; make hook enforces it locally.
+    - mf/trial and its golden rows are deleted in E2, not here.
 retros:
   - sprint: "0.1"
     doc: docs/plan/retros/0.1-greenfield-skeleton.md
@@ -504,4 +471,17 @@ retros:
       enforced. No defect was found by a failing test this sprint — the floor found dead weight and
       one untestable branch — but a surviving mutation found a weak assertion the branch count could
       not see.
+    carry_over: []
+  - sprint: "0.3"
+    doc: docs/plan/retros/0.3-determinism-harness.md
+    gates: []
+    design_amendments: 4
+    headline: >
+      The coverage floor found nothing — a hash and a bump counter barely branch — and mutation
+      testing found four tests that passed for the wrong reason, including a shift test that only
+      looked in one direction and a fold-order test that changed both sides at once. The CI
+      question, deferred twice, is closed: local only, because the build is pinned to one machine
+      and a hosted runner would compile a different program. Two mutations survive and are recorded:
+      both weaken the digest's internal mixing without changing anything its contract exposes, which
+      is the nature of a hash.
     carry_over: []

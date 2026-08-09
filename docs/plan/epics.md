@@ -7,7 +7,7 @@ Status legend: `done` · `active` · `planned` · `not started`
 
 ---
 
-## E0 — Foundations · `active`
+## E0 — Foundations · `done`
 
 Scaffolding, and the determinism harness every later epic depends on.
 
@@ -19,7 +19,7 @@ Retrofitting it means auditing every accumulator written in the meantime.
 | **0.1** | Greenfield skeleton | Repo reset; `make` builds a binary; subcommand shell dispatches; config loads; JSONL artifact writes; tests pass with ≥95% line and branch coverage | `done` |
 | **0.2** | Memory & process model | Arena allocation throughout; no libc allocation outside the memory layer; environmental failure kills the process with a machine-readable report; orchestrator relaunches the worker at a larger arena size | `done` |
 | **0.2.1** | Pool discipline & alignment | A pool is a fixed, configured stock that dies when it runs out; heap and stack disciplines; the orchestrator grows a depth as it grows a size; the arena's alignment contract enforced rather than documented | `done` |
-| **0.3** | Determinism harness | Counter-based RNG; layered digest emission; golden-file comparison; the 6-way matrix (threads × fresh/resumed) runs and passes on a trivial workload | `active` |
+| **0.3** | Determinism harness | Counter-based RNG; layered digest emission; golden-file comparison; the 6-way matrix (threads × fresh/resumed) runs and passes on a trivial workload | `done` |
 
 Sprint 0.2 was inserted after 0.1 rather than appended. The memory model changes what every later
 module allocates from, and the determinism harness pins output with golden files — so doing memory
@@ -28,13 +28,13 @@ follow-on to it rather than a reopening: 0.2 is `done` and its retro is written,
 record in place would destroy it. The same ordering argument applies — a pool whose contract changes
 under a golden file means regenerating the golden file.
 
-## E1 — Card pipeline · `not started`
+## E1 — Card pipeline · `active`
 
 The `preprocess` subcommand. Ends with the project's first kill-switch.
 
 | Sprint | Goal | Exit criteria | Status |
 | ------ | ---- | ------------- | ------ |
-| **1.1** | Acquisition & oracle normalisation | Scryfall bulk ingested; grouped by `oracle_id`; min price across paper non-foil printings; legality and colour identity resolved | `not started` |
+| **1.1** | Acquisition & oracle normalisation | Scryfall bulk ingested; grouped by `oracle_id`; min price across paper non-foil printings; legality and colour identity resolved | `planned` |
 | **1.2** | Opcode model — **gate G1** | Card struct ≤32 B; oracle text → opcodes for the modelled subset; coverage measured on a real commander's pool | `not started` |
 | **1.3** | Classes, dominance, enrichment | Equivalence classes; dominance chains merged into tiered classes; skill floors; precon membership; price imputation; binary card table emitted with content hash | `not started` |
 

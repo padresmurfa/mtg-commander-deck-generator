@@ -48,7 +48,7 @@ BIN_ASAN   := $(BUILD)/mfsim-test-asan
 M    ?=
 DEPS ?=
 
-.PHONY: all debug test coverage asan memcheck smoke check clean help one
+.PHONY: all debug test coverage asan memcheck smoke golden golden-check check hook clean help one
 .DEFAULT_GOAL := all
 
 one: | $(BUILD)
@@ -121,7 +121,26 @@ memcheck:
 smoke: all
 	@sh tests/smoke.sh
 
-check: all memcheck asan coverage smoke
+# The run digests, pinned. Separate from `smoke` because it answers a different
+# question: not "does it work" but "is it the same as it was".
+golden-check: all
+	@sh tests/golden.sh
+
+# Records a new expectation. Deliberately a command you have to type: a harness
+# that refreshed itself on failure would agree with every change ever made.
+golden: all
+	@UPDATE=1 sh tests/golden.sh
+
+# There is no hosted CI (sprint 0.3 T0: the build is pinned to one machine, so a
+# runner elsewhere would compile a different program). This is the local
+# substitute, and it is opt-in on purpose — installing hooks behind someone's
+# back is worse than not having them.
+hook:
+	@printf '#!/bin/sh\nexec make check\n' > .git/hooks/pre-push
+	@chmod +x .git/hooks/pre-push
+	@echo "installed .git/hooks/pre-push -> make check"
+
+check: all memcheck asan coverage smoke golden-check
 
 clean:
 	@rm -rf $(BUILD)
@@ -134,6 +153,8 @@ help:
 	@echo "make coverage   run tests and enforce the $(COVERAGE_FLOOR)% line/branch floor"
 	@echo "make memcheck   assert no libc allocation outside the memory layer"
 	@echo "make smoke      end-to-end relaunch test with real processes"
+	@echo "make golden     record the current run digests as the expectation"
+	@echo "make hook       install a pre-push hook that runs make check"
 	@echo "make one M=x    build and run one module's tests"
 	@echo "make check      everything above (the gate)"
 	@echo "make clean      remove $(BUILD)"

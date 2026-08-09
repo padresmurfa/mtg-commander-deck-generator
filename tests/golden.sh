@@ -1,0 +1,70 @@
+#!/bin/sh
+# Golden-file regression on the run digests.
+#
+# The unit suite proves the digest is invariant to partitioning and to a resume.
+# This proves it is invariant to *us* — that a refactor which was supposed to
+# change nothing changed nothing. Which is the only kind of test that can say so
+# about code that has not been written yet.
+#
+# Updating is deliberately a separate command (`make golden`). A harness that
+# refreshed its own expectation on failure would agree with every change ever
+# made, including the wrong ones.
+
+set -eu
+
+BIN=build/mfsim
+GOLDEN=tests/golden/validate.txt
+WORK=build/golden
+UPDATE=${UPDATE:-0}
+
+rm -rf "$WORK"
+mkdir -p "$WORK" tests/golden
+
+fail() { echo "GOLDEN FAIL: $*" >&2; exit 1; }
+
+# Fixed seed, fixed everything. Nothing here may vary between machines or runs —
+# the artifact path is the only thing that is allowed to, and it is not digested.
+cat > "$WORK/run.json" <<EOF
+{"artifact_path":"$WORK/run.jsonl","seed":20260809,"arena_bytes":4194304,
+ "threads":1,"persist_growth":false}
+EOF
+
+"$BIN" --no-spawn validate --config "$WORK/run.json" >/dev/null 2>&1 ||
+    fail "the validate run did not succeed"
+
+line=$(grep '"record":"digest"' "$WORK/run.jsonl") || fail "no digest record in the artifact"
+
+# One "layer hex" per line, in layer order, so a diff points at the layer that
+# moved rather than at a wall of hex.
+{
+    for layer in preprocess opening solo gauntlet run; do
+        hex=$(printf '%s' "$line" | sed -n "s/.*\"$layer\":\"\([0-9a-f]*\)\".*/\1/p")
+        [ -n "$hex" ] || fail "the digest record has no '$layer' layer"
+        echo "$layer $hex"
+    done
+    for field in seed items hand_total score_total; do
+        val=$(printf '%s' "$line" | sed -n "s/.*\"$field\":\([0-9-]*\).*/\1/p")
+        [ -n "$val" ] || fail "the digest record has no '$field'"
+        echo "$field $val"
+    done
+} > "$WORK/actual.txt"
+
+if [ "$UPDATE" = "1" ]; then
+    cp "$WORK/actual.txt" "$GOLDEN"
+    echo "golden updated: $GOLDEN"
+    cat "$GOLDEN"
+    rm -rf "$WORK"
+    exit 0
+fi
+
+[ -f "$GOLDEN" ] || fail "no golden file; run 'make golden' to create $GOLDEN"
+
+if ! diff -u "$GOLDEN" "$WORK/actual.txt"; then
+    echo >&2
+    echo "The run digests moved. If that was intended, 'make golden' records it;" >&2
+    echo "if it was not, the layer above tells you where to look." >&2
+    exit 1
+fi
+
+rm -rf "$WORK"
+echo "golden OK: run digests unchanged"

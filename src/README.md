@@ -21,6 +21,10 @@
 | `arena` | Bump allocator with stack frames. The only file that may call the libc allocator |
 | `pool` | A fixed stock of pre-zeroed arenas, heap-ordered or stack-ordered |
 | `mem` | Arena-aware replacements for the allocating parts of libc |
+| `rng` | Counter-based randomness, unbiased bounded draws, Fisher-Yates |
+| `digest` | 128-bit output digests and the five named layers |
+| `reduce` | Index-ordered collection: arrival order cannot reach the answer |
+| `trial` | A stand-in evaluation with no game semantics. Exists to be deleted |
 | `json` | Minimal JSON reader and writer. Written in-tree, not vendored |
 | `config` | Run configuration: defaults, load, validate, serialise |
 | `artifact` | Append-only buffered JSONL run artifact |
@@ -29,7 +33,9 @@
 | `worker` | The calculating half. Knows nothing about relaunching |
 
 Dependency order runs downward: `panic` depends on nothing, `arena` on `panic`, everything else on
-`arena`. `panic` cannot depend on the memory layer — a report you have to allocate in order to say
+`arena`. The one edge that reads backwards is `digest` taking `mf_rng_mix` from `rng` — a pure
+function of one integer, shared rather than duplicated because two copies of six constants are how
+two copies drift apart. `panic` cannot depend on the memory layer — a report you have to allocate in order to say
 you cannot allocate is no report at all.
 
 ## Errors

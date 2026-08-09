@@ -5,9 +5,10 @@
 A command-line tool that evaluates Magic: The Gathering Commander decks **by simulation** and
 optimises them by search.
 
-> **Status: early.** Sprints 0.1–0.2 of 22 are complete — the skeleton builds and dispatches, all
-> memory is arena-allocated, and a worker that runs out is relaunched with more. No simulation
-> exists yet. See [`docs/plan/`](docs/plan/).
+> **Status: early.** Epic 0 is complete — the skeleton builds and dispatches, all memory is
+> arena-allocated, a worker that runs out is relaunched with more, and every run emits layered
+> digests that a golden file pins. **No simulation exists yet**; the determinism harness currently
+> measures a stand-in with no game semantics. See [`docs/plan/`](docs/plan/).
 
 ## Why
 

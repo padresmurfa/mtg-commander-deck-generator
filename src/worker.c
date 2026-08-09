@@ -1,9 +1,11 @@
 #include "mf/worker.h"
 
 #include "mf/artifact.h"
+#include "mf/digest.h"
 #include "mf/json.h"
 #include "mf/panic.h"
 #include "mf/pool.h"
+#include "mf/trial.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -15,9 +17,11 @@
    only in tests. */
 #define MF_VALIDATE_WORK_BYTES (1u << 20)
 #define MF_VALIDATE_ITEMS 4
-#define MF_VALIDATE_HEAP_ARENAS 2
 #define MF_VALIDATE_FRAMES 3
 #define MF_VALIDATE_FRAME_BYTES 4096
+/* Enough work items that a partitioning bug has somewhere to hide, and few
+   enough that `validate` still returns instantly. */
+#define MF_VALIDATE_TRIAL_ITEMS 32
 
 /* A record this code builds is well-formed or the code is wrong, so there is
    nothing to check about the text. Whether it reaches the disk is a different
@@ -61,6 +65,28 @@ static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
         mf_arena_alloc(frames[d], MF_VALIDATE_FRAME_BYTES);
     }
     for (size_t d = MF_VALIDATE_FRAMES; d-- > 0;) mf_pool_release(stack, frames[d]);
+
+    /* The determinism harness, on the only work there is to measure. Claimed
+       from the pool once for the whole trial — a phase boundary, which is where
+       an acquire belongs. */
+    mf_arena *work = mf_pool_acquire(heap);
+    mf_digests g;
+    mf_digests_init(&g, c->seed);
+    mf_trial_plan plan = {MF_VALIDATE_TRIAL_ITEMS, 1, 0};
+    mf_trial_result trial;
+    mf_trial_run(work, c, &plan, &g, &trial);
+    mf_pool_release(heap, work);
+
+    mf_jw *dw = mf_jw_new(root);
+    mf_jw_obj_begin(dw);
+    mf_jw_key(dw, "record");      mf_jw_str(dw, "digest");
+    mf_jw_key(dw, "seed");        mf_jw_int(dw, (long long)c->seed);
+    mf_jw_key(dw, "items");       mf_jw_int(dw, (long long)trial.items);
+    mf_jw_key(dw, "hand_total");  mf_jw_int(dw, (long long)trial.hand_total);
+    mf_jw_key(dw, "score_total"); mf_jw_int(dw, (long long)trial.score_total);
+    mf_jw_key(dw, "layers");      mf_digests_write(&g, dw);
+    mf_jw_obj_end(dw);
+    write_record(art, dw);
 
     mf_jw *w = mf_jw_new(root);
     mf_jw_obj_begin(w);

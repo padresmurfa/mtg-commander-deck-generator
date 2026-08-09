@@ -142,6 +142,32 @@ invariants:
       - accumulate in integers; convert to float once, at the end, in fixed order
       - no wall-clock, no pointer values, no hash-map memory-order iteration reaching output
       - memo cache must be value-neutral (ref: 17.2)
+    mechanisms:
+      added: sprint 0.3
+      rng: >
+        mf/rng. Counter-based: every value is a pure function of (seed, stream, counter), so no
+        draw depends on what was drawn before it or on which worker drew it. Per stream the
+        sequence is splitmix64 unchanged; only the starting state is derived from the pair. The
+        stream is keyed by WORK ITEM, never by worker — a worker-keyed stream would make the
+        output depend on the thread count, which is the bug the invariant exists to prevent.
+      bounded_draw: >
+        Rejection, not modulo: draws below 2^64 mod n are discarded so that what remains is an
+        exact multiple of n. The bias a modulo fold leaves is one value in 2^64 and no sample size
+        would ever find it, so mf_rng_reject_below is public and the property is asserted as
+        arithmetic instead.
+      reduction: >
+        mf/reduce. Results are not accumulated while the work runs at all: each item writes its own
+        slot, and the reduction happens once at the end in ascending index. Every slot must be
+        filled before the reduction is readable — a missing slot is a dropped work item, and a
+        slightly-wrong total is how that would otherwise be hidden.
+      digest: >
+        mf/digest. 128 bits in two lanes, absorbed byte at a time so incremental hashing equals
+        one-shot hashing by construction, and big-endian so the value does not depend on the
+        machine. Semantic values only, never rendered text.
+      layers: [preprocess, opening, solo, gauntlet, run]
+      layer_rationale: >
+        A divergence says WHERE. The run layer is the other four folded in ascending layer order —
+        derived, never written directly, and readable only after the seal.
 
   - id: crash_tolerance
     ref: "16"
@@ -839,6 +865,31 @@ validation:
     combinations: 6
     requirement: all combinations produce identical digests
     catches: [reduction_order_bugs, hidden_state, unserialised_counters, thread_order_dependencies, cache_induced_variation]
+    status:
+      added: sprint 0.3
+      running_against: >
+        mf/trial — a stand-in evaluation with no game semantics (shuffle, draw, add) that has the
+        SHAPE of the real thing: per-item streams, out-of-order collection, index-ordered
+        reduction, layered digests, a resumable cursor. It exists to be deleted when E2 produces a
+        real opening phase.
+      thread_axis: >
+        Threading arrives in sprint 6.1, so the axis is exercised by partitioning the work the way
+        a thread pool would and visiting the partitions last-first. The point is to prove the
+        digest is invariant to partition order, which is where the bug would be.
+      resume_axis: >
+        A checkpoint taken mid-item, carrying the result so far and the RNG counter and nothing
+        else. Tested at every boundary from 0 to items, not only at the halfway mark.
+
+  golden_digests:
+    ref: "17.4"
+    added: sprint 0.3
+    file: tests/golden/validate.txt
+    contents: the five layer digests plus the trial totals, one per line, in layer order
+    compared_by: make golden-check, part of make check
+    updated_by: make golden
+    update_rationale: >
+      Deliberately a separate command. A harness that refreshed its own expectation on failure
+      would agree with every change ever made, including the wrong ones.
 
   self_consistency:
     ref: "13.4"

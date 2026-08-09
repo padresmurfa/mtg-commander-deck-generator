@@ -7,6 +7,10 @@ int main(void) {
     run_panic_tests();
     run_arena_tests();
     run_pool_tests();
+    run_rng_tests();
+    run_digest_tests();
+    run_reduce_tests();
+    run_trial_tests();
     run_mem_tests();
     run_json_tests();
     run_config_tests();
