@@ -14,7 +14,7 @@
 #include "mf/scryfall.h"
 #include "mf/skill.h"
 #include "mf/table.h"
-#include "mf/trial.h"
+#include "mf/evaluate.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -28,9 +28,66 @@
 #define MF_VALIDATE_ITEMS 4
 #define MF_VALIDATE_FRAMES 3
 #define MF_VALIDATE_FRAME_BYTES 4096
-/* Enough work items that a partitioning bug has somewhere to hide, and few
-   enough that `validate` still returns instantly. */
-#define MF_VALIDATE_TRIAL_ITEMS 32
+/* Enough games that a partitioning bug has somewhere to hide, and few enough
+   that `validate` still returns instantly. */
+#define MF_VALIDATE_GAMES 32
+
+/* The deck `validate` plays. Fixed and written down here rather than read from
+   anywhere, because the determinism matrix is about the *shape* of the run and
+   a deck that changed underneath it would make every golden file a moving
+   target. Thirty untapped lands, eight that enter tapped, and a curve — the
+   taplands matter, because sequencing them is the first decision the phase
+   makes that a policy could make differently. */
+#define MF_VALIDATE_LANDS 30
+#define MF_VALIDATE_TAPLANDS 8
+#define MF_VALIDATE_TWOS 30
+#define MF_VALIDATE_THREES 23
+
+static void validate_deck(mf_deck *d) {
+    memset(d, 0, sizeof *d);
+    for (unsigned i = 0; i < MF_DECK_CARDS; i++) {
+        mf_metacard *k = &d->key[i];
+        d->table_index[i] = i;
+        if (i < MF_VALIDATE_LANDS) {
+            k->types = MF_TYPE_LAND;
+            k->produces = MF_MANA_G;
+            k->produces_max = 1;
+            k->ops = (uint16_t)(1u << MF_OP_TAP_FOR_MANA);
+        } else if (i < MF_VALIDATE_LANDS + MF_VALIDATE_TAPLANDS) {
+            k->types = MF_TYPE_LAND;
+            k->produces = MF_MANA_G | MF_MANA_W;
+            k->produces_max = 1;
+            k->ops = (uint16_t)((1u << MF_OP_TAP_FOR_MANA_CHOICE) | (1u << MF_OP_ENTERS_TAPPED));
+        } else if (i < MF_VALIDATE_LANDS + MF_VALIDATE_TAPLANDS + MF_VALIDATE_TWOS) {
+            k->types = MF_TYPE_CREATURE;
+            k->cmc = 2;
+            k->generic = 1;
+            k->g = 1;
+            k->power = k->toughness = 2;
+        } else {
+            k->types = MF_TYPE_CREATURE;
+            k->cmc = 3;
+            k->generic = 2;
+            k->g = 1;
+            k->power = k->toughness = 3;
+        }
+    }
+}
+
+/* A keep rule with real numbers in it, so mulligans happen. */
+static const mf_turn_policy MF_VALIDATE_POLICY = {
+    .mulligan = {"careful", 2, 5, 1, 3, 3},
+    .tapped_lands_first = true,
+    .expensive_first = true,
+    .turns = 4};
+static const mf_phase_gate MF_VALIDATE_GATE = {MF_GATE_MIN_MANA, MF_GATE_MIN_SPELLS};
+
+/* T6 (sprint 2.2). The second analytic anchor: the land-drop curve against the
+   closed form, on a deck that neither draws nor ramps — which is the identity's
+   precondition, not a convenience. Fewer samples than G2 because there are four
+   turns per deck and each turn replays the phase. */
+#define MF_T6_SAMPLES 20000
+static const unsigned MF_T6_LANDS[] = {33, 38, 45};
 
 /* Gate G2. 100,000 hands per deck keeps `validate` under a second while leaving
    the standard error small enough for a 5-sigma band to mean something: at
@@ -83,24 +140,35 @@ static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
     }
     for (size_t d = MF_VALIDATE_FRAMES; d-- > 0;) mf_pool_release(stack, frames[d]);
 
-    /* The determinism harness, on the only work there is to measure. Claimed
-       from the pool once for the whole trial — a phase boundary, which is where
-       an acquire belongs. */
+    /* The determinism harness, on the real opening phase. Sprint 0.3 ran this
+       against `mf/trial`, a stand-in with no game semantics that existed to be
+       deleted the moment a real phase existed; 2.2 deleted it. Claimed from the
+       pool once for the whole batch — a phase boundary, which is where an
+       acquire belongs. */
     mf_arena *work = mf_pool_acquire(heap);
     mf_digests g;
     mf_digests_init(&g, c->seed);
-    mf_trial_plan plan = {MF_VALIDATE_TRIAL_ITEMS, 1, 0};
-    mf_trial_result trial;
-    mf_trial_run(work, c, &plan, &g, &trial);
+    mf_deck vd;
+    validate_deck(&vd);
+    mf_eval_plan plan = {MF_VALIDATE_GAMES, 1, 0};
+    mf_eval_result phase;
+    mf_evaluate(work, &vd, &MF_VALIDATE_POLICY, &MF_VALIDATE_GATE, c->seed, &plan, &g, &phase);
     mf_pool_release(heap, work);
 
     mf_jw *dw = mf_jw_new(root);
     mf_jw_obj_begin(dw);
     mf_jw_key(dw, "record");      mf_jw_str(dw, "digest");
     mf_jw_key(dw, "seed");        mf_jw_int(dw, (long long)c->seed);
-    mf_jw_key(dw, "items");       mf_jw_int(dw, (long long)trial.items);
-    mf_jw_key(dw, "hand_total");  mf_jw_int(dw, (long long)trial.hand_total);
-    mf_jw_key(dw, "score_total"); mf_jw_int(dw, (long long)trial.score_total);
+    mf_jw_key(dw, "games");          mf_jw_int(dw, (long long)phase.games);
+    mf_jw_key(dw, "opening_total");  mf_jw_int(dw, (long long)phase.opening_total);
+    /* Hex, not an integer: it is a fold of every state vector in index order,
+       so it exceeds a signed 64-bit range and printing it as one produces a
+       negative number that reads like a bug. The solo layer digest is the
+       stronger statement; this is the one line a human compares. */
+    char state_hex[17];
+    snprintf(state_hex, sizeof state_hex, "%016llx", (unsigned long long)phase.state_total);
+    mf_jw_key(dw, "state_total");    mf_jw_str(dw, state_hex);
+    mf_jw_key(dw, "gate_passes");    mf_jw_int(dw, (long long)phase.passes);
     mf_jw_key(dw, "layers");      mf_digests_write(&g, dw);
     mf_jw_obj_end(dw);
     write_record(art, dw);
@@ -144,6 +212,57 @@ static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
     mf_jw_key(gw, "pass");        mf_jw_bool(gw, g2_pass);
     mf_jw_obj_end(gw);
     write_record(art, gw);
+
+    /* T6 (sprint 2.2). G2 said the hand is dealt honestly; this says the turn
+       loop then draws one card a turn and plays one land a turn. Same tolerance
+       and the same rule, fixed in the sprint document before anything ran. */
+    mf_jw *tw = mf_jw_new(root);
+    mf_jw_obj_begin(tw);
+    mf_jw_key(tw, "record"); mf_jw_str(tw, "land_drops");
+    mf_jw_key(tw, "samples"); mf_jw_int(tw, MF_T6_SAMPLES);
+    mf_jw_key(tw, "tolerance_sigma"); mf_jw_num(tw, MF_ANALYTIC_SIGMA);
+    mf_jw_key(tw, "decks");
+    mf_jw_arr_begin(tw);
+    bool t6_pass = true;
+    double t6_worst = 0.0;
+    /* No mulligan and nothing castable, so the phase is the draw step and the
+       land drop and nothing else — which is what the closed form describes. */
+    mf_turn_policy drops = {.mulligan = {"keep-all", 0, MF_OPENING_HAND, 0, 0, 0},
+                            .turns = MF_ANALYTIC_TURNS};
+    for (size_t i = 0; i < sizeof MF_T6_LANDS / sizeof MF_T6_LANDS[0]; i++) {
+        mf_deck d;
+        memset(&d, 0, sizeof d);
+        for (unsigned n = 0; n < MF_DECK_CARDS; n++) {
+            if (n < MF_T6_LANDS[i]) {
+                d.key[n].types = MF_TYPE_LAND;
+            } else {
+                d.key[n].types = MF_TYPE_CREATURE;
+                d.key[n].cmc = 8;
+                d.key[n].generic = 8;
+            }
+        }
+        for (int side = 0; side < 2; side++) {
+            mf_analytic_drops r;
+            mf_analytic_land_drops(&d, &drops, c->seed, MF_T6_SAMPLES, side == 0, &r);
+            if (!r.pass) t6_pass = false;
+            if (r.worst_sigma > t6_worst) t6_worst = r.worst_sigma;
+
+            mf_jw_obj_begin(tw);
+            mf_jw_key(tw, "lands");       mf_jw_int(tw, (long long)r.lands);
+            mf_jw_key(tw, "on_play");     mf_jw_bool(tw, r.on_play);
+            mf_jw_key(tw, "worst_turn");  mf_jw_int(tw, (long long)r.worst_turn);
+            mf_jw_key(tw, "measured");    mf_jw_num(tw, r.measured[r.worst_turn]);
+            mf_jw_key(tw, "exact");       mf_jw_num(tw, r.exact[r.worst_turn]);
+            mf_jw_key(tw, "worst_sigma"); mf_jw_num(tw, r.worst_sigma);
+            mf_jw_key(tw, "pass");        mf_jw_bool(tw, r.pass);
+            mf_jw_obj_end(tw);
+        }
+    }
+    mf_jw_arr_end(tw);
+    mf_jw_key(tw, "worst_sigma"); mf_jw_num(tw, t6_worst);
+    mf_jw_key(tw, "pass");        mf_jw_bool(tw, t6_pass);
+    mf_jw_obj_end(tw);
+    write_record(art, tw);
 
     mf_jw *w = mf_jw_new(root);
     mf_jw_obj_begin(w);

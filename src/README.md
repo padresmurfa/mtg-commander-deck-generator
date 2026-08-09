@@ -24,7 +24,8 @@
 | `rng` | Counter-based randomness, unbiased bounded draws, Fisher-Yates |
 | `digest` | 128-bit output digests and the five named layers |
 | `reduce` | Index-ordered collection: arrival order cannot reach the answer |
-| `trial` | A stand-in evaluation with no game semantics. Exists to be deleted |
+| `turn` | Turns 1-4 exactly: mana as a matching, castability pip by pip, sequencing |
+| `evaluate` | Many games of the opening phase, reduced in index order. Replaced `trial` in 2.2 |
 | `jstream` | One value at a time out of a JSON array too large to hold |
 | `card` | The card record, its normalisation, and the printing merge rules |
 | `scryfall` | Bulk-export field names, and nothing else |

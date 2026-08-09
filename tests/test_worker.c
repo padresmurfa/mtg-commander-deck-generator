@@ -62,7 +62,7 @@ MF_TEST(validate_exercises_both_pool_disciplines) {
     MF_CHECK(strstr(text, "\"heap_pool_peak\":2") != NULL);
     MF_CHECK(strstr(text, "\"stack_pool_peak\":3") != NULL);
     /* Three borrows: two held together for the whole four-item loop, and one
-       for the trial. Not one per item — a regression to per-item claiming is
+       for the batch of games. Not one per item — a regression to per-item claiming is
        exactly what this number is here to show. */
     MF_CHECK(strstr(text, "\"heap_pool_acquires\":3") != NULL);
     MF_CHECK(strstr(text, "\"stack_pool_acquires\":3") != NULL);

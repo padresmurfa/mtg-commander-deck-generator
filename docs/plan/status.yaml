@@ -13,8 +13,8 @@
 
 meta:
   status: in_progress
-  current_sprint: "2.2"
-  task_split_valid_for: "2.2"     # task-splitting any other sprint is speculative
+  current_sprint: "2.3"
+  task_split_valid_for: "2.3"     # task-splitting any other sprint is speculative
   baseline: greenfield
   language: c
   deliverable: cli
@@ -313,7 +313,20 @@ epics:
           - Monte Carlo agrees with hypergeometric closed forms
       - id: "2.2"
         name: Exact turns 1-4
-        status: not_started
+        status: done
+        retro: docs/plan/retros/2.2-exact-turns.md
+        tasks_doc: docs/plan/sprints/2.2-exact-turns.md
+        result:
+          checks: 10143
+          line_coverage: 100.00
+          branch_coverage: 95.70
+          land_drop_worst_sigma: 1.74
+          land_drop_tolerance_sigma: 5.0
+          land_drop_verdict: pass
+          state_vector_bytes: 13
+          mutations: "35/35"
+          modules_added: [turn, evaluate]
+          modules_deleted: [trial]
         exit_criteria:
           - land drops, mana availability, castability, sequencing
           - end-of-phase state vector produced
@@ -461,50 +474,75 @@ epics:
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
 tasks:
-  sprint: "2.2"
-  doc: docs/plan/sprints/2.2-exact-turns.md
+  sprint: "2.3"
+  doc: docs/plan/sprints/2.3-policies-policy-gap.md
   goal: >
-    Turns 1-4 exactly: land drops, mana availability, castability and sequencing, ending in a
-    state vector the solo evaluation can score.
+    The policy ladder, and gate G3: does naive-versus-careful separate decks that are known to be
+    forgiving from decks that are known to be demanding?
   why_now: >
-    G2 says the hand is dealt honestly. What it does not say is what happens next — and the opening
-    phase is a feasibility gate, so "can this deck cast its spells and reach turn 5 functional" is
-    the question the whole opcode model was built to answer and nothing has asked yet.
+    2.2 built one policy and deliberately built it badly — greedy will not cast a ritual to enable a
+    bigger spell, and it sequences taplands by a flag rather than by whether the mana would be used.
+    That gap is not a defect to fix quietly; it is the signal design section 5 says skill IS. G3 asks
+    whether the signal exists at all, and if it does not, the whole skill ladder is unfounded.
   carried_in: []
   input_from_previous_retro:
     - >
-      G2 covers the shuffle and the draw, NOT the mulligan. The mulligan has no closed form and is
-      checked by properties; do not read the gate as having validated the opening phase.
+      The greedy baseline is weak ON PURPOSE. Do not improve it in place - a careful policy is a new
+      row in the ladder, and the gap between them is the measurement.
     - >
-      A gate must be unable to pass vacuously. The zero-sample case reported agreement it had never
-      observed, and was two lines from shipping. Ask it of every gate.
+      The bottoming rule is a guess with no oracle behind it, carried since 2.1 and now affecting
+      every game played rather than only the hand. 2.3 measures policies; this is one of them.
     - >
-      The bottoming rule is a guess with no oracle behind it. 2.3 measures policies and this is one
-      of the things it should measure.
+      A defect can hide from the state vector. It reports the pool AFTER everything untaps, so
+      anything about timing within a turn is invisible through it. Tests that need to see a turn go
+      through the board API.
     - >
-      mf/trial is still the determinism harness and exists to be deleted once a real opening phase
-      exists. That is this sprint.
+      Draw and cost-reduction AMOUNTS are not in the metacard, so both assume one. This qualifies
+      G1 and it will qualify G3: a policy cannot sequence around a number the model does not carry.
     - >
-      The land-drop and P(>=1 of K by turn T) closed forms in design 13.1 need turns, so they become
-      available as oracles here.
+      A gate must be unable to pass vacuously (2.1), and its threshold must be fixed before the
+      number is seen (2.1, 2.2). G3's separation criterion is the hard case, because "exceeding
+      measurement noise" needs the noise measured first.
   split:
     - id: T1
-      name: the turn loop — untap, draw, land drop, main phase
+      name: the careful policy - sequence the tapland by whether the mana would be used
     - id: T2
-      name: mana availability from the opcode set, including enters-tapped
+      name: the naive policy - a deliberately bad rung, written down as such
     - id: T3
-      name: castability — pips against available colours, not converted cost
+      name: the policy ladder as data, all five rungs from design section 5
     - id: T4
-      name: sequencing, and the greedy baseline policy
+      name: paired measurement - same seeds, same decks, both policies
     - id: T5
-      name: the end-of-phase state vector
+      name: the noise floor, measured BEFORE the separation threshold is chosen
     - id: T6
-      name: land-drop probabilities against the closed form, as a second analytic check
+      name: known-forgiving and known-demanding fixture decks, and why each is which
     - id: T7
-      name: retire mf/trial and move the determinism matrix onto the real opening phase
+      name: gate G3 - measured, recorded, and called
     - id: T8
       name: retro and amendments
 retros:
+  - sprint: "2.2"
+    doc: docs/plan/retros/2.2-exact-turns.md
+    gates: []
+    design_amendments: 5
+    headline: >
+      The opening phase is real: turns 1-4 exactly, mana as a bipartite matching rather than a count
+      per colour, castability decided pip by pip by Hall's condition, and a 13-byte state vector with
+      no padding and no float. mf/trial is deleted after carrying the determinism matrix since 0.3,
+      and the six-way matrix now runs on the thing that will actually be optimised - with the kept
+      hand as the resume state, which is genuinely all a half-finished game carries where the
+      stand-in's two integers were chosen to look plausible. The design's named oracle for land drops
+      LOOKED wrong - its comment claims a conjunction over turns and its body computes one term - and
+      exact rational arithmetic against brute-force enumeration showed it right: exactly one card is
+      seen per turn and the requirement rises by one per turn, so the events are nested and the
+      conjunction collapses. Checking before accusing is the only reason a plausible complaint did
+      not become a wrong fix. Mutation testing did the real work again: 35 mutations, 4 tests
+      rewritten for pinning nothing, and two defects - a fetched-land flag that turned out to have no
+      observable effect at all, which is only possible if entering the battlefield changes no mana,
+      and it did not, so a turn-one Sol Ring paid for nothing behind it. The coverage floor found a
+      process defect rather than a code one: run_turn_tests was never registered in the suite, so a
+      module whose own tests all passed contributed nothing to make check.
+    carry_over: []
   - sprint: "2.1"
     doc: docs/plan/retros/2.1-shuffle-draw-mulligan.md
     gates: [G2]

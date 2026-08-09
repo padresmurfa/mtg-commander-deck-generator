@@ -193,7 +193,30 @@ Evaluation yields **(deck × strategy) → performance**. Consequences:
 ### Phase-end state evaluation
 
 Needs an explicit state vector — mana available, cards in hand, board presence, engine pieces
-online — and a per-strategy scalarisation of it. That scalarisation is a guess, but a checkable one:
+online — and a per-strategy scalarisation of it.
+
+*(Amended sprint 2.2, when the vector was built.)* It is thirteen bytes, every field an integer, with
+**no padding** — asserted statically, because the struct is folded into a run digest byte by byte and
+a hole would put whatever the stack last held into it. The fields are `turns`, `lands`, `mana`,
+`colours`, `spells`, `permanents`, `hand`, `missed_drops`, `mana_spent`, `mana_wasted`, `mulligans`,
+`on_play`, `commander_cast`.
+
+`mana_wasted` earns its place specifically: this section's argument for simulating these turns
+exactly is *sequencing* — "whether the tapland arrived on the turn you had nothing to cast" — and it
+is the only field that can see it.
+
+**The threshold is not in the vector.** This section says the gate's bar is conditional on the
+strategy under test, so the numbers live in a separate predicate, defaulting to *three mana entering
+turn 5 and at least one spell cast*. That is the low bar, and the exact negation of §7.8's
+early-termination example. Keeping it out is what lets §5's five rungs disagree without replaying a
+game.
+
+**On the play for even game indices, on the draw for odd.** Fixing the choice was rejected because it
+would bias the objective *differentially* rather than uniformly: the extra card is worth far more to a
+slow, expensive deck than a cheap one, so a fixed choice changes the *ranking* — which is precisely
+what G4 validates and could not see. Parity assignment is exactly 50/50 over an even sample count, so
+it is proportional stratification rather than randomisation, and it keeps §7.8's common random
+numbers intact: game `g` is on the play for every candidate compared at that index. That scalarisation is a guess, but a checkable one:
 verify that end-of-opening score correlates with end-of-game outcome *within the simulator*. If it
 does not, the phase evaluator is measuring the wrong thing, and that is discoverable in an afternoon
 rather than after the GA has run.
@@ -1199,6 +1222,29 @@ million hands each. Three corrections to the paragraph above:
 The other quantities the paragraph lists — land drops through turn T, P(≥1 of K by turn T) — need
 turns, so they belong to 2.2 rather than here.
 
+*(Amended sprint 2.2, when the land-drop check was built.)* **P(made every land drop through turn T)
+is a single hypergeometric survival value, not a conjunction of T of them**, and the reason is worth
+recording because the code above reads like a bug and is not:
+
+> Exactly one card is seen per turn, so `L(t) − L(t−1) ∈ {0,1}`, and the requirement rises by exactly
+> one per turn. So `L(t) ≥ t` implies `L(t−1) ≥ t−1`: the events are **nested**, and the conjunction
+> collapses to its last term.
+
+`computeLandDropProbabilities` in the legacy tree documents the conjunction and computes the last
+term. That looked like an overstatement — the conjunction is a subset, so it could only be smaller —
+and it is not one. Checked with exact rationals against brute-force enumeration before anything was
+built on it.
+
+**The identity is a precondition, not a convenience.** Any card drawn beyond the draw step, or any
+land put onto the battlefield by a spell, breaks the nesting immediately. So the deck measured
+against it does neither, and a deck that draws is used as the *negative* case — it fails the check,
+which is what says the check has teeth.
+
+**Measured: worst cell 1.74σ** against the same 5σ tolerance, three deck shapes × both sides of the
+play/draw split × four turns. It is not an independent oracle — it is the same hypergeometric family
+G2 used — but it exercises a code path G2 never touched: the turn loop's draw step and the land-drop
+rule.
+
 ### 13.2 Precons as the primary fixture set
 
 Precons are the best validation corpus available, for four reasons:
@@ -1570,13 +1616,18 @@ digest matches and the solo digest does not, the change is in the evaluation and
 and that is most of the debugging. The run layer is derived, never written directly, and readable
 only after the seal.
 
-**Golden files.** `tests/golden/validate.txt` holds the five digests and the trial totals; `make
+**Golden files.** `tests/golden/validate.txt` holds the five digests and the phase totals; `make
 golden-check` compares, `make golden` records. Updating is deliberately a separate command — a
 harness that refreshed its own expectation on failure would agree with every change ever made.
 
-**What the matrix currently runs against.** `mf/trial`: a stand-in evaluation with no game semantics
-whatsoever — shuffle, draw, add — that has the *shape* of the real thing. It exists to be deleted
-when E2 produces a real opening phase, and the golden files are regenerated then.
+**What the matrix runs against.** *(Amended sprint 2.2, when the stand-in was deleted.)* The real
+opening phase, via `mf/evaluate`: thirty-two games of a fixed deck, mulliganed and played out four
+turns. `mf/trial` is gone — deleted rather than left unused, because a stand-in that still builds is
+a stand-in somebody will still call.
+
+The resume axis gained something real in the move. The stand-in's halfway state was two integers
+chosen to look plausible; the phase's is **the kept hand**, which is genuinely the whole of what a
+half-finished game carries. If it were not, the matrix would say so.
 
 ### 17.2 The memo cache must be value-neutral
 

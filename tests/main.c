@@ -10,7 +10,6 @@ int main(void) {
     run_rng_tests();
     run_digest_tests();
     run_reduce_tests();
-    run_trial_tests();
     run_mem_tests();
     run_json_tests();
     run_jstream_tests();
@@ -24,7 +23,9 @@ int main(void) {
     run_table_tests();
     run_hypergeo_tests();
     run_deck_tests();
+    run_turn_tests();
     run_analytic_tests();
+    run_evaluate_tests();
     run_config_tests();
     run_artifact_tests();
     run_cli_tests();

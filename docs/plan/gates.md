@@ -16,7 +16,7 @@ a reason — never "done".
 | ---- | ------ | -------- | --------- | ------- |
 | **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9325**, conditional. Re-measured in 1.2.1, superseding 0.9357 ([retro](retros/1.2.1-clause-reachability.md)) |
 | **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | 5σ per cell, `SE = sqrt(p(1-p)/N)`, fixed in advance | **PASS — worst 2.43σ** ([retro](retros/2.1-shuffle-draw-mulligan.md)) |
-| **G3** Policy gap discriminates | 2.3 | Does naive-vs-careful separate known-forgiving from known-demanding decks? | Separation exceeding measurement noise | *pending* |
+| **G3** Policy gap discriminates | 2.3 | Does naive-vs-careful separate known-forgiving from known-demanding decks? | A fixed multiple of a noise floor measured first | *pending* |
 | **G4** Precon rank correlation | 3.3 | Does the objective rank real decks in the right order? | Spearman above threshold, precons with n≥100 | *pending* |
 | **G5** GA beats greedy | 4.3 | Is the landscape optimisable by population methods? | Margin exceeding the GA's own noise | *pending* |
 
@@ -58,8 +58,19 @@ fails — it just makes every later number wrong the same way.
 result would inherit the defect.
 
 **G3 — policy gap discriminates.** The entire skill ladder rests on the gap between naive and
-careful play being a real, measurable signal. *On failure:* §5 of the design is unfounded and
-needs redesigning before the bracket system is built into the optimiser.
+careful play being a real, measurable signal.
+
+Sprint 2.2 built the naive rung first and **built it badly on purpose** — it will not cast a ritual
+to enable a bigger spell, and it sequences taplands by a flag rather than by whether the mana would
+be used. That is the instrument, not a shortcoming of it.
+
+**The threshold is a multiple of a noise floor that must be measured first**, which is a sharper
+version of the rule G2 established. "Separation exceeding measurement noise" is not a threshold until
+the noise is a number, and a threshold derived from the same run it grades is not a gate — so what
+gets fixed in advance is the *multiple*.
+
+*On failure:* §5 of the design is unfounded and needs redesigning before the bracket system is built
+into the optimiser.
 
 **G4 — precon rank correlation.** The objective is validated against 67 precons with ~11,700
 tracked games. Rank correlation, not absolute win-rate fitting — the data is 4-player-normalised

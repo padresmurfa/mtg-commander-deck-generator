@@ -57,3 +57,54 @@ void mf_analytic_openings(const mf_deck *d, uint64_t seed, unsigned samples,
         if (sigma > MF_ANALYTIC_SIGMA) out->pass = false;
     }
 }
+
+void mf_analytic_land_drops(const mf_deck *d, const mf_turn_policy *p, uint64_t seed,
+                            unsigned samples, bool on_play, mf_analytic_drops *out) {
+    memset(out, 0, sizeof *out);
+    out->samples = samples;
+    out->on_play = on_play;
+
+    unsigned lands = 0;
+    for (unsigned i = 0; i < MF_DECK_LIBRARY; i++) {
+        if (d->key[i].types & MF_TYPE_LAND) lands++;
+    }
+    out->lands = lands;
+
+    /* A run of nothing must not pass — the 2.1 defect, asked of this gate
+       before it was written rather than after it shipped. */
+    out->pass = samples > 0;
+
+    for (unsigned t = 1; t <= MF_ANALYTIC_TURNS; t++) {
+        mf_turn_policy turn = *p;
+        turn.turns = (uint8_t)t;
+
+        /* Counted as integers and divided once (§17.1). */
+        unsigned long made = 0;
+        for (unsigned g = 0; g < samples; g++) {
+            /* Parity picks the side: the phase reads it from the game index, so
+               asking for one side means using only games of that parity. */
+            uint64_t game = (uint64_t)g * 2 + (on_play ? 0u : 1u);
+            mf_phase_state s;
+            mf_phase_run(d, &turn, seed, game, &s);
+            if (s.missed_drops == 0) made++;
+        }
+
+        unsigned seen = MF_OPENING_HAND + (on_play ? t - 1 : t);
+        double pr = mf_hypergeo_sf(MF_DECK_LIBRARY, lands, seen, t);
+        double measured = samples ? (double)made / (double)samples : 0.0;
+        out->exact[t] = pr;
+        out->measured[t] = measured;
+
+        double sigma;
+        if (pr <= 0.0 || pr >= 1.0) {
+            sigma = measured == pr ? 0.0 : INFINITY;
+        } else {
+            sigma = fabs(measured - pr) / sqrt(pr * (1.0 - pr) / (double)samples);
+        }
+        if (sigma > out->worst_sigma) {
+            out->worst_sigma = sigma;
+            out->worst_turn = t;
+        }
+        if (sigma > MF_ANALYTIC_SIGMA) out->pass = false;
+    }
+}
