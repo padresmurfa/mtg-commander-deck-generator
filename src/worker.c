@@ -9,7 +9,10 @@
 #include "mf/pool.h"
 #include "mf/jstream.h"
 #include "mf/opcode.h"
+#include "mf/precon.h"
 #include "mf/scryfall.h"
+#include "mf/skill.h"
+#include "mf/table.h"
 #include "mf/trial.h"
 
 #include <stdio.h>
@@ -240,21 +243,34 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
         }
     }
 
+    mf_skill *floors = mf_arena_array(durable, pool_count ? pool_count : 1, sizeof *floors);
+    for (size_t i = 0; i < pool_count; i++) floors[i] = mf_skill_floor(&pool[i]);
+
     int rc = stream_err == MF_OK ? MF_EXIT_OK : MF_EXIT_FAILURE;
+    char table_hash[MF_DIGEST_HEX] = "";
     if (rc == MF_EXIT_OK) {
-        mf_artifact *table = NULL;
-        if (mf_artifact_open(durable, c->card_table_path, &table) != MF_OK) {
+        mf_digest th;
+        if (mf_table_write(durable, c->card_table_path, c->game, pool, pool_count, classes,
+                           floors, &th) != MF_OK) {
             fprintf(stderr, "mfsim: cannot write card table: %s\n", c->card_table_path);
             rc = MF_EXIT_FAILURE;
         } else {
-            for (size_t i = 0; i < count; i++) {
-                mf_arena_mark frame = mf_arena_push(scratch);
-                mf_jw *cw = mf_jw_new(scratch);
-                mf_card_write(&cards[i], cw);
-                if (mf_artifact_write(table, mf_jw_text(cw)) != MF_OK) rc = MF_EXIT_FAILURE;
-                mf_arena_pop(scratch, frame);
-            }
-            if (mf_artifact_close(table) != MF_OK) rc = MF_EXIT_FAILURE;
+            mf_digest_hex(&th, table_hash);
+        }
+    }
+
+    /* The precon side table, when one was given. Optional because it is only
+       wanted by the acquisition-path cost model (§7.5) and precon seeding (§5),
+       and a table can be built without either. */
+    size_t precon_decks = 0, precon_cards = 0;
+    if (rc == MF_EXIT_OK && c->precon_path[0] != '\0') {
+        mf_precons *pre = NULL;
+        if (mf_precons_load(durable, c->precon_path, &pre) != MF_OK) {
+            fprintf(stderr, "mfsim: cannot read precon file: %s\n", c->precon_path);
+            rc = MF_EXIT_FAILURE;
+        } else {
+            precon_decks = mf_precons_count(pre);
+            precon_cards = mf_precons_distinct_cards(pre);
         }
     }
 
@@ -325,6 +341,31 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
     mf_jw_key(w, "unpriced_before"); mf_jw_int(w, (long long)unpriced_before);
     mf_jw_key(w, "imputed");         mf_jw_int(w, (long long)mf_classes_imputed(classes));
     mf_jw_key(w, "unpriced_after");  mf_jw_int(w, (long long)mf_classes_unpriced(classes));
+    mf_jw_key(w, "skill_floors");
+    mf_jw_obj_begin(w);
+    {
+        size_t by_floor[MF_SKILL_COUNT] = {0};
+        for (size_t i = 0; i < pool_count; i++) by_floor[floors[i]]++;
+        for (int s = 0; s < MF_SKILL_COUNT; s++) {
+            mf_jw_key(w, mf_skill_name((mf_skill)s));
+            mf_jw_int(w, (long long)by_floor[s]);
+        }
+    }
+    mf_jw_obj_end(w);
+    mf_jw_obj_end(w);
+    /* §14.2: prices move weekly and Scryfall changes underneath, so a run is not
+       reproducible from (seed, config) alone. Every run records the hash of the
+       table it actually read. */
+    mf_jw_key(w, "card_table");
+    mf_jw_obj_begin(w);
+    mf_jw_key(w, "path"); mf_jw_str(w, c->card_table_path);
+    mf_jw_key(w, "hash"); mf_jw_str(w, table_hash);
+    mf_jw_obj_end(w);
+    mf_jw_key(w, "precons");
+    mf_jw_obj_begin(w);
+    mf_jw_key(w, "path");           mf_jw_str(w, c->precon_path);
+    mf_jw_key(w, "decks");          mf_jw_int(w, (long long)precon_decks);
+    mf_jw_key(w, "distinct_cards"); mf_jw_int(w, (long long)precon_cards);
     mf_jw_obj_end(w);
     mf_jw_key(w, "layers");        mf_digests_write(&g, w);
     mf_jw_obj_end(w);

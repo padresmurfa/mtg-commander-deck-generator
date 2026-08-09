@@ -51,7 +51,7 @@ line=$(grep '"record":"digest"' "$WORK/run.jsonl") || fail "no digest record in 
 
 # --- and the card table, which is the first real data the harness measures ---
 cat > "$WORK/pre.json" <<EOF
-{"artifact_path":"$WORK/pre.jsonl","card_table_path":"$WORK/cards.jsonl",
+{"artifact_path":"$WORK/pre.jsonl","card_table_path":"$WORK/cards.bin",
  "arena_bytes":4194304,"seed":7,"persist_growth":false}
 EOF
 
@@ -69,9 +69,14 @@ pre=$(grep '"record":"preprocess"' "$WORK/pre.jsonl") || fail "no preprocess rec
     hex=$(printf '%s' "$pre" | sed -n 's/.*"preprocess":"\([0-9a-f]*\)".*/\1/p')
     [ -n "$hex" ] || fail "the preprocess record has no digest"
     echo "cards.digest $hex"
-    # The card table itself, so a change in what is written is not hidden behind
-    # a digest of what was read.
-    echo "cards.rows $(wc -l < "$WORK/cards.jsonl" | tr -d ' ')"
+    # The card table itself, so a change in what is WRITTEN is not hidden behind
+    # a digest of what was READ. Since 1.3 that is the binary table's own content
+    # hash (design §14.2), which the run artifact records because prices move and
+    # a run is not reproducible from (seed, config) alone.
+    thash=$(printf '%s' "$pre" | sed -n 's/.*"card_table":{"path":"[^"]*","hash":"\([0-9a-f]*\)".*/\1/p')
+    [ -n "$thash" ] || fail "the preprocess record has no card table hash"
+    echo "cards.table_hash $thash"
+    echo "cards.table_bytes $(wc -c < "$WORK/cards.bin" | tr -d ' ')"
 } >> "$WORK/actual.txt"
 
 if [ "$UPDATE" = "1" ]; then

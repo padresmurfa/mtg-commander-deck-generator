@@ -329,32 +329,6 @@ const mf_card *mf_cardset_find(mf_cardset *s, const char *oracle_id) {
 
 /* ---- emission ------------------------------------------------------------ */
 
-void mf_card_write(const mf_card *c, mf_jw *w) {
-    mf_jw_obj_begin(w);
-    mf_jw_key(w, "oracle_id");    mf_jw_str(w, c->oracle_id);
-    mf_jw_key(w, "name");         mf_jw_str(w, c->name);
-    mf_jw_key(w, "identity");     mf_jw_int(w, c->identity);
-    mf_jw_key(w, "types");        mf_jw_int(w, c->types);
-    mf_jw_key(w, "cmc");          mf_jw_int(w, c->cmc);
-    mf_jw_key(w, "pips");
-    mf_jw_obj_begin(w);
-    mf_jw_key(w, "generic");      mf_jw_int(w, c->pips.generic);
-    mf_jw_key(w, "w");            mf_jw_int(w, c->pips.w);
-    mf_jw_key(w, "u");            mf_jw_int(w, c->pips.u);
-    mf_jw_key(w, "b");            mf_jw_int(w, c->pips.b);
-    mf_jw_key(w, "r");            mf_jw_int(w, c->pips.r);
-    mf_jw_key(w, "g");            mf_jw_int(w, c->pips.g);
-    mf_jw_key(w, "colourless");   mf_jw_int(w, c->pips.colourless);
-    mf_jw_key(w, "variable");     mf_jw_int(w, c->pips.variable);
-    mf_jw_obj_end(w);
-    mf_jw_key(w, "commander_legal"); mf_jw_bool(w, c->commander_legal);
-    mf_jw_key(w, "has_price");    mf_jw_bool(w, c->has_price);
-    mf_jw_key(w, "price_cents");  mf_jw_int(w, c->price_cents);
-    mf_jw_key(w, "printings");    mf_jw_int(w, c->printings);
-    mf_jw_key(w, "legality_disagreements"); mf_jw_int(w, c->legality_disagreements);
-    mf_jw_obj_end(w);
-}
-
 void mf_cardset_digest(mf_cardset *s, mf_digest *d) {
     const mf_card *cards = mf_cardset_sorted(s);
     mf_digest_u64(d, s->count);

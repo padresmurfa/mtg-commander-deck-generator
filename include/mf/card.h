@@ -187,10 +187,9 @@ size_t mf_cardset_disagreements(const mf_cardset *s);
 const mf_card *mf_cardset_sorted(mf_cardset *s);
 const mf_card *mf_cardset_find(mf_cardset *s, const char *oracle_id);
 
-/* One card as one JSON object. Text for now: the binary layout is decided once
-   the opcode encoding is known (sprint 1.3), and guessing it here would mean
-   packing the bits twice. */
-void mf_card_write(const mf_card *c, mf_jw *w);
+/* The JSONL intermediate this module used to write was replaced in sprint 1.3
+   by mf/table, once the opcode encoding was settled enough to pack bits against.
+   Nothing writes a card as text any more. */
 
 /* Every card, in sorted order, as semantic values — never as the text above.
    Hashing the rendering would make a formatting change look like a new card

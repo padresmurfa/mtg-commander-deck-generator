@@ -26,6 +26,7 @@ typedef struct {
     const char *game;        /* --game, overrides config.game. Required by preprocess */
     bool no_spawn;           /* --no-spawn, do the work in this process */
     bool report_unmatched;   /* --report-unmatched, rank the unmodelled clauses */
+    const char *precon_path; /* --precons, the decklist side table */
 } mf_cli;
 
 /* Global options are parsed before the subcommand dispatches, so --config and

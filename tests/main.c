@@ -21,6 +21,7 @@ int main(void) {
     run_classes_tests();
     run_precon_tests();
     run_skill_tests();
+    run_table_tests();
     run_config_tests();
     run_artifact_tests();
     run_cli_tests();

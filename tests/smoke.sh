@@ -107,7 +107,7 @@ ok "the orchestrator deepened the stack pool and kept the answer ($depth arenas)
 
 # --- preprocess consumes a bulk file and refuses to invent one ------------
 cat > "$WORK/pre.json" <<EOF
-{"artifact_path":"$WORK/pre.jsonl","card_table_path":"$WORK/cards.jsonl",
+{"artifact_path":"$WORK/pre.jsonl","card_table_path":"$WORK/cards.bin",
  "arena_bytes":4194304,"persist_growth":false}
 EOF
 
@@ -141,9 +141,32 @@ grep -q '"game":"paper"' "$WORK/pre.jsonl" || fail "the game was not recorded"
 grep -q '"other_games":2' "$WORK/pre.jsonl" || fail "other games were not dropped"
 grep -q '"legality_disagreements":1' "$WORK/pre.jsonl" || fail "the disagreement was not counted"
 grep -q '"no_oracle_id":1' "$WORK/pre.jsonl" || fail "the unusable printing was not counted"
-[ "$(wc -l < "$WORK/cards.jsonl")" -eq 6 ] || fail "the card table has the wrong number of rows"
-grep -q '"price_cents":175' "$WORK/cards.jsonl" || fail "the cheapest printing did not win"
-ok "preprocess merged the fixture into 6 cards"
+# The card table is binary since 1.3. Its first four bytes say so, and the run
+# artifact carries its content hash — which is what makes a run reproducible
+# when prices move underneath it (design §14.2).
+[ "$(dd if="$WORK/cards.bin" bs=1 count=4 2>/dev/null)" = "MFCT" ] ||
+    fail "the card table is not a card table"
+grep -q '"card_table":{"path":"[^"]*","hash":"[0-9a-f]\{32\}"}' "$WORK/pre.jsonl" ||
+    fail "the run did not record the card table hash"
+# Six cards merged, of which the commander-legal representable ones reach the
+# table — the pool §7.9 prunes to, and the pool the classes were built over.
+grep -q '"classes":{"pool":' "$WORK/pre.jsonl" || fail "no class reduction was recorded"
+ok "preprocess merged the fixture and wrote a hashed binary card table"
+
+# --- the precon side table -------------------------------------------------
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
+    --bulk tests/fixtures/bulk-sample.json \
+    --precons tests/fixtures/precons-sample.jsonl >/dev/null 2>&1 ||
+    fail "preprocess with a precon file failed"
+grep -q '"precons":{"path":"tests/fixtures/precons-sample.jsonl","decks":2,"distinct_cards":11}' \
+    "$WORK/pre.jsonl" || fail "the precon side table was not recorded"
+
+rc=0
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
+    --bulk tests/fixtures/bulk-sample.json --precons "$WORK/no-such-precons.jsonl" \
+    >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 1 ] || fail "a missing precon file should exit 1, got $rc"
+ok "the precon side table loads, and a missing one is a plain failure"
 
 # --- the unmatched tail is a document the tool produces -------------------
 # Its own fixture rather than the one above: adding oracle text there would

@@ -44,7 +44,8 @@ mf_err mf_cli_parse(int argc, char **argv, mf_cli *out, char *eb, size_t el) {
         }
         if (strcmp(arg, "--config") == 0 || strcmp(arg, "--out") == 0 ||
             strcmp(arg, "--report") == 0 || strcmp(arg, "--bulk") == 0 ||
-            strcmp(arg, "--game") == 0) {
+            strcmp(arg, "--game") == 0 ||
+            strcmp(arg, "--precons") == 0) {
             if (i + 1 >= argc) {
                 say(eb, el, "%s needs a value", arg);
                 return MF_ERR_ARGS;
@@ -54,6 +55,7 @@ mf_err mf_cli_parse(int argc, char **argv, mf_cli *out, char *eb, size_t el) {
             else if (strcmp(arg, "--out") == 0) out->out_path = value;
             else if (strcmp(arg, "--bulk") == 0) out->bulk_path = value;
             else if (strcmp(arg, "--game") == 0) out->game = value;
+            else if (strcmp(arg, "--precons") == 0) out->precon_path = value;
             else out->report_path = value;
             continue;
         }
@@ -113,6 +115,7 @@ void mf_cli_usage(FILE *f) {
         "  --config <path>   run configuration (JSON)\n"
         "  --out <path>      artifact path, overriding the config\n"
         "  --bulk <path>     Scryfall bulk export for preprocess\n"
+        "  --precons <path>  Commander precon decklists for preprocess (optional)\n"
         "  --game <name>     paper | arena | mtgo. Required by preprocess: the\n"
         "                    three are different card sets, so there is no default\n"
         "  --version         print the version\n"

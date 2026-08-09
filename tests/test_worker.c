@@ -4,6 +4,7 @@
 #include "mf/artifact.h"
 #include "mf/mem.h"
 #include "mf/panic.h"
+#include "mf/table.h"
 #include "mf/worker.h"
 
 #include <stdio.h>
@@ -103,7 +104,7 @@ MF_TEST(preprocess_reports_the_unmatched_tail_only_when_asked) {
     snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-unmatched.jsonl");
     c.game = MF_GAME_PAPER;
     c.report_unmatched = true;
-    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.jsonl");
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.bin");
 
     int saved = dup(fileno(stdout));
     MF_CHECK(freopen(out, "w", stdout) != NULL);
@@ -123,7 +124,54 @@ MF_TEST(preprocess_reports_the_unmatched_tail_only_when_asked) {
     MF_CHECK(strstr(tail, "Vigilance") == NULL);
 
     remove(out);
-    remove("build/test-worker-cards.jsonl");
+    remove("build/test-worker-cards.bin");
+    remove(PATH);
+}
+
+MF_TEST(preprocess_records_the_precon_side_table_when_it_is_given) {
+    remove(PATH);
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    snprintf(c.precon_path, sizeof c.precon_path, "tests/fixtures/precons-sample.jsonl");
+    c.game = MF_GAME_PAPER;
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.bin");
+
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_OK);
+    char *run = mf_mem_read_file(A, PATH, NULL);
+    MF_CHECK(strstr(run, "\"decks\":2") != NULL);
+    MF_CHECK(strstr(run, "\"distinct_cards\":11") != NULL);
+    /* And the skill floors are counted, so a table can be pruned per bracket
+       without reading every card again. */
+    MF_CHECK(strstr(run, "\"skill_floors\":{\"any\":") != NULL);
+
+    remove("build/test-worker-cards.bin");
+    remove(PATH);
+}
+
+MF_TEST(a_precon_file_that_is_not_there_fails_the_run) {
+    /* Optional to ask for, not optional to find: a run told to use precons and
+       silently not using them would price acquisition paths wrongly with no
+       sign that it had. */
+    remove(PATH);
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    snprintf(c.precon_path, sizeof c.precon_path, "build/definitely-no-such-precons.jsonl");
+    c.game = MF_GAME_PAPER;
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.bin");
+
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_FAILURE);
+    remove("build/test-worker-cards.bin");
+    remove(PATH);
+}
+
+MF_TEST(a_card_table_that_cannot_be_written_fails_the_run) {
+    remove(PATH);
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    c.game = MF_GAME_PAPER;
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/no/such/dir/cards.bin");
+
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_FAILURE);
     remove(PATH);
 }
 
@@ -152,7 +200,7 @@ MF_TEST(preprocess_reads_a_bulk_file_and_writes_a_card_table) {
     mf_config c = worker_cfg(4u << 20);
     snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
     c.game = MF_GAME_PAPER;
-    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.jsonl");
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.bin");
 
     MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_OK);
 
@@ -163,11 +211,26 @@ MF_TEST(preprocess_reads_a_bulk_file_and_writes_a_card_table) {
     MF_CHECK(strstr(run, "\"game\":\"paper\"") != NULL);
     MF_CHECK(strstr(run, "\"no_oracle_id\":1") != NULL);
 
-    char *table = mf_mem_read_file(A, "build/test-worker-cards.jsonl", NULL);
-    MF_CHECK(table != NULL);
-    MF_CHECK(strstr(table, "\"price_cents\":175") != NULL);
+    /* The card table is binary since 1.3, and reading it back through the same
+       reader every other run will use is what proves the file is a file rather
+       than only a write. */
+    MF_CHECK(strstr(run, "\"card_table\":{\"path\"") != NULL);
+    mf_table *table = NULL;
+    MF_EQ_INT(mf_table_read(A, "build/test-worker-cards.bin", &table), MF_OK);
+    MF_EQ_INT(mf_table_game(table), MF_GAME_PAPER);
+    /* The cheapest printing still wins the merge, now asserted on the card the
+       table holds rather than on a line of text about it. */
+    bool found_sol_ring = false;
+    for (size_t i = 0; i < mf_table_count(table); i++) {
+        const mf_table_card *tc = mf_table_at(table, i);
+        if (strcmp(tc->name, "Sol Ring") == 0) {
+            found_sol_ring = true;
+            MF_EQ_INT(tc->price_cents, 175);
+        }
+    }
+    MF_CHECK(found_sol_ring);
 
-    remove("build/test-worker-cards.jsonl");
+    remove("build/test-worker-cards.bin");
     remove(PATH);
 }
 
@@ -282,6 +345,9 @@ void run_worker_tests(void) {
     MF_RUN_A(validate_exercises_the_memory_layer_and_records_what_it_used);
     MF_RUN_A(validate_exercises_both_pool_disciplines);
     MF_RUN_A(the_unimplemented_subcommands_fail_rather_than_pretending);
+    MF_RUN_A(preprocess_records_the_precon_side_table_when_it_is_given);
+    MF_RUN_A(a_precon_file_that_is_not_there_fails_the_run);
+    MF_RUN_A(a_card_table_that_cannot_be_written_fails_the_run);
     MF_RUN_A(preprocess_without_a_game_is_a_usage_error);
     MF_RUN_A(preprocess_without_a_bulk_file_is_a_usage_error_not_a_failure);
     MF_RUN_A(preprocess_reads_a_bulk_file_and_writes_a_card_table);

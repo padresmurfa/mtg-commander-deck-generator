@@ -50,6 +50,9 @@ int main(int argc, char **argv) {
     if (cli.bulk_path) {
         snprintf(cfg.bulk_path, sizeof cfg.bulk_path, "%s", cli.bulk_path);
     }
+    if (cli.precon_path) {
+        snprintf(cfg.precon_path, sizeof cfg.precon_path, "%s", cli.precon_path);
+    }
     if (cli.report_unmatched) cfg.report_unmatched = true;
     if (cli.game) {
         /* An unrecognised value leaves the game unset, which the worker reports

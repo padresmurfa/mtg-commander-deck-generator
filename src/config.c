@@ -28,6 +28,7 @@ void mf_config_defaults(mf_config *c) {
        before the opcode encoding exists. */
     snprintf(c->card_table_path, sizeof c->card_table_path, "data/cards.jsonl");
     c->bulk_path[0] = '\0';
+    c->precon_path[0] = '\0';
     c->game = MF_GAME_NONE;
 
     /* Eight megabytes rather than sixty-four: the pools are stocked eagerly, so
@@ -173,6 +174,8 @@ mf_err mf_config_load_json(mf_arena *a, mf_config *c, const char *text, char *eb
             if (e == MF_OK) c->max_relaunch = (int)num;
         } else if (strcmp(key, "persist_growth") == 0) {
             e = want_bool(v, key, &c->persist_growth, eb, el);
+        } else if (strcmp(key, "precon_path") == 0) {
+            e = want_string(v, key, c->precon_path, sizeof c->precon_path, eb, el);
         } else if (strcmp(key, "report_unmatched") == 0) {
             e = want_bool(v, key, &c->report_unmatched, eb, el);
         } else {
@@ -226,6 +229,7 @@ void mf_config_write(const mf_config *c, mf_jw *w) {
     mf_jw_key(w, "pool_max_depth");       mf_jw_int(w, (long long)c->pool_max_depth);
     mf_jw_key(w, "max_relaunch");         mf_jw_int(w, c->max_relaunch);
     mf_jw_key(w, "persist_growth");       mf_jw_bool(w, c->persist_growth);
+    mf_jw_key(w, "precon_path");          mf_jw_str(w, c->precon_path);
     mf_jw_key(w, "report_unmatched");     mf_jw_bool(w, c->report_unmatched);
     mf_jw_obj_end(w);
 }

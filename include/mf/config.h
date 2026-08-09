@@ -24,6 +24,10 @@ typedef struct {
        `preprocess` reports as a usage error — it consumes a file, it does not
        fetch one (design §8). */
     char bulk_path[MF_PATH_MAX];
+    /* Commander precon decklists, from tools/fetch-precons.sh. Optional: only
+       the acquisition-path cost model (§7.5) and precon seeding (§5) want them,
+       and a card table can be built without either. */
+    char precon_path[MF_PATH_MAX];
     /* Which game's card set to build. **No default**, deliberately: paper,
        Arena and Magic Online are different card pools — 37,553, 16,223 and
        30,950 cards, with 976 of Arena's existing nowhere else — so choosing one
