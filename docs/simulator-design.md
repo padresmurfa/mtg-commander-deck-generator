@@ -1180,6 +1180,25 @@ TypeScript are the reference implementations and are known good.
 These are real unit tests with exact expected values. If they pass, the shuffler, the draw step, the
 mulligan loop, and the RNG are all sound — which is most of the machinery of the opening phase.
 
+*(Amended sprint 2.1, when the gate was actually run.)* **G2 passes: the worst cell of 7 decks × 8
+outcomes came in at 2.43σ against a 5σ tolerance**, and at 3.19σ over a larger 9-deck sweep at a
+million hands each. Three corrections to the paragraph above:
+
+- **The tolerance is 5σ per cell, `SE = sqrt(p(1-p)/N)`, and it was fixed before anything was
+  measured.** A threshold chosen after seeing the result is not a gate. 5σ rather than 3σ because
+  every cell is graded at once and ~72 of them at 3σ would false-alarm about one run in nine.
+- **The mulligan loop is *not* validated by this.** The hypergeometric is exact for one seven-card
+  draw; the London mulligan is a decision procedure and has no comparable closed form. It is checked
+  by properties — it terminates, the hand shrinks by one per mulligan, seven are always drawn — and
+  the sentence above overstates what the gate settles. What the gate does establish is the shuffler,
+  the draw step and the RNG, which is still most of what everything later inherits.
+- **A gate must be unable to pass vacuously.** With zero samples the standard error is infinite,
+  every deviation divides down to 0σ, and the comparison reported agreement it had never observed.
+  `samples > 0` is now a precondition of passing. Ask this of every gate.
+
+The other quantities the paragraph lists — land drops through turn T, P(≥1 of K by turn T) — need
+turns, so they belong to 2.2 rather than here.
+
 ### 13.2 Precons as the primary fixture set
 
 Precons are the best validation corpus available, for four reasons:

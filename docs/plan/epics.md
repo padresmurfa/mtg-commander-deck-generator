@@ -69,7 +69,7 @@ Exact turns 1–4, and the policy machinery everything else is expressed in.
 
 | Sprint | Goal | Exit criteria | Status |
 | ------ | ---- | ------------- | ------ |
-| **2.1** | Shuffle, draw, mulligan — **gate G2** | Unbiased Fisher-Yates; London mulligan with per-policy keep and bottom rules; Monte Carlo agrees with hypergeometric closed forms | `not started` |
+| **2.1** | Shuffle, draw, mulligan — **gate G2** | Unbiased Fisher-Yates; London mulligan with per-policy keep and bottom rules; Monte Carlo agrees with hypergeometric closed forms | `done` — **G2 pass, worst 2.43σ** |
 | **2.2** | Exact turns 1–4 | Land drops, mana availability, castability, sequencing; end-of-phase state vector produced | `not started` |
 | **2.3** | Policies & policy gap — **gate G3** | `greedy` and a careful policy implemented; gap measured; known-forgiving and known-demanding decks separate | `not started` |
 

@@ -858,6 +858,20 @@ schemas:
       bytes: 2923619
       seconds: 4.2
 
+  policy:
+    ref: "5"
+    added: sprint 2.1
+    shape: parameters
+    fields: [min_lands, max_lands, min_playables, playable_max_cmc, max_mulligans]
+    why_not_callbacks: >
+      The five rungs of the ladder differ in HOW MANY lands they insist on and how cheap a spell has
+      to count, not in kind. Data keeps the per-game path free of indirect calls (lock_free_per_game,
+      and 6.3 inherits whatever this becomes), and 2.3 adds rows rather than functions.
+    bottoming: >
+      Deterministic: excess lands beyond the keepable range first, then the most expensive spell. A
+      random choice would be a second source of randomness in a decision the player makes
+      deliberately. UNVALIDATED — no oracle and no fixture; 2.3 should measure it.
+
   skill_floor:
     ref: "7.4"
     added: sprint 1.3
@@ -1140,6 +1154,35 @@ validation:
       Conditional and triggered draw — "If you do, draw a card" and its relatives — is the head of
       the unmatched distribution by a wide margin. Past the top ten shapes the tail is essentially
       unique, so the remaining work is diminishing rather than blocked.
+
+  analytic_agreement:
+    ref: "13.1"
+    added: sprint 2.1
+    gate: G2
+    tolerance:
+      sigma: 5.0
+      standard_error: sqrt(p*(1-p)/N)
+      fixed_when: >
+        Before any code ran, and recorded in the sprint document — a threshold chosen after seeing
+        the result is not a gate. 5 sigma rather than 3 because every cell of every deck is graded
+        at once: at 3 sigma ~72 cells false-alarm about one run in nine, at 5 sigma the family-wise
+        rate is ~3e-5. The standard error needs no result to compute, only the sample size.
+    measured:
+      date: 2026-08-09
+      worst_sigma: 2.43        # 7 decks x 8 cells, N=100000
+      also: [{n: 1000000, decks: 9, worst_sigma: 3.19}, {seed: golden, worst_sigma: 1.67}]
+      verdict: pass
+    covers: >
+      The shuffle and the draw. The hypergeometric is exact for one seven-card draw from a shuffled
+      library.
+    does_not_cover: >
+      The London mulligan, which is a decision procedure with no comparable closed form and is
+      checked by properties instead. Stated up front so the gate cannot later be read as having
+      validated the whole opening phase — the overclaim 1.2.1 spent a sprint unwinding on G1.
+    vacuous_pass_guard: >
+      samples > 0 is a precondition of passing. With no samples the standard error is infinite,
+      every deviation divides down to zero sigma, and the gate reports agreement it never observed.
+      Found by a unit test asking the question directly, two lines from shipping.
 
   class_reduction:
     ref: "7.1, 7.6"

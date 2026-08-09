@@ -15,7 +15,7 @@ a reason — never "done".
 | Gate | Sprint | Question | Threshold | Outcome |
 | ---- | ------ | -------- | --------- | ------- |
 | **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9325**, conditional. Re-measured in 1.2.1, superseding 0.9357 ([retro](retros/1.2.1-clause-reachability.md)) |
-| **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | Within Monte Carlo error of the exact value | *pending* |
+| **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | 5σ per cell, `SE = sqrt(p(1-p)/N)`, fixed in advance | **PASS — worst 2.43σ** ([retro](retros/2.1-shuffle-draw-mulligan.md)) |
 | **G3** Policy gap discriminates | 2.3 | Does naive-vs-careful separate known-forgiving from known-demanding decks? | Separation exceeding measurement noise | *pending* |
 | **G4** Precon rank correlation | 3.3 | Does the objective rank real decks in the right order? | Spearman above threshold, precons with n≥100 | *pending* |
 | **G5** GA beats greedy | 4.3 | Is the landscape optimisable by population methods? | Margin exceeding the GA's own noise | *pending* |
@@ -44,9 +44,18 @@ Unrepresentable cards are excluded from the pool
 output is. At ~30% the "optimal" deck is an artefact of what happened to be modellable.
 *On failure:* grow the opcode set and re-measure, or stop the project. Do not proceed and hope.
 
-**G2 — analytic agreement.** The shuffler, draw step, mulligan loop and RNG are testable against
-exact closed forms. *On failure:* the simulation core is wrong. Fix it before anything is built
-on top; every later result would inherit the defect.
+**G2 — analytic agreement.** **Measured in sprint 2.1: worst cell 2.43σ against a 5σ tolerance —
+passed.** The shuffler, draw step and RNG are testable against exact closed forms.
+
+Two things the original wording got slightly wrong, both corrected when the gate was run. **The
+mulligan loop is not covered** — it is a decision procedure with no closed form, and is checked by
+properties instead. And **the tolerance had to be fixed before the measurement**, which it was: a
+threshold chosen afterwards is not a gate. The 3.19σ seen on a larger sweep was chased across eight
+seeds before being accepted as noise (mean −0.48σ), because a systematic bias in a shuffler never
+fails — it just makes every later number wrong the same way.
+
+*On failure:* the simulation core is wrong. Fix it before anything is built on top; every later
+result would inherit the defect.
 
 **G3 — policy gap discriminates.** The entire skill ladder rests on the gap between naive and
 careful play being a real, measurable signal. *On failure:* §5 of the design is unfounded and
