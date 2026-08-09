@@ -12,9 +12,15 @@ optimises them by search.
 
 ```
 $ curl -sL "$(curl -s https://api.scryfall.com/bulk-data/default-cards |
-      sed -n 's/.*"download_uri":"\([^"]*\)".*/\1/p')" -o data/scryfall.json
-$ mfsim preprocess --config run.json --bulk data/scryfall.json
+      sed -n 's/.*"jsonl_download_uri":"\([^"]*\)".*/\1/p')" -o data/scryfall.jsonl.gz
+$ gzip -d data/scryfall.jsonl.gz
+$ mfsim preprocess --config run.json --bulk data/scryfall.jsonl
+mfsim: arena of 8388608 bytes was too small; relaunching with 16777216
+mfsim: updated run.json with the sizes this run discovered
 ```
+
+116,694 records in, **37,553 cards** out, in about five seconds — and the arena size worked itself
+out on the way.
 
 `preprocess` **consumes** that file; it never downloads one. The card table is an input to a
 deterministic core, so a subcommand that fetched would make the output depend on the day it ran.

@@ -713,17 +713,39 @@ preprocessing:
       outside the tool.
     invocation: "mfsim preprocess --bulk <file>"
     source: "Scryfall default-cards bulk export"
+    format: JSONL, one card object per line
+    format_note: >
+      Corrected sprint 1.1. The design said "one JSON array", which is what it used to be; the
+      bulk-data descriptor now offers only jsonl_download_uri. The reader decides the framing from
+      the first byte and accepts either.
+    decompression: >
+      Part of the fetch, not part of the tool. Reading gzip would mean a third-party library for a
+      step one shell command already does.
+    measured:
+      date: 2026-08-09
+      records: 116694
+      bytes: 624000000
+      paper_printings: 107337
+      digital_only_dropped: 9357
+      cards: 37553
+      rejected: 0
+      legality_disagreements: 0
+      arena_converged_bytes: 16777216
+      wall_clock_seconds: 4.6
   reading:
-    strategy: one top-level array element at a time
+    strategy: one value at a time, framing detected from the first byte
     rationale: >
-      The bulk export is one JSON array of ~110,000 printings and several hundred megabytes.
-      Parsing it into a document would cost gigabytes for a result read once, field by field.
+      The bulk export is 116,694 records and 595 MB. Parsing it into a document would cost gigabytes
+      for a result read once, field by field.
     peak_memory: one card object plus the accumulating card set
     mechanism: >
       A buffered, string-aware scanner finds each element's extent; the ordinary parser reads that
       one element into a stack frame, which is popped once the fields are out.
   oracle_normalisation:
     key: oracle_id
+    key_fallback: >
+      card_faces[0].oracle_id, and likewise for type_line. The `reversible_card` promos carry
+      neither at the top level; both faces name the same oracle, so face zero is unambiguous.
     rule: printings are never entities
     price:
       unit: integer cents

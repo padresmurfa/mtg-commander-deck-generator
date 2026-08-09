@@ -518,19 +518,29 @@ invariant would be quietly conditioned on the network.
 Fetching is one documented command, run deliberately, outside the tool:
 
 ```
-curl -sL "$(curl -s https://api.scryfall.com/bulk-data/default-cards | ...download_uri)" \
-  -o data/scryfall-default-cards.json
-mfsim preprocess --bulk data/scryfall-default-cards.json
+curl -sL "$(curl -s https://api.scryfall.com/bulk-data/default-cards |
+      sed -n 's/.*"jsonl_download_uri":"\([^"]*\)".*/\1/p')" -o data/scryfall.jsonl.gz
+gzip -d data/scryfall.jsonl.gz
+mfsim preprocess --bulk data/scryfall.jsonl
 ```
+
+Decompression is part of the fetch, not part of the tool: reading gzip would mean a third-party
+library for a step one shell command already does.
 
 The bulk file is date-stamped and content-hashed with everything else, so which snapshot produced a
 run is a property of the artifact rather than of anyone's memory.
 
 ### The bulk file does not fit in an arena
 
-Scryfall's `default-cards` export is one JSON array of roughly 110,000 printings and several hundred
-megabytes. Parsing it into a document would cost several gigabytes for a result that is read once,
-field by field, and thrown away.
+Scryfall's `default-cards` export is **116,694 records and 595 MB** (74 MB gzipped). Parsing it into
+a document would cost several gigabytes for a result that is read once, field by field, and thrown
+away.
+
+It is **JSONL** — one card object per line, no array framing. *(Corrected sprint 1.1. This said "one
+JSON array", which is what it used to be; the bulk-data descriptor no longer offers an array at all,
+only `jsonl_download_uri`. The reader was written against the old shape and could not read a single
+line of the real file. It now decides the framing from the first byte and accepts either, because
+being coupled to one publisher's current choice is what caused this.)*
 
 So it is read **one element at a time**: a buffered, string-aware scanner finds each top-level array
 element's extent, hands that one element's text to the ordinary parser in a stack frame, and pops
@@ -538,6 +548,25 @@ the frame when the fields have been extracted. Peak memory is one card object �
 plus the accumulating card set. This is exactly the shape arenas and `mf_arena_push`/`pop` exist
 for, and it means the preprocessing stage's memory is a function of the *output* size rather than
 the input's.
+
+### What the real export contains
+
+Measured, not estimated — the first run against the live file, sprint 1.1:
+
+| | |
+| --- | --- |
+| Records | 116,694 |
+| Paper printings | 107,337 |
+| Digital-only printings, dropped | 9,357 |
+| **Distinct cards** | **37,553** |
+| Printings rejected as unreadable | 0 |
+| Printings whose legality disagreed | 0 |
+| Evaluation arena, converged | 16 MiB, from an 8 MiB guess, in one relaunch |
+| Wall clock | ~4.6 s |
+
+The two shapes that needed handling: **digital-only printings**, which are 8% of the file and whose
+prices no paper buyer can pay; and the `reversible_card` promos, which carry no top-level
+`oracle_id` or `type_line` — both live on the faces, and both faces name the same oracle.
 
 ### Cards are oracle_ids, never printings
 

@@ -170,6 +170,32 @@ MF_TEST(a_fractional_or_absurd_cmc_is_clamped_rather_than_wrapped) {
     MF_EQ_INT(p.cmc, 0);
 }
 
+MF_TEST(a_reversible_printing_takes_its_oracle_from_its_faces) {
+    /* Scryfall's `reversible_card` layout — the double-sided promos — carries no
+       top-level oracle_id; both faces carry the same one. There are 81 of them
+       in the real export, and rejecting them lost nothing but their price,
+       since every one is also printed normally. Reading face zero costs two
+       lines and makes the rejection count honest. */
+    mf_printing p;
+    /* Neither the oracle id nor the type line is at the top level on these. */
+    MF_EQ_INT(read("{\"name\":\"Ghalta // Ghalta\","
+                   "\"games\":[\"paper\"],\"layout\":\"reversible_card\","
+                   "\"card_faces\":[{\"oracle_id\":\"g1\",\"type_line\":\"Legendary Creature\","
+                   "\"mana_cost\":\"{10}{G}{G}\"},{\"oracle_id\":\"g1\"}]}",
+                   &p),
+              MF_SCRY_OK);
+    MF_EQ_STR(p.oracle_id, "g1");
+    MF_EQ_INT(p.types, MF_SUPER_LEGENDARY | MF_TYPE_CREATURE);
+    MF_EQ_INT(p.pips.g, 2);
+
+    /* A top-level id still wins, so an ordinary double-faced card is untouched. */
+    MF_EQ_INT(read("{\"oracle_id\":\"top\",\"name\":\"n\",\"type_line\":\"Creature\","
+                   "\"games\":[\"paper\"],\"card_faces\":[{\"oracle_id\":\"face\"}]}",
+                   &p),
+              MF_SCRY_OK);
+    MF_EQ_STR(p.oracle_id, "top");
+}
+
 MF_TEST(a_missing_field_is_a_named_rejection_and_not_a_crash) {
     /* If the export renames a field, the card table must not come out empty
        with nothing to say why. Each of these is counted and reported. */
@@ -234,6 +260,7 @@ void run_scryfall_tests(void) {
     MF_RUN_A(anything_but_legal_is_not_legal);
     MF_RUN_A(an_absent_legalities_block_is_not_legal);
     MF_RUN_A(a_fractional_or_absurd_cmc_is_clamped_rather_than_wrapped);
+    MF_RUN_A(a_reversible_printing_takes_its_oracle_from_its_faces);
     MF_RUN_A(a_missing_field_is_a_named_rejection_and_not_a_crash);
     MF_RUN_A(a_field_of_the_wrong_type_reads_as_absent);
     MF_RUN_A(every_rejection_has_a_name);

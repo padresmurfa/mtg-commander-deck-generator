@@ -111,6 +111,56 @@ MF_TEST(scalars_and_nested_values_are_both_elements) {
     mf_jstream_close(s);
 }
 
+/* ---- the framing Scryfall actually ships --------------------------------- */
+
+MF_TEST(a_newline_delimited_document_streams_the_same_as_an_array) {
+    /* Scryfall's bulk export is JSONL: one object per line, no brackets and no
+       commas. It used to be a JSON array, and the descriptor no longer offers
+       one at all — so this is not a convenience, it is the only format the real
+       file comes in. */
+    size_t n = 0;
+    const char *ids = ids_of("{\"id\":\"a\"}\n{\"id\":\"b\"}\n{\"id\":\"c\"}\n", &n);
+    MF_EQ_INT(n, 3);
+    MF_EQ_STR(ids, "a,b,c");
+}
+
+MF_TEST(the_framing_is_decided_by_the_first_byte) {
+    /* One reader, two framings, and nothing above has to know which. A file
+       that opens with a bracket is an array; anything else is a value, and the
+       values simply follow one another. */
+    size_t bracketed = 0, bare = 0;
+    const char *a = ids_of("[{\"id\":\"x\"},{\"id\":\"y\"}]", &bracketed);
+    const char *b = ids_of("{\"id\":\"x\"}\n{\"id\":\"y\"}", &bare);
+    MF_EQ_INT(bracketed, 2);
+    MF_EQ_INT(bare, 2);
+    MF_EQ_STR(a, b);
+}
+
+MF_TEST(a_last_line_without_a_newline_is_still_a_line) {
+    size_t n = 0;
+    const char *ids = ids_of("{\"id\":\"a\"}\n{\"id\":\"b\"}", &n);
+    MF_EQ_INT(n, 2);
+    MF_EQ_STR(ids, "a,b");
+}
+
+MF_TEST(a_newline_delimited_file_that_simply_ends_has_ended_cleanly) {
+    /* There is no closing bracket to miss, so running out of input is the
+       normal way for one of these to finish — and a truncated *record* is still
+       an error, which is the distinction that matters. */
+    mf_jstream *s = over("{\"id\":\"a\"}\n");
+    mf_json *doc = NULL;
+    MF_CHECK(mf_jstream_next(s, A, &doc));
+    MF_CHECK(!mf_jstream_next(s, A, &doc));
+    MF_EQ_INT(mf_jstream_error(s), MF_OK);
+    mf_jstream_close(s);
+
+    mf_jstream *t = over("{\"id\":\"a\"}\n{\"id\":\"b");
+    MF_CHECK(mf_jstream_next(t, A, &doc));
+    MF_CHECK(!mf_jstream_next(t, A, &doc));
+    MF_EQ_INT(mf_jstream_error(t), MF_ERR_PARSE);
+    mf_jstream_close(t);
+}
+
 /* ---- the things that confuse a naive scanner ----------------------------- */
 
 MF_TEST(braces_inside_strings_do_not_end_an_element) {
@@ -305,12 +355,16 @@ MF_TEST(a_trailing_comma_is_not_a_shorter_array) {
     mf_jstream_close(s);
 }
 
-MF_TEST(a_document_that_is_not_an_array_is_rejected_at_the_first_byte) {
-    mf_jstream *s = over("{\"data\":[]}");
+MF_TEST(a_single_object_is_a_stream_of_one) {
+    /* This used to be a rejection, back when a JSON array was the only shape
+       accepted. It is not one any more, and it should not be: a file with one
+       record in it is a file with one record in it. */
+    mf_jstream *s = over("{\"data\":[1,2]}");
     mf_json *doc = NULL;
+    MF_CHECK(mf_jstream_next(s, A, &doc));
+    MF_EQ_INT(mf_json_count(mf_json_member(doc, "data")), 2);
     MF_CHECK(!mf_jstream_next(s, A, &doc));
-    MF_EQ_INT(mf_jstream_error(s), MF_ERR_PARSE);
-    MF_CHECK(strstr(mf_jstream_message(s), "array") != NULL);
+    MF_EQ_INT(mf_jstream_error(s), MF_OK);
     mf_jstream_close(s);
 }
 
@@ -441,6 +495,10 @@ void run_jstream_tests(void) {
     MF_RUN_A(an_empty_array_yields_nothing_and_is_not_an_error);
     MF_RUN_A(the_end_of_the_array_stays_ended);
     MF_RUN_A(scalars_and_nested_values_are_both_elements);
+    MF_RUN_A(a_newline_delimited_document_streams_the_same_as_an_array);
+    MF_RUN_A(the_framing_is_decided_by_the_first_byte);
+    MF_RUN_A(a_last_line_without_a_newline_is_still_a_line);
+    MF_RUN_A(a_newline_delimited_file_that_simply_ends_has_ended_cleanly);
     MF_RUN_A(braces_inside_strings_do_not_end_an_element);
     MF_RUN_A(an_escaped_quote_does_not_end_a_string);
     MF_RUN_A(an_escaped_backslash_does_not_escape_the_quote_after_it);
@@ -453,7 +511,7 @@ void run_jstream_tests(void) {
     MF_RUN_A(an_escape_cut_short_inside_a_nested_string_is_an_error);
     MF_RUN_A(nesting_inside_an_element_does_not_end_it_early);
     MF_RUN_A(a_trailing_comma_is_not_a_shorter_array);
-    MF_RUN_A(a_document_that_is_not_an_array_is_rejected_at_the_first_byte);
+    MF_RUN_A(a_single_object_is_a_stream_of_one);
     MF_RUN_A(an_empty_document_is_rejected);
     MF_RUN_A(a_truncated_array_is_an_error_and_not_a_clean_end);
     MF_RUN_A(every_way_a_file_can_be_cut_short_says_where_it_was_cut);

@@ -41,17 +41,25 @@ static mf_colours identity_of(const mf_json *obj) {
     return id;
 }
 
+/* The front face of a card whose top-level value is absent. Scryfall puts the
+   mana cost there for every transforming card, and the oracle id there too for
+   the `reversible_card` promos — 81 of them in the real export — the oracle id
+   and the type line too. Every one of those also exists as an ordinary
+   printing, so rejecting them lost only their price; and both faces name the
+   same oracle, so face zero is unambiguous rather than a choice. */
+static const char *face_member(const mf_json *obj, const char *key) {
+    const mf_json *faces = mf_json_member(obj, "card_faces");
+    if (mf_json_type_of(faces) != MF_JSON_ARRAY || mf_json_count(faces) == 0) return NULL;
+    return str_member(mf_json_at(faces, 0), key);
+}
+
 /* Double-faced cards carry no top-level mana cost; the front face has it. Using
    the front face is the same choice the rest of the pipeline makes about which
    half of a card it is looking at, and it is written down here because the
    back face's cost is silently discarded. */
 static const char *mana_cost_of(const mf_json *obj) {
     const char *cost = str_member(obj, "mana_cost");
-    if (cost) return cost;
-
-    const mf_json *faces = mf_json_member(obj, "card_faces");
-    if (mf_json_type_of(faces) != MF_JSON_ARRAY || mf_json_count(faces) == 0) return NULL;
-    return str_member(mf_json_at(faces, 0), "mana_cost");
+    return cost ? cost : face_member(obj, "mana_cost");
 }
 
 mf_scry_reject mf_scryfall_printing(mf_arena *a, const mf_json *obj, mf_printing *out) {
@@ -59,10 +67,12 @@ mf_scry_reject mf_scryfall_printing(mf_arena *a, const mf_json *obj, mf_printing
     if (mf_json_type_of(obj) != MF_JSON_OBJECT) return MF_SCRY_NOT_AN_OBJECT;
 
     const char *oracle_id = str_member(obj, "oracle_id");
+    if (!oracle_id || !*oracle_id) oracle_id = face_member(obj, "oracle_id");
     if (!oracle_id || !*oracle_id) return MF_SCRY_NO_ORACLE_ID;
     const char *name = str_member(obj, "name");
     if (!name) return MF_SCRY_NO_NAME;
     const char *type_line = str_member(obj, "type_line");
+    if (!type_line) type_line = face_member(obj, "type_line");
     if (!type_line) return MF_SCRY_NO_TYPE_LINE;
 
     /* Absent rather than empty: a renamed field would otherwise make every

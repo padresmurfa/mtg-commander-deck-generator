@@ -414,17 +414,25 @@ tasks:
     The card set exists and has nothing in it the simulator can act on. G1 asks whether enough of a
     real commander's pool can be modelled at all, and it cannot be asked until there is a pool.
   gate: G1
-  task_split_deferred_until:
-    reason: >
-      The split depends on what the first run against the real Scryfall export shows — which fields
-      are rejected, how many cards there are, and what the oracle text actually looks like at scale.
-      Splitting before that is guessing at the shape of the work.
-    blockers: [first_real_export_run]
+  ready_to_split: true
+  first_real_export_run:
+    done: 2026-08-09
+    records: 116694
+    cards: 37553
+    rejected: 0
+    found: >
+      Scryfall no longer publishes a JSON array — only gzipped JSONL — so mf/jstream could not read
+      a line of the real file despite twenty passing tests. Also that 8% of the export is
+      digital-only, and that reversible_card promos carry oracle_id and type_line on their faces.
   input_from_previous_retro:
     - >
-      Nothing has run against the real 500 MB export. Every test in 1.1 is a fixture, so the first
-      real run is the first honest measurement — and the rejection counts in the artifact are how it
-      reports its own surprises.
+      The real export has now been read: 116,694 records into 37,553 cards, nothing rejected. It
+      immediately found that the file is JSONL rather than a JSON array, which twenty passing tests
+      had agreed was wrong. For any sprint that reads an external format, run against the real thing
+      FIRST, not last — a test suite agrees with the assumption it was written under.
+    - >
+      37,553 cards is the pool G1 measures opcode coverage against, and 10 MB of JSONL is what the
+      32-byte card struct has to replace.
     - The card table is JSONL until this sprint's opcode encoding decides the 32-byte layout.
     - Prices that are absent stay absent; imputation is 1.3, not a guess.
     - >

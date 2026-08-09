@@ -19,7 +19,8 @@ struct mf_jstream {
     size_t pos; /* next byte to look at */
     bool eof;   /* the file has no more bytes */
 
-    bool started; /* the opening bracket has been consumed */
+    bool started; /* the framing has been decided */
+    bool array;   /* the document opened with a bracket, so elements are separated */
     bool ended;   /* the closing bracket has been consumed */
     size_t count;
 
@@ -175,14 +176,22 @@ bool mf_jstream_next(mf_jstream *s, mf_arena *frame, mf_json **out) {
     if (s->ended || s->error != MF_OK) return false;
 
     if (!s->started) {
+        /* The framing, decided once by the first byte. A bracket means a JSON
+           array with commas between elements; anything else means the values
+           simply follow one another, which is what Scryfall's bulk export is
+           and now the only shape it comes in. Detecting rather than
+           configuring means nothing above here has to know or care. */
         int c = skip_ws(s);
-        if (c != '[') {
-            fail(s, MF_ERR_PARSE, "expected a JSON array", c);
+        if (c < 0) {
+            fail(s, MF_ERR_PARSE, "the document is empty", -1);
             return false;
         }
-        s->pos++;
+        if (c == '[') {
+            s->pos++;
+            s->array = true;
+        }
         s->started = true;
-    } else {
+    } else if (s->array) {
         int c = skip_ws(s);
         if (c < 0) {
             /* A complete element and then nothing. Blaming a missing comma
@@ -204,12 +213,19 @@ bool mf_jstream_next(mf_jstream *s, mf_arena *frame, mf_json **out) {
     }
 
     int c = skip_ws(s);
-    if (c == ']' && s->count == 0) {
+    if (s->array && c == ']' && s->count == 0) {
         s->pos++;
         s->ended = true;
         return false; /* an empty array, which is a bad download, not a bad file */
     }
     if (c < 0) {
+        /* Without a closing bracket to miss, running out of input is simply how
+           these files finish. A truncated *record* is still an error, which is
+           the distinction that matters for a half-finished download. */
+        if (!s->array) {
+            s->ended = true;
+            return false;
+        }
         fail(s, MF_ERR_PARSE, "the array was never closed", -1);
         return false;
     }
