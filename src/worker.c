@@ -1,5 +1,6 @@
 #include "mf/worker.h"
 
+#include "mf/analytic.h"
 #include "mf/artifact.h"
 #include "mf/card.h"
 #include "mf/classes.h"
@@ -30,6 +31,14 @@
 /* Enough work items that a partitioning bug has somewhere to hide, and few
    enough that `validate` still returns instantly. */
 #define MF_VALIDATE_TRIAL_ITEMS 32
+
+/* Gate G2. 100,000 hands per deck keeps `validate` under a second while leaving
+   the standard error small enough for a 5-sigma band to mean something: at
+   p = 0.28 it is 0.0014, so the band is ±0.007 on a probability the closed form
+   states exactly. The deck shapes span the range a real manabase covers, plus
+   the certainties at each end where the grading rule differs. */
+#define MF_G2_SAMPLES 100000
+static const unsigned MF_G2_LANDS[] = {0, 17, 33, 38, 45, 60, 99};
 
 /* A record this code builds is well-formed or the code is wrong, so there is
    nothing to check about the text. Whether it reaches the disk is a different
@@ -95,6 +104,46 @@ static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
     mf_jw_key(dw, "layers");      mf_digests_write(&g, dw);
     mf_jw_obj_end(dw);
     write_record(art, dw);
+
+    /* Gate G2 (design §13.1). The shuffler and the draw step are the one part
+       of this system with an exact answer available, and a biased shuffle never
+       announces itself — it skews every later result the same way. Measured
+       here rather than only in the unit suite so the number comes from the
+       tool, reproducible from (seed, samples), the way G1's does. */
+    mf_jw *gw = mf_jw_new(root);
+    mf_jw_obj_begin(gw);
+    mf_jw_key(gw, "record"); mf_jw_str(gw, "g2");
+    mf_jw_key(gw, "samples"); mf_jw_int(gw, MF_G2_SAMPLES);
+    mf_jw_key(gw, "tolerance_sigma"); mf_jw_num(gw, MF_ANALYTIC_SIGMA);
+    mf_jw_key(gw, "decks");
+    mf_jw_arr_begin(gw);
+    bool g2_pass = true;
+    double g2_worst = 0.0;
+    for (size_t i = 0; i < sizeof MF_G2_LANDS / sizeof MF_G2_LANDS[0]; i++) {
+        mf_deck d;
+        memset(&d, 0, sizeof d);
+        for (unsigned n = 0; n < MF_DECK_CARDS; n++) {
+            d.key[n].types = n < MF_G2_LANDS[i] ? (uint16_t)MF_TYPE_LAND : (uint16_t)MF_TYPE_CREATURE;
+        }
+        mf_analytic_result r;
+        mf_analytic_openings(&d, c->seed, MF_G2_SAMPLES, &r);
+        if (!r.pass) g2_pass = false;
+        if (r.worst_sigma > g2_worst) g2_worst = r.worst_sigma;
+
+        mf_jw_obj_begin(gw);
+        mf_jw_key(gw, "lands");       mf_jw_int(gw, (long long)r.lands);
+        mf_jw_key(gw, "worst_k");     mf_jw_int(gw, (long long)r.worst_k);
+        mf_jw_key(gw, "measured");    mf_jw_num(gw, r.measured[r.worst_k]);
+        mf_jw_key(gw, "exact");       mf_jw_num(gw, r.exact[r.worst_k]);
+        mf_jw_key(gw, "worst_sigma"); mf_jw_num(gw, r.worst_sigma);
+        mf_jw_key(gw, "pass");        mf_jw_bool(gw, r.pass);
+        mf_jw_obj_end(gw);
+    }
+    mf_jw_arr_end(gw);
+    mf_jw_key(gw, "worst_sigma"); mf_jw_num(gw, g2_worst);
+    mf_jw_key(gw, "pass");        mf_jw_bool(gw, g2_pass);
+    mf_jw_obj_end(gw);
+    write_record(art, gw);
 
     mf_jw *w = mf_jw_new(root);
     mf_jw_obj_begin(w);

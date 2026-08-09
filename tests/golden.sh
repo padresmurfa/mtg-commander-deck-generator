@@ -49,6 +49,18 @@ line=$(grep '"record":"digest"' "$WORK/run.jsonl") || fail "no digest record in 
     done
 } > "$WORK/actual.txt"
 
+# --- gate G2, which is deterministic given the seed -------------------------
+# A change to the shuffler would otherwise pass silently: the digests above pin
+# the trial harness, not the deck. This pins the measurement itself.
+g2=$(grep '"record":"g2"' "$WORK/run.jsonl") || fail "no g2 record in the artifact"
+{
+    sigma=$(printf '%s' "$g2" | sed -n 's/.*"worst_sigma":\([0-9.e-]*\),"pass".*/\1/p')
+    [ -n "$sigma" ] || fail "the g2 record has no worst_sigma"
+    echo "g2.worst_sigma $sigma"
+    printf '%s' "$g2" | grep -q '"pass":true' || fail "G2 did not pass"
+    echo "g2.pass true"
+} >> "$WORK/actual.txt"
+
 # --- and the card table, which is the first real data the harness measures ---
 cat > "$WORK/pre.json" <<EOF
 {"artifact_path":"$WORK/pre.jsonl","card_table_path":"$WORK/cards.bin",

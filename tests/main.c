@@ -22,6 +22,9 @@ int main(void) {
     run_precon_tests();
     run_skill_tests();
     run_table_tests();
+    run_hypergeo_tests();
+    run_deck_tests();
+    run_analytic_tests();
     run_config_tests();
     run_artifact_tests();
     run_cli_tests();
