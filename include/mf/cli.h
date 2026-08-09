@@ -1,6 +1,7 @@
 #ifndef MF_CLI_H
 #define MF_CLI_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 
@@ -20,6 +21,8 @@ typedef struct {
     mf_cmd cmd;
     const char *config_path; /* --config, NULL when absent */
     const char *out_path;    /* --out, overrides config.artifact_path */
+    const char *report_path; /* --report, where a fatal report is written */
+    bool no_spawn;           /* --no-spawn, do the work in this process */
 } mf_cli;
 
 /* Global options are parsed before the subcommand dispatches, so --config and

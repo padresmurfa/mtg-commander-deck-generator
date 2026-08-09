@@ -23,30 +23,53 @@ COVF      := -O0 -g -fprofile-instr-generate -fcoverage-mapping
 
 COVERAGE_FLOOR := 95
 
+# allocator_may_return_null: the out-of-memory path is behaviour here, not an
+# accident, and ASan's default is to abort on a huge request rather than hand
+# back the NULL that path exists to handle.
+ASAN_OPTS := detect_leaks=1:allocator_may_return_null=1
+
 SRC       := $(wildcard src/*.c)
-LIB_SRC   := $(filter-out src/main.c,$(SRC))
+# Both entry points are wiring over tested modules, and neither is reachable
+# from the test binary. Excluded from the coverage denominator, not from review.
+MAIN_SRC  := src/main.c src/worker_main.c
+LIB_SRC   := $(filter-out $(MAIN_SRC),$(SRC))
 TEST_SRC  := $(wildcard tests/*.c)
 
-BUILD     := build
-BIN       := $(BUILD)/mfsim
-BIN_DEBUG := $(BUILD)/mfsim-debug
-BIN_TEST  := $(BUILD)/mfsim-test
+BUILD      := build
+BIN        := $(BUILD)/mfsim
+BIN_WORKER := $(BUILD)/mfsim-worker
+BIN_DEBUG  := $(BUILD)/mfsim-debug
+BIN_TEST   := $(BUILD)/mfsim-test
+BIN_ASAN   := $(BUILD)/mfsim-test-asan
 
-BIN_ASAN  := $(BUILD)/mfsim-test-asan
+# One module and its tests, nothing else linked. Lets a new module be driven
+# red-to-green before the rest of the suite exists.
+#   make one M=arena DEPS="src/panic.c"
+M    ?=
+DEPS ?=
 
-.PHONY: all debug test coverage asan check clean help
+.PHONY: all debug test coverage asan memcheck smoke check clean help one
 .DEFAULT_GOAL := all
 
-all: $(BIN)
+one: | $(BUILD)
+	@test -n "$(M)" || { echo "usage: make one M=<module> [DEPS=\"src/x.c\"]"; exit 2; }
+	$(CC) $(BASE) $(DEBUGF) -Itests -DMF_ONE=run_$(M)_tests \
+		src/$(M).c $(DEPS) tests/test_$(M).c tests/harness.c -o $(BUILD)/one
+	@ASAN_OPTIONS=$(ASAN_OPTS) LSAN_OPTIONS=suppressions=tests/lsan.supp ./$(BUILD)/one
+
+all: $(BIN) $(BIN_WORKER)
 
 $(BUILD):
 	@mkdir -p $(BUILD)
 
-$(BIN): $(SRC) | $(BUILD)
-	$(CC) $(BASE) $(RELEASE) $(SRC) -o $@
+$(BIN): $(LIB_SRC) src/main.c | $(BUILD)
+	$(CC) $(BASE) $(RELEASE) $(LIB_SRC) src/main.c -o $@
 
-debug: $(SRC) | $(BUILD)
-	$(CC) $(BASE) $(DEBUGF) $(SRC) -o $(BIN_DEBUG)
+$(BIN_WORKER): $(LIB_SRC) src/worker_main.c | $(BUILD)
+	$(CC) $(BASE) $(RELEASE) $(LIB_SRC) src/worker_main.c -o $@
+
+debug: $(LIB_SRC) src/main.c | $(BUILD)
+	$(CC) $(BASE) $(DEBUGF) $(LIB_SRC) src/main.c -o $(BIN_DEBUG)
 
 # Tests always build instrumented, so `make test` and `make coverage` never
 # disagree about what ran.
@@ -78,20 +101,39 @@ $(BIN_ASAN): $(LIB_SRC) $(TEST_SRC) | $(BUILD)
 	$(CC) $(BASE) $(DEBUGF) -Itests $(LIB_SRC) $(TEST_SRC) -o $@
 
 asan: $(BIN_ASAN)
-	@ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS=suppressions=tests/lsan.supp ./$(BIN_ASAN)
+	@ASAN_OPTIONS=$(ASAN_OPTS) LSAN_OPTIONS=suppressions=tests/lsan.supp ./$(BIN_ASAN)
 
-# What CI would run, if there were CI. Deferred to sprint 0.2 — see
-# docs/plan/sprints/0.1-greenfield-skeleton.md.
-check: all asan coverage
+# The memory model's one architectural rule: outside the memory layer, nothing
+# calls a libc function that allocates. A grep is a crude enforcement mechanism
+# and an entirely sufficient one — the rule is about which file a call appears
+# in, which is exactly what grep can see.
+memcheck:
+	@bad=$$(grep -nE '\b(malloc|calloc|realloc|free|strdup|strndup|asprintf|vasprintf)\s*\(' \
+		$(filter-out src/arena.c src/mem.c,$(SRC)) /dev/null || true); \
+	if [ -n "$$bad" ]; then \
+		echo "FAIL: libc allocation outside the memory layer:"; echo "$$bad"; exit 1; \
+	fi; \
+	echo "memcheck OK: no libc allocation outside src/arena.c and src/mem.c"
+
+# The whole design, end to end, with real processes: a worker given an arena
+# far too small must die, be relaunched larger, and finally succeed. This is
+# what covers the one line the unit suite cannot reach — the actual _exit.
+smoke: all
+	@sh tests/smoke.sh
+
+check: all memcheck asan coverage smoke
 
 clean:
 	@rm -rf $(BUILD)
 
 help:
-	@echo "make            build $(BIN)"
+	@echo "make            build $(BIN) and $(BIN_WORKER)"
 	@echo "make debug      build with ASan/UBSan"
 	@echo "make test       build instrumented and run the suite"
 	@echo "make asan       run the suite under ASan+UBSan with leak detection"
 	@echo "make coverage   run tests and enforce the $(COVERAGE_FLOOR)% line/branch floor"
-	@echo "make check      build + coverage (the gate)"
+	@echo "make memcheck   assert no libc allocation outside the memory layer"
+	@echo "make smoke      end-to-end relaunch test with real processes"
+	@echo "make one M=x    build and run one module's tests"
+	@echo "make check      everything above (the gate)"
 	@echo "make clean      remove $(BUILD)"

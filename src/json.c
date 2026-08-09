@@ -1,6 +1,6 @@
 #include "mf/json.h"
 
-#include "mf/alloc.h"
+#include "mf/mem.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +10,14 @@
    corrupt file cannot recurse the parser into the stack guard. */
 #define MF_JSON_MAX_DEPTH 64
 
+/* One array of pairs rather than parallel arrays of items and keys: the two
+   would take turns being the arena's most recent allocation, so neither could
+   ever grow in place. `key` is NULL in arrays. */
+typedef struct {
+    char *key;
+    mf_json *value;
+} mf_json_entry;
+
 struct mf_json {
     mf_json_type type;
     union {
@@ -17,9 +25,8 @@ struct mf_json {
         double num;
         char *str;
         struct {
-            mf_json **items;
-            char **keys; /* NULL for arrays */
-            size_t n;
+            mf_json_entry *items;
+            size_t n, cap;
         } coll;
     } as;
 };
@@ -27,6 +34,7 @@ struct mf_json {
 /* ---- reader ------------------------------------------------------------- */
 
 typedef struct {
+    mf_arena *a;
     const char *p;
     int depth;
 } scanner;
@@ -37,9 +45,9 @@ static void skip_ws(scanner *s) {
     while (*s->p == ' ' || *s->p == '\t' || *s->p == '\n' || *s->p == '\r') s->p++;
 }
 
-static mf_json *node(mf_json_type t) {
-    mf_json *v = mf_calloc(1, sizeof *v);
-    if (v) v->type = t;
+static mf_json *node(scanner *s, mf_json_type t) {
+    mf_json *v = mf_arena_alloc(s->a, sizeof *v);
+    v->type = t;
     return v;
 }
 
@@ -47,8 +55,7 @@ static mf_err parse_literal(scanner *s, const char *word, mf_json_type t, bool b
                             mf_json **out) {
     size_t n = strlen(word);
     if (strncmp(s->p, word, n) != 0) return MF_ERR_PARSE;
-    mf_json *v = node(t);
-    if (!v) return MF_ERR_INTERNAL;
+    mf_json *v = node(s, t);
     v->as.b = b;
     s->p += n;
     *out = v;
@@ -79,8 +86,7 @@ static mf_err parse_number(scanner *s, mf_json **out) {
         while (*s->p >= '0' && *s->p <= '9') s->p++;
     }
 
-    mf_json *v = node(MF_JSON_NUMBER);
-    if (!v) return MF_ERR_INTERNAL;
+    mf_json *v = node(s, MF_JSON_NUMBER);
     v->as.num = strtod(start, NULL);
     *out = v;
     return MF_OK;
@@ -119,19 +125,19 @@ static size_t utf8_encode(unsigned cp, char *dst) {
     return 3;
 }
 
-/* Decoded strings are never longer than their source, so one allocation of the
-   source span is always enough. */
+/* Decoded strings are never longer than their source span, so the pre-scan that
+   proves the string is terminated also sizes the buffer exactly. */
 static mf_err parse_string_raw(scanner *s, char **out) {
     if (*s->p != '"') return MF_ERR_PARSE;
     s->p++;
 
     const char *start = s->p;
-    for (const char *q = start; *q != '"'; q++) {
+    const char *q = start;
+    for (; *q != '"'; q++) {
         if (*q == '\0') return MF_ERR_PARSE;
         if (*q == '\\' && q[1] != '\0') q++;
     }
-    char *buf = mf_malloc((size_t)(strchr(start, '\0') - start) + 1);
-    if (!buf) return MF_ERR_INTERNAL;
+    char *buf = mf_arena_alloc(s->a, (size_t)(q - start) + 1);
 
     /* The pre-scan above already proved a closing quote exists and that no
        escape runs off the end, so the copy loop needs no NUL check of its own. */
@@ -151,49 +157,41 @@ static mf_err parse_string_raw(scanner *s, char **out) {
             case 't':  buf[n++] = '\t'; s->p++; break;
             case 'u': {
                 unsigned cp;
-                if (strlen(s->p + 1) < 4 || !hex4(s->p + 1, &cp)) {
-                    mf_free(buf);
-                    return MF_ERR_PARSE;
-                }
-                if (cp >= 0xD800u && cp <= 0xDFFFu) { /* surrogate half */
-                    mf_free(buf);
-                    return MF_ERR_PARSE;
-                }
+                if (strlen(s->p + 1) < 4 || !hex4(s->p + 1, &cp)) return MF_ERR_PARSE;
+                if (cp >= 0xD800u && cp <= 0xDFFFu) return MF_ERR_PARSE; /* surrogate half */
                 n += utf8_encode(cp, buf + n);
                 s->p += 5;
                 break;
             }
             default:
-                mf_free(buf);
                 return MF_ERR_PARSE;
         }
     }
     s->p++; /* closing quote */
-    buf[n] = '\0';
+    /* The terminator is already there — arena memory arrives zeroed. */
     *out = buf;
     return MF_OK;
 }
 
-static mf_err collection_push(mf_json *v, char *key, mf_json *item) {
+static void collection_push(scanner *s, mf_json *v, char *key, mf_json *item) {
     size_t n = v->as.coll.n;
-    mf_json **items = mf_realloc(v->as.coll.items, (n + 1) * sizeof *items);
-    if (!items) return MF_ERR_INTERNAL;
-    v->as.coll.items = items;
-    items[n] = item;
-
-    if (v->type == MF_JSON_OBJECT) {
-        char **keys = mf_realloc(v->as.coll.keys, (n + 1) * sizeof *keys);
-        if (!keys) return MF_ERR_INTERNAL;
-        v->as.coll.keys = keys;
-        keys[n] = key;
+    if (v->as.coll.cap == 0) {
+        v->as.coll.cap = 4;
+        v->as.coll.items = mf_arena_array(s->a, 4, sizeof *v->as.coll.items);
+    } else if (n == v->as.coll.cap) {
+        size_t cap = v->as.coll.cap * 2;
+        v->as.coll.items = mf_arena_grow_last(s->a, v->as.coll.items,
+                                              v->as.coll.cap * sizeof *v->as.coll.items,
+                                              cap * sizeof *v->as.coll.items);
+        v->as.coll.cap = cap;
     }
+    v->as.coll.items[n].key = key;
+    v->as.coll.items[n].value = item;
     v->as.coll.n = n + 1;
-    return MF_OK;
 }
 
 static mf_err parse_array(scanner *s, mf_json **out) {
-    mf_json *v = node(MF_JSON_ARRAY);
-    if (!v) return MF_ERR_INTERNAL;
+    mf_json *v = node(s, MF_JSON_ARRAY);
     s->p++; /* [ */
     skip_ws(s);
     if (*s->p == ']') { s->p++; *out = v; return MF_OK; }
@@ -201,21 +199,18 @@ static mf_err parse_array(scanner *s, mf_json **out) {
     for (;;) {
         mf_json *item = NULL;
         mf_err e = parse_value(s, &item);
-        if (e != MF_OK) { mf_json_free(v); return e; }
-        e = collection_push(v, NULL, item);
-        if (e != MF_OK) { mf_json_free(item); mf_json_free(v); return e; }
+        if (e != MF_OK) return e;
+        collection_push(s, v, NULL, item);
 
         skip_ws(s);
         if (*s->p == ',') { s->p++; skip_ws(s); continue; }
         if (*s->p == ']') { s->p++; *out = v; return MF_OK; }
-        mf_json_free(v);
         return MF_ERR_PARSE;
     }
 }
 
 static mf_err parse_object(scanner *s, mf_json **out) {
-    mf_json *v = node(MF_JSON_OBJECT);
-    if (!v) return MF_ERR_INTERNAL;
+    mf_json *v = node(s, MF_JSON_OBJECT);
     s->p++; /* { */
     skip_ws(s);
     if (*s->p == '}') { s->p++; *out = v; return MF_OK; }
@@ -223,25 +218,34 @@ static mf_err parse_object(scanner *s, mf_json **out) {
     for (;;) {
         char *key = NULL;
         mf_err e = parse_string_raw(s, &key);
-        if (e != MF_OK) { mf_json_free(v); return e; }
+        if (e != MF_OK) return e;
 
         skip_ws(s);
-        if (*s->p != ':') { mf_free(key); mf_json_free(v); return MF_ERR_PARSE; }
+        if (*s->p != ':') return MF_ERR_PARSE;
         s->p++;
         skip_ws(s);
 
         mf_json *item = NULL;
         e = parse_value(s, &item);
-        if (e != MF_OK) { mf_free(key); mf_json_free(v); return e; }
-        e = collection_push(v, key, item);
-        if (e != MF_OK) { mf_free(key); mf_json_free(item); mf_json_free(v); return e; }
+        if (e != MF_OK) return e;
+        collection_push(s, v, key, item);
 
         skip_ws(s);
         if (*s->p == ',') { s->p++; skip_ws(s); continue; }
         if (*s->p == '}') { s->p++; *out = v; return MF_OK; }
-        mf_json_free(v);
         return MF_ERR_PARSE;
     }
+}
+
+static mf_err parse_string_node(scanner *s, mf_json **out) {
+    char *str = NULL;
+    mf_err e = parse_string_raw(s, &str);
+    if (e != MF_OK) return e;
+
+    mf_json *v = node(s, MF_JSON_STRING);
+    v->as.str = str;
+    *out = v;
+    return MF_OK;
 }
 
 static mf_err parse_value(scanner *s, mf_json **out) {
@@ -255,54 +259,28 @@ static mf_err parse_value(scanner *s, mf_json **out) {
         case 'f': e = parse_literal(s, "false", MF_JSON_BOOL, false, out); break;
         case '[': e = parse_array(s, out); break;
         case '{': e = parse_object(s, out); break;
-        case '"': {
-            char *str = NULL;
-            e = parse_string_raw(s, &str);
-            if (e == MF_OK) {
-                mf_json *v = node(MF_JSON_STRING);
-                if (!v) { mf_free(str); e = MF_ERR_INTERNAL; break; }
-                v->as.str = str;
-                *out = v;
-            }
-            break;
-        }
+        case '"': e = parse_string_node(s, out); break;
         default: e = parse_number(s, out); break;
     }
     s->depth--;
     return e;
 }
 
-mf_err mf_json_parse(const char *text, mf_json **out) {
+mf_err mf_json_parse(mf_arena *a, const char *text, mf_json **out) {
     if (!text || !out) return MF_ERR_ARGS;
     *out = NULL;
 
-    scanner s = {.p = text, .depth = 0};
+    scanner s = {.a = a, .p = text, .depth = 0};
     mf_json *v = NULL;
     mf_err e = parse_value(&s, &v);
     if (e != MF_OK) return e;
 
     skip_ws(&s);
-    if (*s.p != '\0') { /* trailing garbage is an error, not a truncation point */
-        mf_json_free(v);
-        return MF_ERR_PARSE;
-    }
+    /* Trailing garbage is an error, not a truncation point. */
+    if (*s.p != '\0') return MF_ERR_PARSE;
+
     *out = v;
     return MF_OK;
-}
-
-void mf_json_free(mf_json *v) {
-    if (!v) return;
-    if (v->type == MF_JSON_STRING) {
-        mf_free(v->as.str);
-    } else if (v->type == MF_JSON_ARRAY || v->type == MF_JSON_OBJECT) {
-        for (size_t i = 0; i < v->as.coll.n; i++) {
-            mf_json_free(v->as.coll.items[i]);
-            if (v->as.coll.keys) mf_free(v->as.coll.keys[i]);
-        }
-        mf_free(v->as.coll.items);
-        mf_free(v->as.coll.keys);
-    }
-    mf_free(v);
 }
 
 mf_json_type mf_json_type_of(const mf_json *v) { return v ? v->type : MF_JSON_NULL; }
@@ -314,18 +292,18 @@ size_t mf_json_count(const mf_json *v) {
 
 const mf_json *mf_json_at(const mf_json *v, size_t i) {
     if (i >= mf_json_count(v)) return NULL;
-    return v->as.coll.items[i];
+    return v->as.coll.items[i].value;
 }
 
 const char *mf_json_key_at(const mf_json *obj, size_t i) {
     if (!obj || obj->type != MF_JSON_OBJECT || i >= obj->as.coll.n) return NULL;
-    return obj->as.coll.keys[i];
+    return obj->as.coll.items[i].key;
 }
 
 const mf_json *mf_json_member(const mf_json *obj, const char *key) {
     if (!obj || obj->type != MF_JSON_OBJECT || !key) return NULL;
     for (size_t i = 0; i < obj->as.coll.n; i++) {
-        if (strcmp(obj->as.coll.keys[i], key) == 0) return obj->as.coll.items[i];
+        if (strcmp(obj->as.coll.items[i].key, key) == 0) return obj->as.coll.items[i].value;
     }
     return NULL;
 }
@@ -347,8 +325,7 @@ const char *mf_json_string(const mf_json *v) {
 #define MF_JW_MAX_DEPTH 64
 
 struct mf_jw {
-    char *buf;
-    size_t len, cap;
+    mf_buf buf;
     bool poisoned;
     /* stack[i] is true for object, false for array. expect_key tracks whether an
        object is waiting for a key rather than a value. */
@@ -358,40 +335,20 @@ struct mf_jw {
     bool need_comma;
 };
 
-mf_jw *mf_jw_new(void) {
-    mf_jw *w = mf_calloc(1, sizeof *w);
-    if (!w) return NULL;
-    w->cap = 256;
-    w->buf = mf_malloc(w->cap);
-    if (!w->buf) { mf_free(w); return NULL; }
-    w->buf[0] = '\0';
+mf_jw *mf_jw_new(mf_arena *a) {
+    /* Arena memory arrives zeroed, so every flag below starts false and the
+       depth starts at zero without being written. */
+    mf_jw *w = mf_arena_alloc(a, sizeof *w);
+    mf_buf_init(&w->buf, a, 256);
     return w;
 }
 
-void mf_jw_free(mf_jw *w) {
-    if (!w) return;
-    mf_free(w->buf);
-    mf_free(w);
-}
-
-static void jw_reserve(mf_jw *w, size_t extra) {
-    if (w->poisoned) return;
-    if (w->len + extra + 1 <= w->cap) return;
-    size_t cap = w->cap;
-    while (cap < w->len + extra + 1) cap *= 2;
-    char *buf = mf_realloc(w->buf, cap);
-    if (!buf) { w->poisoned = true; return; }
-    w->buf = buf;
-    w->cap = cap;
-}
-
-static void jw_raw(mf_jw *w, const char *s, size_t n) {
-    jw_reserve(w, n);
-    if (w->poisoned) return;
-    memcpy(w->buf + w->len, s, n);
-    w->len += n;
-    w->buf[w->len] = '\0';
-}
+/* Every caller checks `poisoned` before reaching here — jw_pre_value, jw_key
+   and jw_close between them cover all of them. This used to check as well,
+   because a failed reallocation could poison mid-write; an arena cannot fail,
+   so that possibility is gone and so is the check. Anything written after a
+   structural error is unreachable through mf_jw_text regardless. */
+static void jw_raw(mf_jw *w, const char *s, size_t n) { mf_buf_append(&w->buf, s, n); }
 
 /* Called before every value. Emits the separator and enforces that a value is
    legal here at all. */
@@ -404,7 +361,7 @@ static bool jw_pre_value(mf_jw *w) {
     if (w->need_comma) jw_raw(w, ",", 1);
     w->need_comma = true;
     if (w->depth > 0 && w->stack[w->depth - 1]) w->expect_key = true;
-    return !w->poisoned;
+    return true;
 }
 
 static void jw_string_body(mf_jw *w, const char *s) {
@@ -490,11 +447,9 @@ void mf_jw_num(mf_jw *w, double n) {
        round-trip would break determinism. Try increasing precision until the
        value survives. */
     char buf[32];
-    int k = 0;
-    for (int prec = 15; prec <= 17; prec++) {
-        k = snprintf(buf, sizeof buf, "%.*g", prec, n);
-        if (strtod(buf, NULL) == n) break;
-    }
+    int k = snprintf(buf, sizeof buf, "%.15g", n);
+    if (strtod(buf, NULL) != n) k = snprintf(buf, sizeof buf, "%.16g", n);
+    if (strtod(buf, NULL) != n) k = snprintf(buf, sizeof buf, "%.17g", n);
     jw_raw(w, buf, (size_t)k);
 }
 
@@ -513,5 +468,5 @@ bool mf_jw_ok(const mf_jw *w) { return w && !w->poisoned; }
 
 const char *mf_jw_text(const mf_jw *w) {
     if (!w || w->poisoned || w->depth != 0) return NULL;
-    return w->buf;
+    return mf_buf_str(&w->buf);
 }

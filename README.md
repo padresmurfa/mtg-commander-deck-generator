@@ -5,8 +5,9 @@
 A command-line tool that evaluates Magic: The Gathering Commander decks **by simulation** and
 optimises them by search.
 
-> **Status: early.** Sprint 0.1 of 21 is complete — the skeleton builds, dispatches, and is fully
-> covered by tests. No simulation exists yet. See [`docs/plan/`](docs/plan/).
+> **Status: early.** Sprints 0.1–0.2 of 22 are complete — the skeleton builds and dispatches, all
+> memory is arena-allocated, and a worker that runs out is relaunched with more. No simulation
+> exists yet. See [`docs/plan/`](docs/plan/).
 
 ## Why
 
@@ -31,11 +32,14 @@ make
 
 | Target | Does |
 | ------ | ---- |
-| `make` | Build `build/mfsim` |
+| `make` | Build `build/mfsim` and `build/mfsim-worker` |
 | `make test` | Build instrumented and run the suite |
 | `make asan` | Run the suite under ASan + UBSan with leak detection |
 | `make coverage` | Run tests and enforce the 95% line/branch floor |
-| `make check` | Build + asan + coverage. **The gate** |
+| `make memcheck` | Assert no libc allocation outside the memory layer |
+| `make smoke` | End-to-end relaunch test with real processes |
+| `make one M=x` | Build and run one module's tests |
+| `make check` | All of the above. **The gate** |
 | `make debug` | Build the binary with sanitizers |
 | `make clean` | Remove `build/` |
 
@@ -55,6 +59,26 @@ reconstructable without the config file that produced it.
 
 Unknown configuration keys are an **error**, never ignored: a typo'd key that silently does
 nothing is a run that quietly measured the wrong thing.
+
+### Two processes, and why
+
+`mfsim` owns the configuration; `mfsim-worker` does the work. The worker runs with the arena size
+it was given and **dies** when that is not enough, writing a report saying by how much. The
+orchestrator reads it, grows `arena_bytes`, writes the new value back to your config file, and
+launches again.
+
+This exists because the memory an evaluation needs is not knowable before the evaluation is
+written. Rather than a number you have to guess right, the arena size is a cache that converges:
+
+```
+$ mfsim validate --config run.json
+mfsim: arena of 65536 bytes was too small; relaunching with 131072
+...
+mfsim: updated arena_bytes in run.json
+```
+
+The second run fits first time. `--no-spawn` does the same work in one process, without the
+relaunching, which is usually what you want under a debugger.
 
 ## Development
 

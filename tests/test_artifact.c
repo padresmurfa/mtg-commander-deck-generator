@@ -3,27 +3,26 @@
 #include <string.h>
 
 #include "harness.h"
+#include "mf/arena.h"
 #include "mf/artifact.h"
+#include "mf/mem.h"
+
+#include <unistd.h>
 
 static const char *PATH = "build/test-artifact.jsonl";
+static mf_arena *A;
 
-static char *slurp(const char *path, size_t *len) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
-    fseek(f, 0, SEEK_END);
-    long n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char *buf = malloc((size_t)n + 1);
-    size_t got = fread(buf, 1, (size_t)n, f);
-    buf[got] = '\0';
-    fclose(f);
-    if (len) *len = got;
-    return buf;
-}
+#define MF_RUN_A(fn)         \
+    do {                     \
+        mf_arena_reset(A);   \
+        MF_RUN(fn);            \
+    } while (0)
+
+static char *slurp(const char *path, size_t *len) { return mf_mem_read_file(A, path, len); }
 
 MF_TEST(artifact_writes_one_record_per_line) {
     mf_artifact *a = NULL;
-    MF_EQ_INT(mf_artifact_open(PATH, &a), MF_OK);
+    MF_EQ_INT(mf_artifact_open(A, PATH, &a), MF_OK);
     MF_EQ_INT(mf_artifact_write(a, "{\"a\":1}"), MF_OK);
     MF_EQ_INT(mf_artifact_write(a, "{\"b\":2}"), MF_OK);
     MF_EQ_INT(mf_artifact_records(a), 2);
@@ -31,25 +30,22 @@ MF_TEST(artifact_writes_one_record_per_line) {
 
     char *text = slurp(PATH, NULL);
     MF_EQ_STR(text, "{\"a\":1}\n{\"b\":2}\n");
-    free(text);
     remove(PATH);
 }
 
 MF_TEST(artifact_buffers_until_flushed) {
     mf_artifact *a = NULL;
-    MF_EQ_INT(mf_artifact_open(PATH, &a), MF_OK);
+    MF_EQ_INT(mf_artifact_open(A, PATH, &a), MF_OK);
     MF_EQ_INT(mf_artifact_write(a, "{\"a\":1}"), MF_OK);
 
     size_t len = 999;
     char *early = slurp(PATH, &len);
     MF_CHECK(early != NULL);
     MF_EQ_INT(len, 0); /* still in the buffer, deliberately */
-    free(early);
 
     MF_EQ_INT(mf_artifact_flush(a), MF_OK);
-    char *after = slurp(PATH, &len);
+    slurp(PATH, &len);
     MF_EQ_INT(len, 8);
-    free(after);
 
     mf_artifact_close(a);
     remove(PATH);
@@ -57,7 +53,7 @@ MF_TEST(artifact_buffers_until_flushed) {
 
 MF_TEST(artifact_flushes_when_the_buffer_fills) {
     mf_artifact *a = NULL;
-    MF_EQ_INT(mf_artifact_open(PATH, &a), MF_OK);
+    MF_EQ_INT(mf_artifact_open(A, PATH, &a), MF_OK);
     char rec[128];
     memset(rec, 'x', sizeof rec - 1);
     rec[sizeof rec - 1] = '\0';
@@ -66,49 +62,44 @@ MF_TEST(artifact_flushes_when_the_buffer_fills) {
     MF_EQ_INT(mf_artifact_close(a), MF_OK);
 
     size_t len = 0;
-    char *text = slurp(PATH, &len);
+    slurp(PATH, &len);
     MF_EQ_INT(len, 1000 * 128); /* 127 chars + newline */
-    free(text);
     remove(PATH);
 }
 
 MF_TEST(artifact_handles_a_record_larger_than_the_buffer) {
     mf_artifact *a = NULL;
-    MF_EQ_INT(mf_artifact_open(PATH, &a), MF_OK);
+    MF_EQ_INT(mf_artifact_open(A, PATH, &a), MF_OK);
     size_t big_len = 200000;
-    char *big = malloc(big_len + 1);
+    char *big = mf_arena_alloc(A, big_len + 1);
     memset(big, 'y', big_len);
-    big[big_len] = '\0';
     MF_EQ_INT(mf_artifact_write(a, big), MF_OK);
     MF_EQ_INT(mf_artifact_close(a), MF_OK);
 
     size_t len = 0;
-    char *text = slurp(PATH, &len);
+    slurp(PATH, &len);
     MF_EQ_INT(len, big_len + 1);
-    free(text);
-    free(big);
     remove(PATH);
 }
 
 MF_TEST(artifact_appends_rather_than_truncating) {
     mf_artifact *a = NULL;
-    MF_EQ_INT(mf_artifact_open(PATH, &a), MF_OK);
+    MF_EQ_INT(mf_artifact_open(A, PATH, &a), MF_OK);
     mf_artifact_write(a, "1");
     mf_artifact_close(a);
 
-    MF_EQ_INT(mf_artifact_open(PATH, &a), MF_OK);
+    MF_EQ_INT(mf_artifact_open(A, PATH, &a), MF_OK);
     mf_artifact_write(a, "2");
     mf_artifact_close(a);
 
     char *text = slurp(PATH, NULL);
     MF_EQ_STR(text, "1\n2\n");
-    free(text);
     remove(PATH);
 }
 
 MF_TEST(artifact_reports_an_unopenable_path) {
     mf_artifact *a = NULL;
-    MF_EQ_INT(mf_artifact_open("build/no/such/dir/x.jsonl", &a), MF_ERR_IO);
+    MF_EQ_INT(mf_artifact_open(A, "build/no/such/dir/x.jsonl", &a), MF_ERR_IO);
     MF_CHECK(a == NULL);
 }
 
@@ -118,10 +109,10 @@ MF_TEST(artifact_is_null_safe) {
     MF_EQ_INT(mf_artifact_flush(NULL), MF_ERR_ARGS);
     MF_EQ_INT(mf_artifact_write(NULL, "x"), MF_ERR_ARGS);
     MF_EQ_INT(mf_artifact_records(NULL), 0);
-    MF_EQ_INT(mf_artifact_open(NULL, &a), MF_ERR_ARGS);
-    MF_EQ_INT(mf_artifact_open(PATH, NULL), MF_ERR_ARGS);
+    MF_EQ_INT(mf_artifact_open(A, NULL, &a), MF_ERR_ARGS);
+    MF_EQ_INT(mf_artifact_open(A, PATH, NULL), MF_ERR_ARGS);
 
-    MF_EQ_INT(mf_artifact_open(PATH, &a), MF_OK);
+    MF_EQ_INT(mf_artifact_open(A, PATH, &a), MF_OK);
     MF_EQ_INT(mf_artifact_write(a, NULL), MF_ERR_ARGS);
     mf_artifact_close(a);
     remove(PATH);
@@ -136,7 +127,7 @@ static mf_artifact *tiny(char *buf, size_t cap) {
        than at some later flush. The artifact does its own buffering; stdio
        doing a second layer would only obscure which write failed. */
     setvbuf(f, NULL, _IONBF, 0);
-    return mf_artifact_open_stream(f, &a) == MF_OK ? a : NULL;
+    return mf_artifact_open_stream(A, f, &a) == MF_OK ? a : NULL;
 }
 
 MF_TEST(artifact_reports_a_failed_buffered_write) {
@@ -201,7 +192,7 @@ MF_TEST(artifact_reports_a_failed_flush_when_the_buffer_fills) {
 
 MF_TEST(artifact_flush_of_an_empty_buffer_is_a_no_op) {
     mf_artifact *a = NULL;
-    MF_EQ_INT(mf_artifact_open(PATH, &a), MF_OK);
+    MF_EQ_INT(mf_artifact_open(A, PATH, &a), MF_OK);
     MF_EQ_INT(mf_artifact_flush(a), MF_OK); /* nothing pending */
     MF_EQ_INT(mf_artifact_write(a, "x"), MF_OK);
     MF_EQ_INT(mf_artifact_flush(a), MF_OK);
@@ -210,28 +201,96 @@ MF_TEST(artifact_flush_of_an_empty_buffer_is_a_no_op) {
     remove(PATH);
 }
 
+/* fmemopen truncates silently — a short write reports itself at the fwrite and
+   nowhere else, so fflush and fclose always succeed on one. Closing the
+   underlying descriptor out from under a real file is the closest thing to
+   "the disk went away mid-run" that a test can arrange, and it is the only way
+   these two paths run at all. */
+static mf_artifact *doomed(const char *path) {
+    mf_artifact *a = NULL;
+    FILE *f = fopen(path, "wb");
+    mf_artifact_open_stream(A, f, &a);
+    close(fileno(f));
+    return a;
+}
+
+MF_TEST(artifact_reports_a_flush_that_the_kernel_refuses) {
+    const char *path = "build/test-artifact-doomed.jsonl";
+    mf_artifact *a = doomed(path);
+    /* stdio takes the bytes happily; the descriptor is where it falls apart. */
+    MF_EQ_INT(mf_artifact_write(a, "{\"a\":1}"), MF_OK);
+    MF_EQ_INT(mf_artifact_flush(a), MF_ERR_IO);
+    mf_artifact_close(a);
+    remove(path);
+}
+
+MF_TEST(artifact_reports_a_close_that_fails_on_its_own) {
+    /* Nothing pending, so the flush succeeds and the close is the only thing
+       left to go wrong. Losing the artifact at the last moment still has to be
+       reported — an unnoticed truncated artifact is worse than a failed run. */
+    const char *path = "build/test-artifact-doomed2.jsonl";
+    mf_artifact *a = doomed(path);
+    MF_EQ_INT(mf_artifact_close(a), MF_ERR_IO);
+    remove(path);
+}
+
+MF_TEST(a_close_that_fails_does_not_relabel_an_earlier_failure) {
+    /* Both the flush and the close fail here. The flush is the first and more
+       specific cause, so it is the one that survives. */
+    const char *path = "build/test-artifact-doomed3.jsonl";
+    mf_artifact *a = doomed(path);
+    MF_EQ_INT(mf_artifact_write(a, "{\"a\":1}"), MF_OK); /* still buffered */
+    MF_EQ_INT(mf_artifact_close(a), MF_ERR_IO);
+    remove(path);
+}
+
 MF_TEST(artifact_open_stream_validates_its_arguments) {
     mf_artifact *a = NULL;
-    MF_EQ_INT(mf_artifact_open_stream(NULL, &a), MF_ERR_ARGS);
+    MF_EQ_INT(mf_artifact_open_stream(A, NULL, &a), MF_ERR_ARGS);
     char sink[8];
     FILE *f = fmemopen(sink, sizeof sink, "w");
-    MF_EQ_INT(mf_artifact_open_stream(f, NULL), MF_ERR_ARGS);
+    MF_EQ_INT(mf_artifact_open_stream(A, f, NULL), MF_ERR_ARGS);
     fclose(f);
 }
 
+MF_TEST(artifact_takes_its_buffer_from_the_arena) {
+    /* The whole record buffer is reserved at open, which is what makes writing
+       allocation-free. If this ever stops costing arena, something started
+       allocating per record instead. */
+    size_t before = mf_arena_used(A);
+    mf_artifact *a = NULL;
+    MF_EQ_INT(mf_artifact_open(A, PATH, &a), MF_OK);
+    MF_CHECK(mf_arena_used(A) - before >= 65536);
+
+    size_t after_open = mf_arena_used(A);
+    for (int i = 0; i < 100; i++) mf_artifact_write(a, "{\"n\":1}");
+    MF_EQ_INT(mf_arena_used(A), after_open);
+
+    mf_artifact_close(a);
+    remove(PATH);
+}
+
 void run_artifact_tests(void) {
-    MF_RUN(artifact_reports_a_failed_buffered_write);
-    MF_RUN(artifact_reports_a_failed_oversized_write);
-    MF_RUN(artifact_reports_a_failed_newline_write);
-    MF_RUN(artifact_reports_a_failed_flush_before_an_oversized_write);
-    MF_RUN(artifact_reports_a_failed_flush_when_the_buffer_fills);
-    MF_RUN(artifact_flush_of_an_empty_buffer_is_a_no_op);
-    MF_RUN(artifact_open_stream_validates_its_arguments);
-    MF_RUN(artifact_writes_one_record_per_line);
-    MF_RUN(artifact_buffers_until_flushed);
-    MF_RUN(artifact_flushes_when_the_buffer_fills);
-    MF_RUN(artifact_handles_a_record_larger_than_the_buffer);
-    MF_RUN(artifact_appends_rather_than_truncating);
-    MF_RUN(artifact_reports_an_unopenable_path);
-    MF_RUN(artifact_is_null_safe);
+    A = mf_arena_create("artifact-test", 4u << 20);
+
+    MF_RUN_A(artifact_reports_a_failed_buffered_write);
+    MF_RUN_A(artifact_reports_a_failed_oversized_write);
+    MF_RUN_A(artifact_reports_a_failed_newline_write);
+    MF_RUN_A(artifact_reports_a_failed_flush_before_an_oversized_write);
+    MF_RUN_A(artifact_reports_a_failed_flush_when_the_buffer_fills);
+    MF_RUN_A(artifact_flush_of_an_empty_buffer_is_a_no_op);
+    MF_RUN_A(artifact_reports_a_flush_that_the_kernel_refuses);
+    MF_RUN_A(artifact_reports_a_close_that_fails_on_its_own);
+    MF_RUN_A(a_close_that_fails_does_not_relabel_an_earlier_failure);
+    MF_RUN_A(artifact_open_stream_validates_its_arguments);
+    MF_RUN_A(artifact_writes_one_record_per_line);
+    MF_RUN_A(artifact_buffers_until_flushed);
+    MF_RUN_A(artifact_flushes_when_the_buffer_fills);
+    MF_RUN_A(artifact_handles_a_record_larger_than_the_buffer);
+    MF_RUN_A(artifact_appends_rather_than_truncating);
+    MF_RUN_A(artifact_reports_an_unopenable_path);
+    MF_RUN_A(artifact_is_null_safe);
+    MF_RUN_A(artifact_takes_its_buffer_from_the_arena);
+
+    mf_arena_destroy(A);
 }

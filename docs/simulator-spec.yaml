@@ -149,26 +149,91 @@ invariants:
     acceptance: kill at arbitrary point; resume; run completes with correct digests
 
   - id: testable_failure_paths
-    ref: "retro 0.1"
+    ref: "retro 0.1, amended retro 0.2"
     added: sprint 0.1
     statement: Every failure path a test cannot otherwise reach gets a seam that makes it reachable.
     rationale: >
-      Branch coverage stalled at 84% on out-of-memory branches no test could trigger. The choice
-      was to delete the OOM handling (wrong for a tool running unattended for hours) or make it
-      reachable. The seam won. It is now a standing property test rather than a one-off fix.
+      Branch coverage stalled at 84% on out-of-memory branches no test could trigger. The choice was
+      to delete the OOM handling or to make it reachable, and the seam won.
+    amendment_0_2: >
+      The OOM half is superseded. Sprint 0.2 removed the paths instead of injecting into them:
+      arena allocation cannot fail, so there is no `if (!ptr)` to reach and mf/alloc.h is gone.
+      The rule still governs genuine I/O failure, where the environment really can refuse and the
+      code really must respond.
     seams:
-      - id: mf/alloc.h
-        covers: out-of-memory
-        mechanism: mf_alloc_fail_after(n) fails the nth allocation
-        pattern: >
-          OOM sweep — run the operation once to count its allocations, then again failing each in
-          turn. Every `if (!ptr)` is exercised; new ones are covered the moment they are written.
       - id: mf_artifact_open_stream
         covers: i/o write failure
         mechanism: a short fmemopen stream fails writes exactly like a full disk
+      - id: mf_worker_run(art)
+        covers: artifact write and close failure inside a run
+        mechanism: pass a pre-opened artifact over a doomed stream
+      - id: mf_panic_set_hook
+        covers: process death
+        mechanism: >
+          the hook longjmps out, so a fatal is observable without being fatal to the suite. What it
+          cannot cover is the _exit itself; tests/smoke.sh checks that with real processes and real
+          exit codes.
+      - id: closing the descriptor under a real FILE*
+        covers: fflush and fclose failure
+        mechanism: >
+          fmemopen truncates silently on macOS — a short write reports at the fwrite and nowhere
+          else — so flush and close paths need a real fd yanked mid-run.
     rule: >
-      Direct malloc/free in src/ is a defect: it puts the call outside the sweep and silently
-      drops a branch off the coverage floor.
+      Direct libc allocation outside src/arena.c and src/mem.c is a defect. Enforced by
+      `make memcheck`.
+
+  - id: fail_fast
+    ref: "10"
+    added: sprint 0.2
+    statement: >
+      Environmental failure terminates the process with a distinct exit code and a machine-readable
+      report. It is never a value a caller inspects.
+    rationale: >
+      There is no useful recovery from half an arena in a batch simulator. Handling it produces
+      error branches that exist only to be tested and will never fire in anger.
+    scope:
+      fatal: [out of memory, arena exhausted, broken internal invariant]
+      not_fatal: [missing file, malformed config, unknown subcommand, unimplemented subcommand]
+    exit_codes:
+      0: ok
+      1: the run did not succeed
+      2: the command line was wrong
+      70: arena exhausted — the report says by how much
+      71: the OS refused memory the process genuinely needs
+      72: an invariant this code guarantees did not hold
+    stability: >
+      The codes cross a process boundary and the orchestrator switches on them. Renumbering is a
+      wire-format change, not a refactor.
+
+  - id: arena_allocation
+    ref: "10"
+    added: sprint 0.2
+    statement: >
+      All memory comes from bump-allocated arenas supplied by the caller. Nothing is freed
+      individually; a frame is released by moving a pointer backwards.
+    guarantees:
+      - allocation cannot fail, so no caller checks for NULL
+      - memory is always zeroed, on first use and after a pop
+      - one arena belongs to one thread; there are no atomics in mf/arena
+    implications:
+      - lifetime is a property of the phase, not of the object
+      - use-after-free and leaks are removed by construction, not by sanitiser
+      - the per-game path takes memory reserved before the loop started (see no_io_in_loop)
+    layout:
+      grain_bytes: 16          # alignof(max_align_t) on arm64
+      payload_alignment: 128   # every arena's payload starts on a cache line
+    todo_perf:
+      - id: backing_store
+        now: one calloc per arena
+        later: mmap(MAP_ANON) — kernel-zeroed, so create() stops paying for a memset
+        sprint: "6.3"
+      - id: pop_zeroing
+        now: eager memset of the released range
+        later: a dirty watermark zeroed lazily on the next allocation, if a profile ever shows it
+      - id: pool_refill
+        now: synchronous on release
+        later: a background thread keeps the pool stocked
+        sprint: "6.1"
 
   - id: no_popularity_prior
     ref: "7.9"
@@ -182,6 +247,86 @@ invariants:
 # Tunable parameters. Defaults are the recommendation, not a constraint.
 # ---------------------------------------------------------------------------
 parameters:
+
+  memory:
+    ref: "10"
+    added: sprint 0.2
+    note: >
+      arena_bytes is a starting guess, not a specification. The worker dies when it is too small
+      and the orchestrator relaunches at a larger one, so the value converges over a few runs
+      rather than having to be right up front.
+    root_arena_bytes:
+      type: size
+      value: 1048576          # fixed, not grown: config, paths, the artifact record buffer
+      note: Not the size the orchestrator grows. That one is per evaluation.
+    arena_bytes:
+      type: size
+      default: 67108864       # 64 MiB
+      min: 65536
+      max: 1099511627776      # 1 TiB
+    arena_max_bytes:
+      type: size
+      default: 8589934592     # 8 GiB
+      min: 65536
+      max: 1099511627776
+      constraint: must be >= arena_bytes; checked after the whole document is read
+    arena_pool_depth:
+      type: int
+      default: 2
+      min: 0
+      max: 64
+      note: 0 means "do not pool"; every acquire is then a miss, which is legal.
+    max_relaunch:
+      type: int
+      default: 4
+      min: 0
+      max: 16
+      note: 0 means run once and report.
+    persist_arena_growth:
+      type: bool
+      default: true
+      note: >
+        Writes a grown arena_bytes back to the config file, atomically. Without it, "fixed by the
+        next retry" holds only within one invocation and tomorrow's run rediscovers the same size
+        the same expensive way.
+    growth_policy:
+      ref: "10"
+      rule: max(need * 1.25, arena_bytes * 2), clamped to arena_max_bytes
+      headroom_rationale: >
+        `need` covers the one allocation that did not fit, not whatever the run would have gone on
+        to want. Sizing exactly to it invites a second death a few allocations later.
+      stop_conditions:
+        - need above arena_max_bytes
+        - already at arena_max_bytes
+        - attempts used == max_relaunch
+
+  processes:
+    ref: "10"
+    added: sprint 0.2
+    orchestrator:
+      binary: mfsim
+      owns: [config resolution, worker launch, growth decisions, config write-back]
+      never: [simulation]
+    worker:
+      binary: mfsim-worker
+      owns: [the run]
+      never: [spawning, retrying, recovering]
+      note: >
+        Being a separate process is what makes "give up and be relaunched larger" coherent rather
+        than a euphemism for catching your own out-of-memory.
+    discovery: >
+      The worker path is derived from the orchestrator's argv[0] so the pair travels together and
+      neither depends on the working directory. MF_WORKER overrides.
+    control_files:
+      resolved_config: written before every launch; passed as --config
+      fatal_report: written by the dying worker; passed as --report
+      location: $TMPDIR (default /tmp), named with the pid
+      determinism_note: >
+        Transient control files, not output. Nothing derived from them reaches an artifact, so the
+        pid in their names costs the determinism invariant nothing.
+    single_process_mode: >
+      `mfsim --no-spawn` runs the work in one process. Nothing is retried there — a worker that
+      cannot ask for a bigger arena is a worker that dies with the report and stops.
 
   concurrency:
     threads:

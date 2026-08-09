@@ -39,7 +39,9 @@ Corollaries:
   happens to be what the architecture invariants require anyway (§10), so the pressures align.
 - **Do not add defensive branches you cannot reach.** An `if (!ptr) return ERR_OOM;` that no test
   can trigger is uncovered branch weight with no value. Prefer designs where the impossible state
-  is unrepresentable.
+  is unrepresentable. Sprint 0.2 took this to its conclusion for allocation: `mf_arena_alloc`
+  cannot fail, so there is no branch to reach. **Watch for branches a refactor has just made
+  dead** — two survived the arena port by a sprint before anyone noticed.
 - Error paths are behaviour and get tested like anything else: malformed input, missing files,
   unknown keys, short writes.
 
@@ -50,6 +52,8 @@ Stated in `docs/simulator-design.md` §10 and `docs/simulator-spec.yaml` under `
 | Invariant | Short form |
 | --------- | ---------- |
 | `no_io_in_loop` | Zero syscalls per game; O(1) per generation |
+| `fail_fast` | Environmental failure kills the process; it is never a value a caller inspects |
+| `arena_allocation` | All memory from caller-supplied arenas; allocation cannot fail; memory is always zeroed |
 | `lock_free_per_game` | No locks or atomics on the per-game path |
 | `l1_resident_hot_set` | Per-thread hot set fits in L1d |
 | `determinism` | Same seed + config + card table ⇒ bit-identical output |
@@ -123,7 +127,15 @@ worth consulting — that decision belongs in the E1 retro, not to a passing imp
 
 - **C17**, no compiler extensions beyond what the fixed flags imply
 - **No logging on per-game paths.** Progress output at generation granularity only
-- **Allocation**: at startup and at evaluation boundaries. Never per game
+- **Allocation**: from an arena the caller supplies, at startup and at evaluation boundaries.
+  Never per game. **No libc allocation outside `src/arena.c` and `src/mem.c`** — `make memcheck`
+  enforces it, and `mf/mem.h` has the arena-backed `strdup`/`sprintf`/file-read you were reaching
+  for. Do not check allocations for `NULL`; they cannot fail
+- **Do not `memset` what an arena just handed you.** It is already zero, on first use and after a
+  pop. A struct from an arena starts fully zeroed, which is usually the whole initialisation
+- **`mf_err` is for the user's mistakes, `mf_panic` for the environment's.** Missing file, bad
+  config, unknown key → `mf_err`, handled. No memory, arena too small, broken invariant → fatal,
+  uncatchable. The test for which: could the caller have done anything about it?
 - Errors propagate as `mf_err` return codes; `out` parameters carry results
 - Public headers in `include/`, implementation and private headers in `src/`
 - One test file per module, named `tests/test_<module>.c`
@@ -133,5 +145,8 @@ worth consulting — that decision belongs in the E1 retro, not to a passing imp
 - Match the surrounding code. Comment density here is low and load-bearing — comments explain
   *why*, never *what*
 - Small commits, each with its tests
-- Run `make check` (build + test + coverage floor) before claiming anything works
+- `make one M=<module>` drives one module red-to-green before the rest of the suite links
+- Run `make check` (build + memcheck + asan + coverage + smoke) before claiming anything works
+- **Green on the first compile proves nothing.** Either watch the test fail first, or mutate the
+  implementation afterwards and watch the test catch it
 - Do not report a task complete on the strength of it compiling

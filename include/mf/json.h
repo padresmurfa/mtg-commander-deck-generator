@@ -4,12 +4,18 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "mf/arena.h"
 #include "mf/err.h"
 
 /* Minimal JSON reader and writer.
  *
  * Written in-tree rather than vendored: nothing here needs a general-purpose
  * library, and code we own is code we can hold to the coverage floor.
+ *
+ * Everything a parse produces — nodes, keys, decoded strings — lives in the
+ * arena the caller supplies. There is no free function and no ownership to
+ * track: drop the frame and the whole document goes with it. A failed parse is
+ * not a leak for the same reason, so error paths do no cleanup at all.
  *
  * Reader limitation: \u escapes cover the BMP only. A surrogate half is rejected
  * as MF_ERR_PARSE rather than silently mangled. Revisit in E1 if Scryfall data
@@ -26,10 +32,10 @@ typedef enum {
 
 typedef struct mf_json mf_json;
 
-/* Parses a NUL-terminated document. Trailing non-whitespace is an error.
-   On success the caller owns *out and must mf_json_free it. */
-mf_err mf_json_parse(const char *text, mf_json **out);
-void mf_json_free(mf_json *v);
+/* Parses a NUL-terminated document into `a`. Trailing non-whitespace is an
+   error. On failure *out is NULL and the arena holds whatever the parse got to
+   before it gave up — which the caller discards along with the frame. */
+mf_err mf_json_parse(mf_arena *a, const char *text, mf_json **out);
 
 mf_json_type mf_json_type_of(const mf_json *v);
 /* Members for objects, elements for arrays, 0 otherwise. */
@@ -50,12 +56,16 @@ const char *mf_json_string(const mf_json *v);
    Append-only, growable. Structural errors (unbalanced containers, a value
    where a key belongs) are programming errors, not runtime conditions; the
    writer records a poisoned flag rather than aborting, and mf_jw_text returns
-   NULL once poisoned so a bad document can never reach an artifact. */
+   NULL once poisoned so a bad document can never reach an artifact.
+
+   Poisoning is deliberately not fatal, unlike an exhausted arena. A malformed
+   document is a bug in the caller's sequence of calls, caught by the caller's
+   own tests; running out of memory is the environment failing underneath a run
+   that cannot continue. */
 
 typedef struct mf_jw mf_jw;
 
-mf_jw *mf_jw_new(void);
-void mf_jw_free(mf_jw *w);
+mf_jw *mf_jw_new(mf_arena *a);
 
 void mf_jw_obj_begin(mf_jw *w);
 void mf_jw_obj_end(mf_jw *w);

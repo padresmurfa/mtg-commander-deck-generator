@@ -6,7 +6,8 @@
 | ---- | ----- |
 | `include/mf/` | Public headers. One per module, `mf/<module>.h` |
 | `src/` | Implementation, plus any private headers |
-| `src/main.c` | Entry point only. Thin wiring; everything it does lives in a tested module |
+| `src/main.c` | Orchestrator entry point. Thin wiring; everything it does lives in a tested module |
+| `src/worker_main.c` | Worker entry point. Same rule |
 | `src/vendor/` | Third-party single-header code, if ever needed. Excluded from the coverage floor |
 | `tests/` | One file per module, `tests/test_<module>.c`. `tests/main.c` runs them |
 | `tools/` | Developer scripts. Not part of the binary |
@@ -16,11 +17,20 @@
 | Module | Responsibility |
 | ------ | -------------- |
 | `err` | The `mf_err` code set and its messages |
-| `alloc` | Allocation seam. Everything that allocates goes through it so OOM paths are testable |
+| `panic` | Fail-fast: exit codes, the human message, the machine-readable fatal report |
+| `arena` | Bump allocator with stack frames. The only file that may call the libc allocator |
+| `pool` | A stock of pre-zeroed arenas |
+| `mem` | Arena-aware replacements for the allocating parts of libc |
 | `json` | Minimal JSON reader and writer. Written in-tree, not vendored |
 | `config` | Run configuration: defaults, load, validate, serialise |
 | `artifact` | Append-only buffered JSONL run artifact |
 | `cli` | Argument parsing and subcommand dispatch |
+| `orch` | Growth decisions, the relaunch loop, and spawning the worker |
+| `worker` | The calculating half. Knows nothing about relaunching |
+
+Dependency order runs downward: `panic` depends on nothing, `arena` on `panic`, everything else on
+`arena`. `panic` cannot depend on the memory layer — a report you have to allocate in order to say
+you cannot allocate is no report at all.
 
 ## Errors
 
@@ -33,6 +43,11 @@ means "no detail needed". Functions must not assume an errbuf exists.
 Argument validation returns `MF_ERR_ARGS` rather than asserting: this is a long-running batch
 tool, and aborting on a bad pointer loses hours of work that a returned error would not.
 
+**`mf_err` is for the user's mistakes; `mf_panic` is for the environment's.** A missing file, a
+malformed config, an unknown key — all `mf_err`, all handled. No memory, an arena too small, an
+invariant this code guarantees — all fatal, none catchable. The line is drawn at "could the caller
+have done anything about it", and nothing in the second list qualifies.
+
 ## Logging
 
 **No logging on per-game paths.** A `printf` per game is a syscall per game and would dominate
@@ -43,6 +58,9 @@ JSONL artifact — never mixed.
 
 ## Allocation
 
+Everything comes from an arena the caller supplies. Nothing is freed individually; a phase is
+released by moving a pointer backwards.
+
 | Where | Allowed |
 | ----- | ------- |
 | Startup | Yes |
@@ -50,8 +68,16 @@ JSONL artifact — never mixed.
 | Per game | **Never** |
 | Per record written | **Never** |
 
-Everything allocates through `mf_alloc.h`. Direct `malloc`/`free` in `src/` is a defect — it
-puts the call outside the OOM sweep and silently drops a branch off the coverage floor.
+Two rules, both enforced rather than trusted:
+
+- **No libc allocation outside `src/arena.c` and `src/mem.c`.** `make memcheck` greps for it. Need
+  a `strdup` or an `asprintf`? `mf/mem.h` has the arena-backed version
+- **Allocation cannot fail**, so do not check for `NULL`. An exhausted arena kills the process with
+  a report the orchestrator uses to relaunch at a larger size
+
+Arena memory arrives zeroed — on first use *and* after a pop — so never `memset` what you were just
+handed. A struct taken from an arena starts with every field zero, which is usually the whole
+initialisation.
 
 ## Style
 

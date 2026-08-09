@@ -120,7 +120,35 @@ MF_TEST(cli_usage_writes_something_useful) {
     remove("build/test-usage.txt");
 }
 
+MF_TEST(cli_tolerates_an_errbuf_with_no_room) {
+    char eb[1];
+    mf_cli c;
+    char *argv[] = {"mfsim", "--nope", NULL};
+    MF_EQ_INT(mf_cli_parse(2, argv, &c, eb, 0), MF_ERR_ARGS);
+}
+
+MF_TEST(cli_parses_the_diagnostic_options) {
+    char eb[128];
+    mf_cli c;
+    char *argv[] = {"mfsim", "--no-spawn", "--report", "/tmp/f.json", "validate", NULL};
+    MF_EQ_INT(mf_cli_parse(5, argv, &c, eb, sizeof eb), MF_OK);
+    MF_EQ_INT(c.cmd, MF_CMD_VALIDATE);
+    MF_EQ_STR(c.report_path, "/tmp/f.json");
+    MF_CHECK(c.no_spawn == true);
+
+    char *bare[] = {"mfsim", "validate", NULL};
+    MF_EQ_INT(mf_cli_parse(2, bare, &c, eb, sizeof eb), MF_OK);
+    MF_CHECK(c.report_path == NULL);
+    MF_CHECK(c.no_spawn == false);
+
+    char *dangling[] = {"mfsim", "validate", "--report", NULL};
+    MF_EQ_INT(mf_cli_parse(3, dangling, &c, eb, sizeof eb), MF_ERR_ARGS);
+    MF_CHECK(strstr(eb, "--report") != NULL);
+}
+
 void run_cli_tests(void) {
+    MF_RUN(cli_tolerates_an_errbuf_with_no_room);
+    MF_RUN(cli_parses_the_diagnostic_options);
     MF_RUN(cli_dispatches_every_subcommand);
     MF_RUN(cli_handles_help_and_version);
     MF_RUN(cli_requires_a_subcommand);

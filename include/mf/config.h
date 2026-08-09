@@ -1,8 +1,10 @@
 #ifndef MF_CONFIG_H
 #define MF_CONFIG_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
+#include "mf/arena.h"
 #include "mf/err.h"
 #include "mf/json.h"
 
@@ -17,15 +19,30 @@ typedef struct {
     unsigned long long seed;  /* run seed; the whole RNG state is derived from it */
     char artifact_path[MF_PATH_MAX];
     char card_table_path[MF_PATH_MAX];
+
+    /* Memory. arena_bytes is a starting guess, not a specification: the worker
+       dies when it is too small and the orchestrator relaunches at a larger
+       one, so the value converges over a few runs rather than having to be
+       right up front (design §10.7). */
+    size_t arena_bytes;        /* worker arena capacity */
+    size_t arena_max_bytes;    /* growth ceiling; past this, the run fails */
+    size_t arena_pool_depth;   /* arenas kept zeroed and warm */
+    int max_relaunch;          /* retries the orchestrator will spend growing */
+    bool persist_arena_growth; /* write a grown size back to the config file */
 } mf_config;
 
 void mf_config_defaults(mf_config *c);
 
 /* Unknown keys are an error, never ignored: a typo'd key that silently does
    nothing is a run that quietly measured the wrong thing. errbuf, when given,
-   receives a specific message naming the offending key. */
-mf_err mf_config_load_json(mf_config *c, const char *text, char *errbuf, size_t errlen);
-mf_err mf_config_load_file(mf_config *c, const char *path, char *errbuf, size_t errlen);
+   receives a specific message naming the offending key.
+
+   The arena holds the parsed document, which is dead by the time these return —
+   pass a scratch frame, not the arena you intend to keep. */
+mf_err mf_config_load_json(mf_arena *a, mf_config *c, const char *text, char *errbuf,
+                           size_t errlen);
+mf_err mf_config_load_file(mf_arena *a, mf_config *c, const char *path, char *errbuf,
+                           size_t errlen);
 
 /* Writes the fully resolved config as one JSON object. */
 void mf_config_write(const mf_config *c, mf_jw *w);

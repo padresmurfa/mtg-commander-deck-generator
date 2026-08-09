@@ -4,7 +4,7 @@
 MF_TEST(err_every_code_has_a_message) {
     const mf_err all[] = {MF_OK,        MF_ERR_ARGS,  MF_ERR_IO,
                           MF_ERR_PARSE, MF_ERR_UNKNOWN_KEY, MF_ERR_TYPE,
-                          MF_ERR_RANGE, MF_ERR_NOT_IMPLEMENTED, MF_ERR_INTERNAL};
+                          MF_ERR_RANGE};
     for (size_t i = 0; i < sizeof all / sizeof *all; i++) {
         const char *s = mf_err_str(all[i]);
         MF_CHECK(s != NULL);

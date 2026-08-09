@@ -11,10 +11,13 @@ typedef enum {
     MF_ERR_PARSE,           /* malformed JSON */
     MF_ERR_UNKNOWN_KEY,     /* config key not recognised — never ignored */
     MF_ERR_TYPE,            /* config key present with the wrong JSON type */
-    MF_ERR_RANGE,           /* config value outside its permitted range */
-    MF_ERR_NOT_IMPLEMENTED, /* subcommand stub */
-    MF_ERR_INTERNAL
+    MF_ERR_RANGE            /* config value outside its permitted range */
 } mf_err;
+
+/* Every code above has a producer. There is deliberately no MF_ERR_INTERNAL:
+   the conditions it used to carry — out of memory, a broken invariant — kill
+   the process now instead of travelling as a value nobody can act on
+   (see mf/panic.h). A code with no producer is a claim the code does not make. */
 
 const char *mf_err_str(mf_err e);
 

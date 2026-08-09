@@ -1,13 +1,11 @@
 #include "mf/artifact.h"
 
-#include "mf/alloc.h"
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-/* One page-ish buffer, allocated at open. Sized so ordinary records never
-   round-trip to the kernel, and never resized — growth would be an allocation
-   on a path that must not allocate. */
+/* One page-ish buffer, taken from the arena at open. Sized so ordinary records
+   never round-trip to the kernel, and never resized — growth would be an
+   allocation on a path that must not allocate. */
 #define MF_ARTIFACT_BUF 65536
 
 struct mf_artifact {
@@ -17,20 +15,18 @@ struct mf_artifact {
     char buf[MF_ARTIFACT_BUF];
 };
 
-mf_err mf_artifact_open_stream(FILE *f, mf_artifact **out) {
+mf_err mf_artifact_open_stream(mf_arena *arena, FILE *f, mf_artifact **out) {
     if (!f || !out) return MF_ERR_ARGS;
     *out = NULL;
 
-    mf_artifact *a = mf_malloc(sizeof *a);
-    if (!a) { fclose(f); return MF_ERR_INTERNAL; }
+    /* `used` and `records` start at zero because arena memory does. */
+    mf_artifact *a = mf_arena_alloc(arena, sizeof *a);
     a->f = f;
-    a->used = 0;
-    a->records = 0;
     *out = a;
     return MF_OK;
 }
 
-mf_err mf_artifact_open(const char *path, mf_artifact **out) {
+mf_err mf_artifact_open(mf_arena *arena, const char *path, mf_artifact **out) {
     if (!path || !out) return MF_ERR_ARGS;
     *out = NULL;
 
@@ -39,7 +35,7 @@ mf_err mf_artifact_open(const char *path, mf_artifact **out) {
     FILE *f = fopen(path, "ab");
     if (!f) return MF_ERR_IO;
 
-    return mf_artifact_open_stream(f, out);
+    return mf_artifact_open_stream(arena, f, out);
 }
 
 static mf_err write_all(FILE *f, const char *p, size_t n) {
@@ -90,8 +86,7 @@ mf_err mf_artifact_close(mf_artifact *a) {
     if (!a) return MF_OK; /* close(NULL) is a no-op so cleanup paths stay simple */
     mf_err e = mf_artifact_flush(a);
     if (fclose(a->f) != 0 && e == MF_OK) e = MF_ERR_IO;
-    mf_free(a);
-    return e;
+    return e; /* the struct itself dies with the arena */
 }
 
 size_t mf_artifact_records(const mf_artifact *a) { return a ? a->records : 0; }

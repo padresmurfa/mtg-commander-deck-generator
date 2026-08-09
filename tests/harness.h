@@ -2,6 +2,7 @@
 #define MF_TEST_HARNESS_H
 
 #include <math.h>
+#include <setjmp.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -11,6 +12,9 @@
 
 extern int mf_t_pass, mf_t_fail;
 extern const char *mf_t_current;
+
+void mf_t_boot(void);
+int mf_t_report(void);
 
 #define MF_TEST(name) static void name(void)
 
@@ -57,11 +61,46 @@ extern const char *mf_t_current;
         mf_t_pass++;                                                       \
     } while (0)
 
+/* ---- catching a fatal ----------------------------------------------------
+   Environmental failure kills the process (design §10.7), which is exactly what
+   makes it awkward to test. mf_panic calls a hook before it exits; the harness
+   installs one that longjmps back here, so the death is observable without
+   being fatal to the suite.
+
+   Anything the panicking code was mid-way through is abandoned — that is the
+   point of arena allocation, since the arena is discarded whole afterwards. Do
+   not reuse an arena that was panicked out of. */
+
+jmp_buf *mf_t_panic_jmp(void);
+void mf_t_panic_arm(void);
+void mf_t_panic_disarm(void);
+int mf_t_panic_code(void);
+const char *mf_t_panic_msg(void);
+/* Restores the suite's quiet sink after a test has redirected it. */
+void mf_t_panic_quiet(void);
+
+#define MF_EXPECT_PANIC(block)                                       \
+    do {                                                             \
+        mf_t_panic_arm();                                            \
+        if (setjmp(*mf_t_panic_jmp()) == 0) {                        \
+            block;                                                   \
+            mf_t_panic_disarm();                                     \
+            MF_FAILED("%s", "expected a fatal, none happened");      \
+        }                                                            \
+        mf_t_panic_disarm();                                         \
+        mf_t_pass++;                                                 \
+    } while (0)
+
 void run_err_tests(void);
-void run_alloc_tests(void);
+void run_panic_tests(void);
+void run_arena_tests(void);
+void run_pool_tests(void);
+void run_mem_tests(void);
 void run_json_tests(void);
 void run_config_tests(void);
 void run_artifact_tests(void);
 void run_cli_tests(void);
+void run_orch_tests(void);
+void run_worker_tests(void);
 
 #endif

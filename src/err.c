@@ -9,8 +9,6 @@ const char *mf_err_str(mf_err e) {
         case MF_ERR_UNKNOWN_KEY:    return "unknown config key";
         case MF_ERR_TYPE:           return "wrong type";
         case MF_ERR_RANGE:          return "value out of range";
-        case MF_ERR_NOT_IMPLEMENTED:return "not implemented";
-        case MF_ERR_INTERNAL:       return "internal error";
     }
     return "unknown error";
 }

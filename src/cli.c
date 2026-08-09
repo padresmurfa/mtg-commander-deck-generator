@@ -42,13 +42,20 @@ mf_err mf_cli_parse(int argc, char **argv, mf_cli *out, char *eb, size_t el) {
             out->cmd = MF_CMD_VERSION;
             return MF_OK;
         }
-        if (strcmp(arg, "--config") == 0 || strcmp(arg, "--out") == 0) {
+        if (strcmp(arg, "--config") == 0 || strcmp(arg, "--out") == 0 ||
+            strcmp(arg, "--report") == 0) {
             if (i + 1 >= argc) {
                 say(eb, el, "%s needs a value", arg);
                 return MF_ERR_ARGS;
             }
-            if (strcmp(arg, "--config") == 0) out->config_path = argv[++i];
-            else out->out_path = argv[++i];
+            const char *value = argv[++i];
+            if (strcmp(arg, "--config") == 0) out->config_path = value;
+            else if (strcmp(arg, "--out") == 0) out->out_path = value;
+            else out->report_path = value;
+            continue;
+        }
+        if (strcmp(arg, "--no-spawn") == 0) {
+            out->no_spawn = true;
             continue;
         }
         if (arg[0] == '-') {
@@ -95,6 +102,10 @@ void mf_cli_usage(FILE *f) {
         "  --config <path>   run configuration (JSON)\n"
         "  --out <path>      artifact path, overriding the config\n"
         "  --version         print the version\n"
-        "  -h, --help        show this message\n",
+        "  -h, --help        show this message\n"
+        "\n"
+        "diagnostics:\n"
+        "  --no-spawn        run the work in this process instead of a worker\n"
+        "  --report <path>   where a fatal report is written\n",
         f);
 }

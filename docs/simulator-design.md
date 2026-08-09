@@ -32,7 +32,7 @@ Every claim about the target machine in either document was measured on it, not 
 | 7 | Search space reduction | Metacards, mana solver, stratification, budget, dominance chaining |
 | 8 | Preprocessing | What the Node stage emits; pricing rules |
 | 9 | Fidelity ladder | Cost per stage; where Forge belongs |
-| 10 | Tech stack | Build target; the four architecture invariants; power management |
+| 10 | Tech stack | Build target; the architecture invariants; the memory and process model; power management |
 | 11 | Performance TODO | Deferred optimisation, in order |
 | 12 | First slice | What to build first, and the control experiment |
 | 13 | Validation | How we know the simulator is not lying |
@@ -43,13 +43,15 @@ Every claim about the target machine in either document was measured on it, not 
 
 ### The load-bearing decisions
 
-If you read nothing else, these five are the ones that everything else depends on:
+If you read nothing else, these six are the ones that everything else depends on:
 
 - **Forge validates, it never scores** (§2, §9). A GA pointed at an AI learns to beat that AI.
 - **Strategy *is* policy** (§4). Without it, "simulate a phase" is undefined.
 - **Skill is measured as a policy gap** (§5), not estimated from card features.
 - **Gate on the opening, never score it** (§3). Scoring it breeds out every control deck.
 - **Determinism is a constraint, not a nicety** (§17). It is what makes every later change checkable.
+- **Environmental failure kills the process** (§10). No recovery paths, no NULL checks; arena size
+  is discovered by dying and being relaunched larger, not guessed correctly up front.
 
 ---
 
@@ -822,6 +824,84 @@ artifact. Crashing would be worse still: the work is fine, the machine's power p
 Worth also checking the power source at startup via `IOPSGetProvidingPowerSourceType`. Running on
 battery is not an error, but it is worth one warning line, since throttling on battery produces the
 same misleading timings.
+
+### Memory is arenas, and failure is death — architecture invariant
+
+*(Added sprint 0.2. This replaces the implicit "malloc where convenient" of sprint 0.1.)*
+
+Three decisions that are really one decision seen from three sides.
+
+**Nothing is freed individually.** All memory comes from bump-allocated arenas: a pointer, a
+capacity, and a high-water mark. Releasing is moving the pointer backwards, which frees a whole
+phase in O(1) and re-zeroes what it released. Lifetime becomes a property of the phase rather than
+of the object, which removes use-after-free and leaks by construction rather than by sanitiser —
+and it is what `no_io_in_loop` needs anyway, since the per-game path must take memory that was
+reserved before the loop started.
+
+Two properties callers may rely on, and do:
+
+- **Allocation cannot fail.** There is no NULL to check, so no caller checks, so there is no
+  branch. This is not optimism; see below.
+- **Memory is always zeroed**, on first use *and* after a pop. Nobody clears what they were handed.
+
+**Environmental failure kills the process.** No memory, an arena too small, an invariant this code
+claims to maintain — none of these has a useful recovery in a batch simulator. There is nothing to
+do with half an arena. Handling them would mean error branches that exist only to be tested, on a
+machine with 32 GB of RAM where they will never fire in anger. So they are not branches: the
+process writes a message, writes a machine-readable report, and `_exit`s with a code that says
+which kind of failure it was.
+
+| Code | Meaning |
+| ---- | ------- |
+| `70` | An arena was too small. The report says by how much |
+| `71` | The OS refused memory the process genuinely needs |
+| `72` | An invariant this code guarantees did not hold |
+
+Note what is *not* in that list: bad input. A missing file or a malformed config is a user error,
+reported as an `mf_err` and handled normally. Only the environment is fatal.
+
+**Which makes arena size something to discover rather than derive.** The honest maximum working set
+of an evaluation is not knowable before the evaluation exists, and a number that has to be guessed
+right is a number that will be wrong. So the failure is designed to be self-correcting, and that is
+what the second process is for:
+
+```
+mfsim (orchestrator)                    mfsim-worker
+  owns the config          --spawn-->     runs with the arena it was given
+  reads the fatal report   <--exit 70--   dies when that is not enough
+  grows arena_bytes, rewrites the config
+  relaunches               --spawn-->     succeeds
+```
+
+Doing this in one process would mean a worker catching its own out-of-memory — exactly the recovery
+path this design removes, and not trustworthy anyway once the failure *is* memory. Growth is at
+least a doubling and at least the reported shortfall plus 25% headroom, clamped to
+`arena_max_bytes`; past the ceiling or past `max_relaunch`, the run stops and says so. The grown
+size is written back to the config file atomically, so the next run starts where this one ended
+rather than rediscovering it.
+
+The control files this needs — the resolved config in, the fatal report out — are transient and
+carry a pid. **Nothing derived from them reaches an artifact**, so they cost the determinism
+invariant nothing.
+
+**Pooling and pre-zeroing.** Arenas come from a fixed-depth pool that hands them out for the cost of
+a pointer decrement. Everything expensive — asking the OS for pages, and clearing them — happens on
+*release*, after the caller has finished the work it cared about. Running the pool dry is not an
+error: it makes another arena and counts a miss, and the miss count is the signal that the depth was
+set too low. Releasing beyond the depth throws the arena away rather than growing, so a burst of
+work cannot permanently inflate the footprint.
+
+This is deliberate pre-optimisation, and scoped as such: the layer is built for the shape the
+optimised version needs — pooled, pre-zeroed, single-threaded, stack-framed — and backed for now by
+one `calloc` per arena. Every place the fast version will differ carries a `TODO(perf)`. Sprint 6.1
+moves the zeroing to a background thread; sprint 6.3 evaluates `mmap(MAP_ANON)`, which is
+kernel-zeroed and would make creation stop paying for a `memset` at all.
+
+**The rule that keeps it honest:** outside `src/arena.c` and `src/mem.c`, nothing calls a libc
+function that allocates. `mf/mem.h` provides arena-backed `strdup`, `sprintf`, file reads and a
+growable buffer. `make memcheck` greps for violations, which is a crude enforcement mechanism and an
+entirely sufficient one — the rule is about which file a call appears in, and that is exactly what
+grep can see.
 
 ### Thread count is tunable
 

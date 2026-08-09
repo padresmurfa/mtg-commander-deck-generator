@@ -1,24 +1,36 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "mf/artifact.h"
+#include "mf/arena.h"
 #include "mf/cli.h"
 #include "mf/config.h"
-#include "mf/json.h"
+#include "mf/mem.h"
+#include "mf/orch.h"
+#include "mf/panic.h"
+#include "mf/worker.h"
 
-#define MF_VERSION "0.1.0"
+/* The orchestrator. Owns the config and nothing else: it resolves the run,
+   launches a worker, and — when the worker dies for want of arena — grows the
+   number and launches again.
 
-/* main is deliberately thin: everything it does lives in a tested module, and
-   what remains is wiring. It is the one file not held to the coverage floor. */
+   main is deliberately thin: everything it does lives in a tested module, and
+   what remains is wiring. It is one of the two files not held to the coverage
+   floor. */
 
 static int fail(const char *what, const char *detail) {
     fprintf(stderr, "mfsim: %s%s%s\n", what, detail[0] ? ": " : "", detail);
-    return 1;
+    return MF_EXIT_FAILURE;
 }
 
-static int run_stub(mf_cmd cmd) {
-    fprintf(stderr, "mfsim: '%s' is not implemented yet\n", mf_cli_cmd_name(cmd));
-    return 1;
+/* Control files, not output: they carry the resolved config in and the fatal
+   report back out. The pid keeps concurrent runs apart. Nothing derived from
+   them reaches an artifact, so they cost the determinism invariant nothing. */
+static char *scratch(mf_arena *a, const char *what) {
+    const char *dir = getenv("TMPDIR");
+    return mf_mem_sprintf(a, "%s%smfsim-%ld-%s.json", dir ? dir : "/tmp",
+                          (dir && dir[strlen(dir) - 1] == '/') ? "" : "/", (long)getpid(), what);
 }
 
 int main(int argc, char **argv) {
@@ -28,21 +40,22 @@ int main(int argc, char **argv) {
     if (mf_cli_parse(argc, argv, &cli, eb, sizeof eb) != MF_OK) {
         fprintf(stderr, "mfsim: %s\n\n", eb);
         mf_cli_usage(stderr);
-        return 2;
+        return MF_EXIT_USAGE;
     }
-
     if (cli.cmd == MF_CMD_HELP) {
         mf_cli_usage(stdout);
-        return 0;
+        return MF_EXIT_OK;
     }
     if (cli.cmd == MF_CMD_VERSION) {
         printf("mfsim %s\n", MF_VERSION);
-        return 0;
+        return MF_EXIT_OK;
     }
+
+    mf_arena *root = mf_arena_create("orchestrator", MF_ROOT_ARENA_BYTES);
 
     mf_config cfg;
     mf_config_defaults(&cfg);
-    if (cli.config_path && mf_config_load_file(&cfg, cli.config_path, eb, sizeof eb) != MF_OK) {
+    if (cli.config_path && mf_config_load_file(root, &cfg, cli.config_path, eb, sizeof eb) != MF_OK) {
         return fail("config", eb);
     }
     if (cli.out_path) {
@@ -52,32 +65,37 @@ int main(int argc, char **argv) {
         snprintf(cfg.artifact_path, sizeof cfg.artifact_path, "%s", cli.out_path);
     }
 
-    /* Every run opens with its fully resolved configuration, so an artifact is
-       reconstructable without the config file that produced it (design §14.5). */
-    mf_artifact *art = NULL;
-    if (mf_artifact_open(cfg.artifact_path, &art) != MF_OK) {
-        return fail("cannot open artifact", cfg.artifact_path);
+    /* One process, for debugging and for anyone who would rather not have a
+       child. Nothing is retried here: a worker that cannot ask for a bigger
+       arena is a worker that dies with the report and stops. */
+    if (cli.no_spawn) {
+        if (cli.report_path) mf_panic_report_path(cli.report_path);
+        int rc = mf_worker_run(root, &cfg, cli.cmd, NULL);
+        mf_arena_destroy(root);
+        return rc;
     }
 
-    mf_jw *w = mf_jw_new();
-    mf_jw_obj_begin(w);
-    mf_jw_key(w, "record");  mf_jw_str(w, "run_config");
-    mf_jw_key(w, "version"); mf_jw_str(w, MF_VERSION);
-    mf_jw_key(w, "command"); mf_jw_str(w, mf_cli_cmd_name(cli.cmd));
-    mf_jw_key(w, "config");  mf_config_write(&cfg, w);
-    mf_jw_obj_end(w);
+    char worker[MF_PATH_MAX];
+    mf_orch_worker_path(argv[0], worker, sizeof worker);
 
-    const char *line = mf_jw_text(w);
-    int rc = 0;
-    if (!line || mf_artifact_write(art, line) != MF_OK) {
-        rc = fail("cannot write artifact", cfg.artifact_path);
-    }
-    mf_jw_free(w);
+    const char *report = cli.report_path ? cli.report_path : scratch(root, "fatal");
+    char *resolved = scratch(root, "resolved");
 
-    if (rc == 0) rc = run_stub(cli.cmd);
+    mf_orch_spawn_ctx spawn = {.arena = root,
+                               .worker_path = worker,
+                               .subcommand = mf_cli_cmd_name(cli.cmd),
+                               .resolved_config_path = resolved};
+    mf_orch orch = {.launch = mf_orch_spawn,
+                    .ctx = &spawn,
+                    .arena = root,
+                    .report_path = report,
+                    .config_path = cli.config_path,
+                    .log = stderr};
 
-    if (mf_artifact_close(art) != MF_OK && rc == 0) {
-        rc = fail("cannot close artifact", cfg.artifact_path);
-    }
+    int rc = mf_orch_run(&orch, &cfg);
+
+    remove(resolved);
+    if (!cli.report_path) remove(report);
+    mf_arena_destroy(root);
     return rc;
 }

@@ -13,8 +13,8 @@
 
 meta:
   status: in_progress
-  current_sprint: "0.2"
-  task_split_valid_for: "0.2"     # task-splitting any other sprint is speculative
+  current_sprint: "0.3"
+  task_split_valid_for: "0.3"     # task-splitting any other sprint is speculative
   baseline: greenfield
   language: c
   deliverable: cli
@@ -146,9 +146,30 @@ epics:
           - JSONL artifact writes
           - one test passes under make test
       - id: "0.2"
+        name: Memory & process model
+        status: done
+        retro: docs/plan/retros/0.2-memory-process-model.md
+        result:
+          checks: 1661
+          line_coverage: 100.00
+          branch_coverage: 97.16
+          function_coverage: 100.00
+        tasks_doc: docs/plan/sprints/0.2-memory-process-model.md
+        inserted_after: "0.1"
+        why_inserted: >
+          The memory model changes what every later module allocates from, and 0.3 pins output with
+          golden files. Memory after determinism would mean regenerating every golden file the
+          moment it was written.
+        exit_criteria:
+          - no libc allocation outside the memory layer
+          - every module allocates from a caller-supplied arena
+          - environmental failure exits with a distinct code and a machine-readable report
+          - arena stack frames release in O(1) and restore the zero guarantee
+          - orchestrator relaunches the worker at a larger arena size and persists it
+      - id: "0.3"
         name: Determinism harness
         status: active
-        tasks_doc: docs/plan/sprints/0.2-determinism-harness.md
+        tasks_doc: docs/plan/sprints/0.3-determinism-harness.md
         exit_criteria:
           - counter-based RNG
           - layered digest emission
@@ -349,8 +370,8 @@ epics:
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
 tasks:
-  sprint: "0.2"
-  doc: docs/plan/sprints/0.2-determinism-harness.md
+  sprint: "0.3"
+  doc: docs/plan/sprints/0.3-determinism-harness.md
   goal: >
     Counter-based RNG, layered output digests, and the golden-file regression harness, with the
     6-way determinism matrix passing on a trivial workload. No simulation yet.
@@ -359,6 +380,12 @@ tasks:
     auditing every accumulator written in the meantime, and the reduction-order bug it guards
     against is silent — low-bit drift nobody notices until a result cannot be reproduced.
   list:
+    - id: T0
+      name: Decide CI
+      done_when: [decision and reason recorded in the sprint doc and the retro]
+      note: >
+        First, not last. Deferred twice already (0.1, 0.2) for the same reason each time — the
+        digest it would enforce did not exist. It does now, so the reason is spent.
     - id: T1
       name: Counter-based RNG (mf/rng)
       done_when: [known-answer vectors pass, same (seed,stream,n) yields same value regardless of call order]
@@ -382,34 +409,38 @@ tasks:
       done_when: [deliberate change fails with a readable diff, make golden updates it]
     - id: T8
       name: Trivial deterministic workload
-      done_when: ["mfsim validate runs it and emits all five digests"]
+      done_when: ["mfsim validate emits all five digests alongside the memcheck record"]
+      note: >
+        `validate` already exercises the memory layer; the digest layers hang off the same
+        subcommand rather than inventing a second one.
     - id: T9
       name: The 6-way determinism matrix
       done_when: [threads 1/4/8 x fresh/resumed produce byte-identical digests, run by make check]
       note: >
         Threading lands in 6.1; the thread axis here uses simulated work partitioning. The point is
         that the digest is invariant to partition order, which is where the bug would be.
-    - id: T10
-      name: Decide CI
-      done_when: [decision and reason recorded in the sprint doc and the retro]
 
   input_from_previous_retro:
-    - The allocation-seam pattern generalises — apply it to digest and checkpoint I/O rather than
-      discovering the gap at the coverage gate.
-    - _FORTIFY_SOURCE folded branches cap achievable branch coverage below 100%. Do not chase it.
-    - The CI decision is due this sprint; the digest check is now something CI could enforce.
+    - Arena allocation and fail-fast are in place, so the RNG and digest modules take an arena and
+      have no allocation failure paths to test. Expect fewer error branches than 0.1 would have had.
+    - Watch for branches a refactor has just made dead. Two survived the arena port by a sprint.
+    - Do not catch a fatal that owns memory the test cannot reach. MF_EXPECT_PANIC longjmps past
+      cleanup, and LeakSanitizer is right to complain. Put those cases in tests/smoke.sh.
+    - Green on the first compile proves nothing. Mutate the implementation and watch the test catch
+      it, if the red could not be observed first.
+    - The residual branch gap is almost entirely _FORTIFY_SOURCE folding (18 of 19). Do not chase it.
 
   open_decisions:
-    - id: ci
-      question: GitHub Actions running `make check`, or local-only?
-      status: due_this_sprint
-      carried_from: "0.1"
-      why_carried: The thing CI would enforce (output digests) did not exist until now.
-      blocks: []
     - id: digest_algorithm
       question: Which 128-bit non-cryptographic hash?
       constraint: stable, fast, no dependency, written in-tree
       candidates: [xxHash128, SplitMix-based construction]
+    - id: digest_of_control_files
+      question: Do the resolved-config and fatal-report files need to be digest-neutral?
+      status: answered_in_0_2
+      answer: >
+        No. They are transient control files carrying a pid, and nothing derived from them reaches
+        an artifact. Recorded in spec parameters.processes.control_files.
 
   not_in_this_sprint:
     items: [real threading, real checkpointing]
@@ -426,4 +457,15 @@ retros:
       The coverage floor changed the design rather than merely measuring it: OOM branches no test
       could reach forced an allocation seam, which turned into a standing OOM sweep. Branch
       coverage 84% -> 92% from that alone.
+    carry_over: [ci_decision]
+  - sprint: "0.2"
+    doc: docs/plan/retros/0.2-memory-process-model.md
+    gates: []
+    design_amendments: 6
+    headline: >
+      The 0.1 allocation seam was superseded by its own logic: the seam made out-of-memory branches
+      testable, arenas made them nonexistent. A testable failure path beats an untested one, and no
+      failure path beats either. The coverage floor also caught two real defects — cache-line
+      alignment computed from an offset rather than an address, and a reader over-reserving arena
+      that the high-water mark would have made permanent.
     carry_over: [ci_decision]

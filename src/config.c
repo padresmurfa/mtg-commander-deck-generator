@@ -1,9 +1,14 @@
 #include "mf/config.h"
 
-#include "mf/alloc.h"
+#include "mf/mem.h"
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
+
+/* Sizing bounds. The lower one keeps a typo from producing an arena that cannot
+   hold the first allocation; the upper one keeps a runaway growth loop from
+   asking the OS for the address space. */
+#define MF_ARENA_MIN (64u * 1024u)
+#define MF_ARENA_LIMIT (1024.0 * 1024.0 * 1024.0 * 1024.0) /* 1 TiB */
 
 /* Defaults mirror docs/simulator-spec.yaml. Tests assert the correspondence, so
    a drifting spec fails the build rather than silently changing a run. */
@@ -15,6 +20,12 @@ void mf_config_defaults(mf_config *c) {
     c->seed = 0;
     snprintf(c->artifact_path, sizeof c->artifact_path, "runs/run.jsonl");
     snprintf(c->card_table_path, sizeof c->card_table_path, "data/cards.bin");
+
+    c->arena_bytes = 64u * 1024u * 1024u;
+    c->arena_max_bytes = 8ull * 1024u * 1024u * 1024u;
+    c->arena_pool_depth = 2;
+    c->max_relaunch = 4;
+    c->persist_arena_growth = true;
 }
 
 static void say(char *buf, size_t len, const char *fmt, const char *a) {
@@ -28,6 +39,15 @@ static mf_err want_number(const mf_json *v, const char *key, double *out,
         return MF_ERR_TYPE;
     }
     *out = mf_json_number(v);
+    return MF_OK;
+}
+
+static mf_err want_bool(const mf_json *v, const char *key, bool *out, char *eb, size_t el) {
+    if (mf_json_type_of(v) != MF_JSON_BOOL) {
+        say(eb, el, "config key '%s' must be true or false", key);
+        return MF_ERR_TYPE;
+    }
+    *out = mf_json_bool(v);
     return MF_OK;
 }
 
@@ -51,16 +71,15 @@ static mf_err range_err(const char *key, char *eb, size_t el) {
     return MF_ERR_RANGE;
 }
 
-mf_err mf_config_load_json(mf_config *c, const char *text, char *eb, size_t el) {
+mf_err mf_config_load_json(mf_arena *a, mf_config *c, const char *text, char *eb, size_t el) {
     mf_json *doc = NULL;
-    mf_err e = mf_json_parse(text, &doc);
+    mf_err e = mf_json_parse(a, text, &doc);
     if (e != MF_OK) {
         say(eb, el, "config is not valid JSON%s", "");
         return e;
     }
     if (mf_json_type_of(doc) != MF_JSON_OBJECT) {
         say(eb, el, "config must be a JSON object%s", "");
-        mf_json_free(doc);
         return MF_ERR_TYPE;
     }
 
@@ -89,6 +108,28 @@ mf_err mf_config_load_json(mf_config *c, const char *text, char *eb, size_t el) 
             e = want_string(v, key, c->artifact_path, sizeof c->artifact_path, eb, el);
         } else if (strcmp(key, "card_table_path") == 0) {
             e = want_string(v, key, c->card_table_path, sizeof c->card_table_path, eb, el);
+        } else if (strcmp(key, "arena_bytes") == 0) {
+            e = want_number(v, key, &num, eb, el);
+            if (e == MF_OK && (num < MF_ARENA_MIN || num > MF_ARENA_LIMIT)) {
+                e = range_err(key, eb, el);
+            }
+            if (e == MF_OK) c->arena_bytes = (size_t)num;
+        } else if (strcmp(key, "arena_max_bytes") == 0) {
+            e = want_number(v, key, &num, eb, el);
+            if (e == MF_OK && (num < MF_ARENA_MIN || num > MF_ARENA_LIMIT)) {
+                e = range_err(key, eb, el);
+            }
+            if (e == MF_OK) c->arena_max_bytes = (size_t)num;
+        } else if (strcmp(key, "arena_pool_depth") == 0) {
+            e = want_number(v, key, &num, eb, el);
+            if (e == MF_OK && (num < 0 || num > 64)) e = range_err(key, eb, el);
+            if (e == MF_OK) c->arena_pool_depth = (size_t)num;
+        } else if (strcmp(key, "max_relaunch") == 0) {
+            e = want_number(v, key, &num, eb, el);
+            if (e == MF_OK && (num < 0 || num > 16)) e = range_err(key, eb, el);
+            if (e == MF_OK) c->max_relaunch = (int)num;
+        } else if (strcmp(key, "persist_arena_growth") == 0) {
+            e = want_bool(v, key, &c->persist_arena_growth, eb, el);
         } else {
             /* Never ignored: a typo'd key that silently does nothing is a run
                that quietly measured the wrong thing. */
@@ -96,56 +137,41 @@ mf_err mf_config_load_json(mf_config *c, const char *text, char *eb, size_t el) 
             e = MF_ERR_UNKNOWN_KEY;
         }
 
-        if (e != MF_OK) {
-            mf_json_free(doc);
-            return e;
-        }
+        if (e != MF_OK) return e;
     }
 
-    mf_json_free(doc);
+    /* Checked after the loop rather than per key, because either key may be the
+       one that arrives second. A ceiling below the starting size would make the
+       very first relaunch impossible, which is a config nobody meant to write. */
+    if (c->arena_max_bytes < c->arena_bytes) {
+        say(eb, el, "arena_max_bytes is below arena_bytes%s", "");
+        return MF_ERR_RANGE;
+    }
+
     return MF_OK;
 }
 
-/* Read incrementally rather than seek-to-end: it works on pipes and character
-   devices (so `--config /dev/stdin` is usable), and it removes two error paths
-   that nothing could have exercised. */
-mf_err mf_config_load_file(mf_config *c, const char *path, char *eb, size_t el) {
-    FILE *f = fopen(path, "rb");
-    if (!f) {
+mf_err mf_config_load_file(mf_arena *a, mf_config *c, const char *path, char *eb, size_t el) {
+    char *text = mf_mem_read_file(a, path, NULL);
+    if (!text) {
         say(eb, el, "cannot open config file '%s'", path);
         return MF_ERR_IO;
     }
-
-    size_t cap = 256, len = 0;
-    char *text = mf_malloc(cap);
-    if (!text) { fclose(f); return MF_ERR_INTERNAL; }
-
-    for (;;) {
-        if (len + 1 >= cap) {
-            char *bigger = mf_realloc(text, cap * 2);
-            if (!bigger) { mf_free(text); fclose(f); return MF_ERR_INTERNAL; }
-            text = bigger;
-            cap *= 2;
-        }
-        size_t got = fread(text + len, 1, cap - 1 - len, f);
-        if (got == 0) break;
-        len += got;
-    }
-    text[len] = '\0';
-    fclose(f);
-
-    mf_err e = mf_config_load_json(c, text, eb, el);
-    mf_free(text);
-    return e;
+    return mf_config_load_json(a, c, text, eb, el);
 }
 
 void mf_config_write(const mf_config *c, mf_jw *w) {
     mf_jw_obj_begin(w);
-    mf_jw_key(w, "threads");         mf_jw_int(w, c->threads);
-    mf_jw_key(w, "lambda_cvar");     mf_jw_num(w, c->lambda_cvar);
-    mf_jw_key(w, "cvar_quantile");   mf_jw_num(w, c->cvar_quantile);
-    mf_jw_key(w, "seed");            mf_jw_int(w, (long long)c->seed);
-    mf_jw_key(w, "artifact_path");   mf_jw_str(w, c->artifact_path);
-    mf_jw_key(w, "card_table_path"); mf_jw_str(w, c->card_table_path);
+    mf_jw_key(w, "threads");              mf_jw_int(w, c->threads);
+    mf_jw_key(w, "lambda_cvar");          mf_jw_num(w, c->lambda_cvar);
+    mf_jw_key(w, "cvar_quantile");        mf_jw_num(w, c->cvar_quantile);
+    mf_jw_key(w, "seed");                 mf_jw_int(w, (long long)c->seed);
+    mf_jw_key(w, "artifact_path");        mf_jw_str(w, c->artifact_path);
+    mf_jw_key(w, "card_table_path");      mf_jw_str(w, c->card_table_path);
+    mf_jw_key(w, "arena_bytes");          mf_jw_int(w, (long long)c->arena_bytes);
+    mf_jw_key(w, "arena_max_bytes");      mf_jw_int(w, (long long)c->arena_max_bytes);
+    mf_jw_key(w, "arena_pool_depth");     mf_jw_int(w, (long long)c->arena_pool_depth);
+    mf_jw_key(w, "max_relaunch");         mf_jw_int(w, c->max_relaunch);
+    mf_jw_key(w, "persist_arena_growth"); mf_jw_bool(w, c->persist_arena_growth);
     mf_jw_obj_end(w);
 }
