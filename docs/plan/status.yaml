@@ -512,12 +512,16 @@ tasks:
     - id: T5
       name: skill floors
     - id: T6
-      name: precon membership bitmask
-      blocked_by: precon_decklists_unavailable
+      name: precon membership side table
+      unblocked_by: "1.2.1 addendum"
+      data: data/precons.jsonl
+      acquisition: tools/fetch-precons.sh
       note: >
-        Needs ~68 precon decklists and no source is acquired — 1.1 ingested Scryfall bulk only, and
-        Scryfall knows precon products but not their contents. Resolve or defer T6 to the E1 close;
-        nothing else in the sprint depends on it.
+        No longer blocked. MTGJSON publishes precon contents as CC0 bulk JSON keyed by
+        scryfallOracleId — 190 decks, all exactly 100 cards, joining at 16,624 of 16,624 entries.
+        The task changed shape as a result: 190 bits will not fit a 32-byte card struct, so this is
+        a side table joined at deck-scoring granularity, NOT a per-card field, and membership must
+        not enter the equivalence-class key.
     - id: T7
       name: binary card table with content hash
     - id: T8
@@ -541,6 +545,27 @@ retros:
       the fraction everywhere. Mutation testing found the Island accident had reappeared as a dead
       || alternative, and three tests that pinned nothing.
     carry_over: []
+    addendum:
+      what: precon decklists acquired, and two design assumptions corrected
+      why: >
+        1.3 T6 had been recorded as blocked on precon contents, on the belief that only Moxfield,
+        MTGGoldfish and EDHREC held them and all behind HTML meant for humans. MTGJSON publishes
+        them as CC0 bulk JSON keyed by scryfallOracleId — the key 1.1 already builds the card set
+        around — joining at 16,624 of 16,624 entries. The blocker was an unchecked assumption, not
+        a fact, and it was recorded as a blocker without anyone going to look.
+      corrections:
+        - >
+          190 Commander precons exist, not ~68. The ~68 was the count with WIN RATES (67), a
+          different and much smaller set; the design carried it as though it were both.
+        - >
+          The membership bitmask cannot be a per-card field: 190 bits is 24 bytes against a
+          32-byte struct budget, the set grows every release, and 83% of cards are in no precon at
+          all. It becomes a side table, and T1 gets those bytes back.
+        - >
+          A precon has one OR TWO commanders — five of the 190 are partner pairs.
+      also: >
+        spec meta.current_sprint had been stale at "0.2" for five sprints. Corrected, and pointed
+        at status.yaml as the authority so it cannot drift again.
   - sprint: "0.1"
     doc: docs/plan/retros/0.1-greenfield-skeleton.md
     gates: []

@@ -8,14 +8,15 @@
 # disagree, the design doc is authoritative for INTENT and this file is authoritative
 # for VALUES — reconcile, do not guess.
 #
-# Status: design. No implementation exists yet.
+# Status: in progress. E0 is complete; E1 is active.
 
 meta:
   name: mtg-deck-simulator
   binary: mfsim
   status: in_progress
   implementation_started: true
-  current_sprint: "0.2"
+  current_sprint: "1.3"          # was stale at "0.2" through five sprints; corrected 1.2.1 addendum
+  current_sprint_authority: docs/plan/status.yaml
   authoritative_prose: docs/simulator-design.md
   plan: docs/plan/
   players: 2
@@ -816,19 +817,48 @@ schemas:
       - price_imputed_flag
       - skill_floor
       - commander_legal
-      - precon_membership_bitmask
+      # precon_membership_bitmask REMOVED in 1.2.1 addendum — it is a side table, not a per-card field.
+      # 190 precons is 24 bytes of the struct's 32-byte budget, the set grows every release, and
+      # 83% of cards are in no precon at all. See side_tables.precon_membership.
 
   side_tables:
     ref: "8, 13.2"
-    note: Hand-maintained, date-stamped, content-hashed with the rest.
+    note: Date-stamped and content-hashed with the rest.
     tables:
+      - id: precon_membership
+        added: sprint 1.2.1 addendum
+        rows: 190
+        unit: decks
+        source: "mtgjson.com AllDeckFiles (CC0), reduced by tools/fetch-precons.sh"
+        acquired: 2026-08-09
+        sha256: bd1f9dca34c6fb0e860d36d93726302ae819e789957e9e8c957b14f15c6dfec2
+        join_key: identifiers.scryfallOracleId
+        join_rate: 1.0             # 16,624 of 16,624 entries; 0 missing ids, 0 unknown oracles
+        shape: "deck -> {code, name, released, commanders[1..2], cards[100]}"
+        covers: "6257 of 37553 paper oracles (16.7%)"
+        per_game_reach: {paper: 1.0, mtgo: 0.963, arena: 0.403}
+        why_not_per_card: >
+          190 bits is 24 bytes against a 32-byte struct budget, the set grows on Wizards' schedule,
+          and 83% of cards are in no precon. Joined at deck-scoring granularity instead.
+        must_not: >
+          Precon membership is NOT part of the equivalence-class key. Two functionally identical
+          cards must not split into different classes because one is in a precon — that is a fact
+          about retail, not about the game.
+        why_this_source: >
+          Machine-readable, CC0, bulk-downloadable, and carries the Scryfall oracle id that sprint
+          1.1 already builds the card set around. Moxfield, MTGGoldfish and EDHREC hold the same
+          lists behind HTML meant for humans; scraping them would be fragile and is not what their
+          terms invite.
       - id: precon_prices
-        rows: 68
+        rows: 190                  # was 68 — see precon_membership; the count was an underestimate
         source: manual
         why_manual: Scryfall prices singles, not sealed product.
       - id: precon_win_rates
         rows: 67
         source: "playgroup.gg (manual transcription; no API or bulk export)"
+        note: >
+          67 is the set with WIN RATES, and is not the set of precons that exist. The design
+          previously carried "~68 precons" as though it were both.
 
   checkpoint:
     ref: "16.3"

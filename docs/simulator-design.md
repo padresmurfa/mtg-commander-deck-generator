@@ -421,6 +421,17 @@ rates (§13.2).
 as a small hand-updated table alongside the Playgroup win rates — 67 rows, same transcription pass,
 refreshed occasionally. Out-of-print precons drift upward, so date-stamp it.
 
+*(Amended sprint 1.2.1 addendum.)* **Precon *contents* are not a gap, and never were** — the plan had carried
+them as an unresolved data dependency on the assumption that only Moxfield, MTGGoldfish and EDHREC
+had them, all behind HTML meant for humans. [MTGJSON](https://mtgjson.com) publishes them as
+CC0 bulk JSON keyed by `scryfallOracleId`, which is the key §8 already builds the card set around:
+**190 decks, all exactly 100 cards, joining at 16,624 of 16,624 entries.**
+
+Acquired by `tools/fetch-precons.sh`, which runs by hand and writes a file — the same
+consume-don't-fetch shape as the Scryfall bulk, so `mfsim` still never touches the network. Note
+this is *contents*, not *prices*: the price table above stays hand-maintained, and its row count
+rises from 68 to 190 with the corrected deck count.
+
 ### 7.6 Dominance chaining — do not prune
 
 Card A **dominates** B when A's effects are a superset at ≤ mana cost and ≤ dollar cost.
@@ -614,11 +625,33 @@ builder pays more for the unpriced card, so $2 is the correct *effective* cost o
 - minimum price (imputed where absent) + imputation flag
 - skill floor (§7.4)
 - commander legality
-- precon membership bitmask — which of the ~68 precons contain this card, for the acquisition-path
-  cost model (§7.5)
+- ~~precon membership bitmask — which of the ~68 precons contain this card, for the acquisition-path
+  cost model (§7.5)~~ — **superseded, sprint 1.2.1 addendum. See below.**
 
 Plus two small hand-maintained side tables, date-stamped and content-hashed with the rest:
 precon retail prices, and precon win rates from Playgroup (§13.2).
+
+**Precon membership is a side table, not a per-card field.** *(Amended sprint 1.2.1 addendum, when the data
+was actually acquired and contradicted two assumptions at once.)*
+
+- **There are 190 Commander precons, not ~68**, spanning 2011-06-17 to 2026-06-26, and the count
+  grows every release. The "~68" was an underestimate of roughly a third; it is close to the 67 that
+  §13.2 has *win rates* for, which is a different and much smaller set, and the two were probably
+  conflated.
+- **190 bits is 24 bytes**, and the card struct's whole budget is 32 (§7.9). A membership bitmask
+  cannot live in the struct beside cost, colours, opcodes and P/T — and a fixed-width one would be a
+  standing liability, since the set grows on a schedule Wizards controls and this project does not.
+- **It would be mostly zero anyway.** Only 6,257 of 37,553 paper cards — 16.7% — appear in any
+  precon at all, so as a per-card field it is 83% padding.
+
+So: a `deck -> [oracle_id]` side table, joined when the acquisition-path cost model (§7.5) or precon
+seeding (§5) needs it, which is at deck-scoring granularity rather than per card. **Membership must
+not be part of the equivalence-class key** (§7.1), or two functionally identical cards would split
+into different classes because one happens to be in a precon — which is a fact about retail, not
+about the game.
+
+A deck has **one or two commanders**: five of the 190 are partner pairs. The data model carries a
+list, not a field.
 
 ---
 
