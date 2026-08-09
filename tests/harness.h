@@ -112,6 +112,8 @@ void run_scryfall_tests(void);
 void run_opcode_tests(void);
 void run_metacard_tests(void);
 void run_classes_tests(void);
+void run_precon_tests(void);
+void run_skill_tests(void);
 void run_panic_tests(void);
 void run_arena_tests(void);
 void run_pool_tests(void);

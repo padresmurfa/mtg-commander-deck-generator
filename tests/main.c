@@ -19,6 +19,8 @@ int main(void) {
     run_opcode_tests();
     run_metacard_tests();
     run_classes_tests();
+    run_precon_tests();
+    run_skill_tests();
     run_config_tests();
     run_artifact_tests();
     run_cli_tests();
