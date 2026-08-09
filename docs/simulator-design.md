@@ -1188,6 +1188,29 @@ That distinction is the whole of the number, and it means the number is **condit
 phases run**. G1 measured **0.9357** in sprint 1.2 with 89.4% of clauses inert. Re-measure when E3
 widens what is observed; the figure will fall, and that is the model growing rather than breaking.
 
+*(Amended sprint 1.2.1, after the classifier was found to apply its own rule to one branch out of
+five.)* Classification is **three steps, in this order**, and the first and third are what 1.2 had
+only in places:
+
+1. **Reachability.** Does the trigger fire inside the simulated phases? Entering, casting, the
+   beginning of a turn or step, and land drops do. Attacking, blocking, combat damage, dying and an
+   opponent's actions do not. A clause gated on an event these phases never run is **inert**,
+   whatever it goes on to do.
+2. **Shape.** What it does, in the observable currency.
+3. **Expressibility.** A concrete opcode whose amount or condition depends on state the model does
+   not carry is **unmatched**. Magic's own templating draws the line the model needs: *when* fires
+   once at a moment the model knows, *whenever* fires a count set by the rest of the deck.
+   Optionality is not such a condition — assume the beneficial choice, since §5's ladder contains
+   no policy that declines a free land.
+
+**The metric has a hazard, and it is worth stating plainly: G1 goes up when less is simulated.**
+Moving a clause out of scope and modelling it properly both raise the fraction, and a model that
+simulated nothing would score 1.0. Re-measurement in 1.2.1 did exactly this — reclassifying combat
+triggers as inert raised coverage while modelling nothing new — and the headline only fell to
+**0.9325** because corrections in the other direction happened to be slightly larger. **So the
+inert share is quoted beside the fraction, always**, and a rise in G1 that comes with a rise in the
+inert share is not an improvement.
+
 ---
 
 ## 14. Implementation hazards

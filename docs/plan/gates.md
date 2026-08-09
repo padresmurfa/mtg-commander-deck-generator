@@ -14,7 +14,7 @@ a reason — never "done".
 
 | Gate | Sprint | Question | Threshold | Outcome |
 | ---- | ------ | -------- | --------- | ------- |
-| **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9357**, conditional ([retro](retros/1.2-opcode-model.md)) |
+| **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9325**, conditional. Re-measured in 1.2.1, superseding 0.9357 ([retro](retros/1.2.1-clause-reachability.md)) |
 | **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | Within Monte Carlo error of the exact value | *pending* |
 | **G3** Policy gap discriminates | 2.3 | Does naive-vs-careful separate known-forgiving from known-demanding decks? | Separation exceeding measurement noise | *pending* |
 | **G4** Precon rank correlation | 3.3 | Does the objective rank real decks in the right order? | Spearman above threshold, precons with n≥100 | *pending* |
@@ -27,11 +27,17 @@ a reason — never "done".
 These are real branches, written down in advance so that failing a gate is a decision rather
 than a crisis.
 
-**G1 — opcode coverage.** **Measured 0.9357 in sprint 1.2 — passed, with a condition.** The figure
-is coverage of what the *currently simulated* phases can observe, and those are only the turn-1–4
-feasibility gate: 89.4% of all clauses are inert rather than modelled. It must be re-measured when
-E3 widens what is observed, and it will fall. A number quoted without that condition answers a
-different question.
+**G1 — opcode coverage.** **Measured 0.9357 in sprint 1.2 and re-measured at 0.9325 in sprint
+1.2.1 — passed, with a condition.** The figure is coverage of what the *currently simulated* phases
+can observe, and those are only the turn-1–4 feasibility gate: 90.3% of all clauses are inert
+rather than modelled. It must be re-measured when E3 widens what is observed, and it will fall. A
+number quoted without that condition answers a different question.
+
+The re-measurement moved the headline by 0.0032 and 1,454 clauses — a near-cancellation of two
+large corrections in opposite directions, not evidence the first classifier was nearly right. It
+also exposed a hazard in the metric itself: **G1 rises when less is simulated**, because moving a
+clause out of scope and modelling it both count the same way. In the limit a model that simulates
+nothing scores 1.0. The inert share is therefore quoted beside the fraction, always.
 
 Unrepresentable cards are excluded from the pool
 ([spec §13.5](../simulator-spec.yaml)), so coverage is a hard ceiling on how meaningful any

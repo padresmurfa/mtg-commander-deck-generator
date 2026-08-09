@@ -35,8 +35,15 @@ The `preprocess` subcommand. Ends with the project's first kill-switch.
 | Sprint | Goal | Exit criteria | Status |
 | ------ | ---- | ------------- | ------ |
 | **1.1** | Acquisition & oracle normalisation | Scryfall bulk ingested; grouped by `oracle_id`; min price across paper non-foil printings; legality and colour identity resolved | `done` |
-| **1.2** | Opcode model — **gate G1** | Card struct ≤32 B; oracle text → opcodes for the modelled subset; coverage measured on a real commander's pool | `done` — **G1 0.9357, conditional pass** |
+| **1.2** | Opcode model — **gate G1** | Card struct ≤32 B; oracle text → opcodes for the modelled subset; coverage measured on a real commander's pool | `done` — **G1 0.9357**, superseded by 1.2.1 |
+| **1.2.1** | Clause reachability — **G1 re-measured** | Reachability, shape and expressibility as three steps applied to every branch rather than one; land fetch by land type; G1 re-measured against the corrected rule | `done` — **G1 0.9325, conditional pass** |
 | **1.3** | Classes, dominance, enrichment | Equivalence classes; dominance chains merged into tiered classes; skill floors; precon membership; price imputation; binary card table emitted with content hash | `not started` |
+
+1.2.1 is a follow-on to 1.2 on the 0.2.1 precedent, and for a sharper reason: **G1's number is
+published.** A published measurement that quietly changes is worse than one superseded in the open,
+so 0.9357 stands as what 1.2 measured, with what was wrong with it recorded beside it. The
+supersession also carries a finding about the metric rather than the classifier — **G1 rises when
+less is simulated** — which is why every quotation of it now carries the inert share.
 
 ## E2 — Opening phase · `not started`
 

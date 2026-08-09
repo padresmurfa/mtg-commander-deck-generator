@@ -989,30 +989,66 @@ validation:
   opcode_coverage:
     ref: "13.5"
     added: sprint 1.2
+    remeasured: sprint 1.2.1
     gate: G1
     threshold: {sound: 0.60, compromised: 0.30}
     measured:
-      value: 0.9357
+      value: 0.9325
       date: 2026-08-09
       pool: commander-legal paper cards from the Scryfall export
-      representable: 29783
+      representable: 29681
       legal: 31829
       verdict: pass
+    superseded:
+      - value: 0.9357
+        sprint: "1.2"
+        why: >
+          The classifier decided a clause from the first effect keyword it recognised and applied
+          its expressibility check to the mana branch only. 162 lands that enter tapped ONLY under
+          a condition were recorded as entering tapped outright, 118 variable cost reductions as
+          fixed, and combat-triggered effects were charged to the opcode set rather than to the
+          narrowness of the phases. Retained because a published measurement that quietly changes
+          is worse than one superseded in the open.
+      - value: 0.9249
+        sprint: "1.2"
+        why: >
+          Pre-dates the choice opcodes; 481 dual-land clauses read as fixed single-colour mana.
     definition: >
       A card is representable when everything it does THAT THE SIMULATED PHASES CAN OBSERVE is
       modelled. The opening phase (design §3) simulates turns 1-4 and asks whether a deck can cast
       its spells and reach turn 5 functional, so the observables are mana produced, cost, cards
       drawn, lands fetched and cost reduction. A vanilla creature is fully representable: a cost, a
       colour requirement and a body is all of it that turn four can see.
+    classification_rule:
+      ref: sprint 1.2.1
+      steps:
+        - name: reachability
+          rule: >
+            Does the trigger fire inside the simulated phases? Entering, casting, the beginning of
+            a turn or step, and land drops do. Attacking, blocking, combat damage, dying and an
+            opponent's actions do not. A clause gated on an event these phases never run is INERT.
+        - name: shape
+          rule: What it does, in the observable currency.
+        - name: expressibility
+          rule: >
+            A concrete opcode whose amount or condition depends on state the model does not carry
+            is UNMATCHED. "Whenever" is such a condition and "when" is not — a one-shot trigger
+            fires once at a known moment, a repeating one fires a count set by the rest of the
+            deck. Optionality is NOT such a condition; assume the beneficial choice.
     condition: >
-      MUST be re-measured when a later epic widens what is simulated. 89.4% of clauses are inert
+      MUST be re-measured when a later epic widens what is simulated. 90.3% of clauses are inert
       rather than modelled, and inertia is relative to the phases being run. The figure will fall
       as the model widens; that is expected and is not a regression. Quoting it bare answers a
       different question than the one it was measured for.
+    metric_hazard: >
+      G1 rises when LESS is simulated. Reclassifying combat triggers as inert in 1.2.1 raised
+      coverage by moving clauses out of scope rather than modelling them, and in the limit a model
+      that simulates nothing scores 1.0. The number is therefore only meaningful beside the inert
+      share, which is why both are recorded here and both are emitted in the run artifact.
     clause_mix:
       total: 77348
-      inert: 69169
-      unmatched: 2392
+      inert: 69865
+      unmatched: 2475
     largest_lever: >
       Conditional and triggered draw — "If you do, draw a card" and its relatives — is the head of
       the unmatched distribution by a wide margin. Past the top ten shapes the tail is essentially

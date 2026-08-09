@@ -23,18 +23,54 @@ static bool has(const char *s, size_t len, const char *needle) {
     return false;
 }
 
-/* The classification, stated as a rule rather than a pile of patterns:
+/* Step 1 — reachability. A clause is only worth classifying if its trigger
+ * fires inside the phases being simulated. §3 runs turns 1-4 exactly: cards are
+ * cast, permanents enter, lands are played, turns begin. It does not run
+ * combat, and nothing dies in a phase where nothing attacks.
  *
- *   1. Does this clause mention something the opening phase can observe?
- *   2. If not, it is inert — real text, in a currency these phases do not spend.
- *   3. If so, can this opcode set express it? If not, it is unmatched, and that
- *      is what gate G1 counts.
+ * So a clause gated on one of these events contributes nothing to what is being
+ * measured, whatever it goes on to do — which is inert, in the same sense and
+ * for the same reason that a vanilla 4/4 is fully represented. Charging the
+ * opcode set for it instead would count the narrowness of the simulated phases
+ * twice: once as the inert majority, and again as unmodelled text.
  *
- * Step 1 is the auditable part, and it is deliberately generous: anything
- * touching mana, drawing, land search or cost reduction is *considered*, and
- * only then judged. A clause that mentions mana in a way this set cannot
- * express counts against the gate rather than being quietly waved through. */
-mf_opcode mf_opcode_classify(const char *clause, size_t len) {
+ * The leading spaces are not decoration. "dies" is a substring of "bodies". */
+static bool trigger_is_unreachable(const char *s, size_t n) {
+    return has(s, n, " dies") || has(s, n, " attacks") || has(s, n, " blocks") ||
+           has(s, n, "combat damage") || has(s, n, "is put into a graveyard") ||
+           has(s, n, "leaves the battlefield");
+}
+
+/* Step 3 — expressibility. The amount or the condition depends on game state
+ * this model does not carry, so the opcode set cannot say what happens.
+ *
+ * This is the predicate 1.2 applied to mana and nowhere else. A fixed opcode
+ * standing in for a variable effect is not an approximation, it is a wrong
+ * answer that inflates the gate: a land recorded as entering tapped when it
+ * would have entered untapped misreports tempo on exactly the turns the opening
+ * phase exists to measure.
+ *
+ * "Whenever" is here and "when" is not, which is Magic's own distinction and
+ * the model's: a one-shot trigger fires once at a moment the model knows — the
+ * card is cast, it enters — while a repeating one fires a number of times set
+ * by what else was drawn and cast. A fixed opcode can stand for the first and
+ * not the second.
+ *
+ * Optionality is deliberately absent. "You may" is expressible — assume the
+ * beneficial choice, since §5's ladder of policies contains none that declines
+ * a free card or a free land, and treating it as a condition would make most
+ * enters-the-battlefield ramp unrepresentable. */
+static bool depends_on_unheld_state(const char *s, size_t n) {
+    return has(s, n, "for each") || has(s, n, "equal to") || has(s, n, "unless") ||
+           has(s, n, "whenever") || has(s, n, "if ") || has(s, n, "as long as") ||
+           has(s, n, "instead") || has(s, n, "that much") ||
+           has(s, n, "spend this mana only") || has(s, n, "during your first");
+}
+
+/* Step 2 — shape. What does this clause do, in the currency the phases spend?
+   Returns INERT for text they cannot see, and UNMATCHED only where the shape
+   itself is one the opcode set has no room for at all. */
+static mf_opcode shape_of(const char *clause, size_t len) {
     /* Cost reduction first: "spells you cast cost {1} less to cast" also
        mentions casting, and the reduction is the part that matters. */
     if (has(clause, len, "cost") && has(clause, len, "less to cast")) return MF_OP_COST_LESS;
@@ -44,20 +80,10 @@ mf_opcode mf_opcode_classify(const char *clause, size_t len) {
     }
 
     /* Mana. "Add" is the only word that produces it in modern templating.
-     *
-     * Two questions, in order, and the order is the whole of the rule. First:
-     * does *how much* depend on game state this model does not carry? Then it
-     * cannot be expressed, and rounding it to a constant would be a lie that
-     * inflates the gate. Second: is it a choice from a set printed on the card?
-     * Then it can — the set is right there — and it gets its own opcode, because
-     * telling a dual land it makes one colour would misreport exactly the
-     * flexibility the opening phase exists to measure. */
+       A choice from a set printed on the card is expressible — the set is right
+       there — and gets its own opcode, because telling a dual land it makes one
+       colour would misreport exactly the flexibility the opening measures. */
     if (has(clause, len, "add ")) {
-        if (has(clause, len, "for each") || has(clause, len, "if you control") ||
-            has(clause, len, "unless") || has(clause, len, "equal to") ||
-            has(clause, len, "spend this mana only")) {
-            return MF_OP_UNMATCHED;
-        }
         bool choice = has(clause, len, " or ") || has(clause, len, "any color") ||
                       has(clause, len, "any colour") || has(clause, len, "any type") ||
                       has(clause, len, "any combination") || has(clause, len, "choose");
@@ -68,21 +94,27 @@ mf_opcode mf_opcode_classify(const char *clause, size_t len) {
     }
 
     if (has(clause, len, "draw")) {
-        /* A plain draw is modelled. A draw with a condition, a cost, or a
-           trigger this model has no notion of, is not. */
+        /* A draw belonging to an opponent does not change what this deck can
+           cast, so the solo feasibility gate does not observe it. */
+        if (has(clause, len, "opponent")) return MF_OP_INERT;
+        /* Quantities this set counts. Anything else is a shape it has no room
+           for, rather than a condition it cannot evaluate. */
         if (has(clause, len, "draw a card") || has(clause, len, "draw two cards") ||
             has(clause, len, "draw three cards")) {
-            if (has(clause, len, "whenever") || has(clause, len, "if ") ||
-                has(clause, len, "may ") || has(clause, len, "each opponent")) {
-                return MF_OP_UNMATCHED;
-            }
             return MF_OP_DRAW;
         }
         return MF_OP_UNMATCHED;
     }
 
     if (has(clause, len, "search your library")) {
-        if (!has(clause, len, "land")) return MF_OP_INERT; /* tutoring a spell, not ramp */
+        /* By land *type*, not by the letters l-a-n-d. "Search your library for a
+           Plains or Island card" used to be ramp and "a Mountain or Forest card"
+           used to be a spell tutor, because "Island" happens to contain "land"
+           and "Forest" does not — an accident of spelling deciding 64 cards. */
+        bool land = has(clause, len, "land") || has(clause, len, "plains") ||
+                    has(clause, len, "swamp") || has(clause, len, "mountain") ||
+                    has(clause, len, "forest"); /* "island" would be dead: it contains "land" */
+        if (!land) return MF_OP_INERT; /* tutoring a spell, not ramp */
         if (has(clause, len, "onto the battlefield") || has(clause, len, "into your hand")) {
             return MF_OP_FETCH_LAND;
         }
@@ -93,6 +125,21 @@ mf_opcode mf_opcode_classify(const char *clause, size_t len) {
        and it is not a failure to model it — it is a statement about which
        phases are simulated. */
     return MF_OP_INERT;
+}
+
+/* The rule, in the order the three steps have to run.
+ *
+ * Reachability before shape, because an unreachable trigger makes the shape
+ * irrelevant. Expressibility after shape, because it only means anything once
+ * there is a concrete opcode for it to disqualify — an inert clause is allowed
+ * to say "unless" all it likes. */
+mf_opcode mf_opcode_classify(const char *clause, size_t len) {
+    if (trigger_is_unreachable(clause, len)) return MF_OP_INERT;
+
+    mf_opcode op = shape_of(clause, len);
+    if (op == MF_OP_INERT || op == MF_OP_UNMATCHED) return op;
+
+    return depends_on_unheld_state(clause, len) ? MF_OP_UNMATCHED : op;
 }
 
 /* Reminder text restates rules rather than adding them, so every card with a
