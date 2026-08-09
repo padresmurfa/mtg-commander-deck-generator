@@ -1,0 +1,639 @@
+# Deck simulator & optimiser — machine-readable specification
+#
+# Companion to docs/simulator-design.md. That document carries the reasoning; this one
+# carries the extracted decisions in structured form: parameters, invariants, schemas,
+# and acceptance criteria.
+#
+# Every entry has a `ref` pointing at the design section that justifies it. If the two
+# disagree, the design doc is authoritative for INTENT and this file is authoritative
+# for VALUES — reconcile, do not guess.
+#
+# Status: design. No implementation exists yet.
+
+meta:
+  name: mtg-deck-simulator
+  status: design
+  implementation_started: false
+  authoritative_prose: docs/simulator-design.md
+  players: 2
+  format: commander
+
+# ---------------------------------------------------------------------------
+# Target host. Deliberately single-machine; no portability allowances (ref: 10).
+# All values measured on the host, not assumed.
+# ---------------------------------------------------------------------------
+target_host:
+  ref: "10"
+  machine: Apple M1 Pro
+  arch: arm64
+  packages: 1              # no NUMA
+  cores:
+    performance: 8         # 2 clusters x 4
+    efficiency: 2
+  smt: false               # physicalcpu == logicalcpu
+  cache:
+    line_bytes: 128        # NOT 64 — x86 padding habits leave false sharing
+    p_core:
+      l1d_bytes: 131072
+      l1i_bytes: 196608
+      l2_bytes: 12582912   # shared per 4-core cluster
+    e_core:
+      l1d_bytes: 65536
+      l2_bytes: 4194304
+  page_bytes: 16384
+  ram_bytes: 34359738368
+  thread_affinity_supported: false   # thread_policy_set -> KERN_NOT_SUPPORTED (46)
+  toolchain: "clang (Homebrew 21)"
+  compile_flags:
+    required: ["-O3", "-mcpu=apple-m1", "-fno-fast-math", "-ffp-contract=off"]
+    forbidden: ["-ffast-math", "-funsafe-math-optimizations"]
+    notes: >
+      -mcpu is the correct knob on AArch64 (selects scheduling model, not just ISA).
+      fast-math and FP contraction are forbidden because they break determinism (ref: 17.1).
+
+# ---------------------------------------------------------------------------
+# Hard invariants. Each is testable; each has an acceptance check.
+# ---------------------------------------------------------------------------
+invariants:
+  - id: no_io_in_loop
+    ref: "10"
+    statement: Zero syscalls per game; O(1) syscalls per generation.
+    acceptance: syscall count per generation does not scale with games simulated
+    implications:
+      - card table loaded once at startup, prefaulted, never re-read
+      - no allocation in the hot loop (arena per thread, reused)
+      - no logging or progress output per game
+      - result buffers per thread, flushed at generation boundaries
+      - preprocessing is a separate subcommand; eval path cannot reach the network
+      - no database in the loop
+      - memoisation cache in memory only
+
+  - id: lock_free_per_game
+    ref: "10"
+    statement: Zero locks and zero atomics in the per-game path; <=1 atomic per work batch; 1 barrier per generation.
+    acceptance: no synchronisation primitive appears on a per-game code path
+    scope_note: Applies to the per-game path only. Per-evaluation data is 3-5 orders of magnitude colder.
+    implications:
+      - counter-based RNG, no shared generator
+      - per-thread arenas, scratch, output buffers
+      - work distributed by static partition or one fetch_add per BATCH
+      - per-thread structures padded/aligned to 128 bytes
+
+  - id: l1_resident_hot_set
+    ref: "10"
+    statement: The per-thread hot working set fits in L1d.
+    acceptance: hot set <= 16 KB (measured budget ~6.3 KB against 128 KB L1d)
+    implications:
+      - compact per-deck card table built at evaluation start; global table touched once per evaluation, never per game
+      - in-simulation card references are uint8 indices 0..99
+      - AoS for static per-deck table; SoA for per-game mutable state
+      - software prefetch unnecessary
+
+  - id: determinism
+    ref: "17"
+    statement: >
+      Same seed + config + card table produces bit-identical output, regardless of thread
+      count, work distribution order, or resume-from-checkpoint.
+    acceptance: see validation.determinism_matrix
+    implications:
+      - reduce in fixed index order, never completion order
+      - accumulate in integers; convert to float once, at the end, in fixed order
+      - no wall-clock, no pointer values, no hash-map memory-order iteration reaching output
+      - memo cache must be value-neutral (ref: 17.2)
+
+  - id: crash_tolerance
+    ref: "16"
+    statement: A crash loses at most the configured checkpoint interval of work.
+    acceptance: kill at arbitrary point; resume; run completes with correct digests
+
+  - id: no_popularity_prior
+    ref: "7.9"
+    statement: The candidate pool is never pruned by EDHREC popularity.
+    rationale: >
+      The project exists to escape the popularity prior of the legacy PlanScore stack.
+      An optimiser restricted to already-popular cards can only rediscover the consensus deck.
+    permitted_pruning: [legality, colour_identity, budget, skill_floor, simulator_representability]
+
+# ---------------------------------------------------------------------------
+# Tunable parameters. Defaults are the recommendation, not a constraint.
+# ---------------------------------------------------------------------------
+parameters:
+
+  concurrency:
+    threads:
+      ref: "10"
+      type: int
+      default: 4
+      min: 1
+      max: 8
+      note: Never exceed performance core count. Never schedule onto E-cores.
+    qos_class:
+      ref: "10"
+      type: enum
+      default: QOS_CLASS_USER_INITIATED
+      note: >
+        Biases toward P-cores; cannot pin (affinity unsupported). Set explicitly rather
+        than inheriting the launching shell's class.
+
+  objective:
+    ref: "3"
+    formula: "mean + lambda * CVaR_10"
+    lambda:
+      type: float
+      default: 0.5
+      note: >
+        A large lambda is expensive in a way the formula does not reveal — CVaR_10 uses the
+        bottom decile only, so its effective sample size is ~n/10 (ref: 15.5).
+    cvar_quantile:
+      type: float
+      default: 0.10
+    forbidden_alternatives:
+      - id: minimax
+        why: >
+          Degenerates. Every deck's worst case is "mulligan to four, no lands, opponent has
+          the nuts"; they are all equally bad, so the objective discriminates nothing.
+      - id: adversarial_over_opponent_hands
+        why: Turns each evaluation into a game-tree search; forfeits the tractability win.
+
+  adaptive_sampling:
+    ref: "15"
+    method: group_sequential
+    block_size:
+      type: int
+      default: 32
+      note: Check at block boundaries, not continuously. Batches align with threading.
+    critical_note: >
+      Fixed-alpha tests with repeated peeking do NOT give the nominal error rate
+      (optional-stopping fallacy). Use an anytime-valid procedure: empirical-Bernstein
+      confidence sequence, SPRT, or group-sequential with alpha spending.
+    stages:
+      - id: screening
+        alpha: 0.20
+        min_effect_pp: 5
+        max_games: 100
+        note: Loose is correct, not sloppy — a wrongly promoted candidate meets a stricter test next stage.
+      - id: selection
+        alpha: 0.05
+        min_effect_pp: 2
+        max_games: 1000
+      - id: elite_promotion
+        alpha: 0.01
+        min_effect_pp: 1
+        max_games: 4000
+    required_parameters_note: >
+      alpha alone is not a stopping rule. Two equal candidates never separate at any sample
+      size, so min_effect (declare a tie below it) and max_games (hard cap) are mandatory.
+
+  variance_reduction:
+    ref: "7.3, 7.8"
+    stratification:
+      variable: opening_hand_land_count
+      strata: [0, 1, 2, 3, 4, 5, 6, 7]
+      allocation: neyman        # proportional to (stratum probability x within-stratum stddev)
+      do_not_truncate: true
+      why: >
+        Extreme strata become MULLIGANS, and mulligan rate is a primary consistency signal.
+        Truncating deletes exactly that difference. Neyman allocation starves them naturally
+        because their outcome is nearly determined, while keeping the estimator unbiased.
+    common_random_numbers:
+      enabled: true
+      note: Same shuffle seeds, gauntlet, and play/draw split per generation; run each matchup on the play and on the draw with mirrored seeds.
+      expected_saving: "3-5x fewer samples"
+    racing:
+      enabled: true
+      note: Successive halving — all candidates get a short budget, bottom half dies, survivors continue.
+
+  genome:
+    ref: "7.1, 7.6"
+    representation: integer_vector_over_metacard_classes
+    length_approx: 150
+    element_bounds: "0..class_size"
+    sum_constraint: 99
+    note: >
+      NOT a 400-bit vector with a cardinality constraint. Singleton means a class carries a
+      multiplicity (you may run Llanowar AND Fyndhorn AND Elvish Mystic), so the element is a
+      count bounded by class size. Swapping functionally identical cards becomes a no-op in
+      the search space, as it is in the game.
+    crossover:
+      method: package_aware
+      unit: connected components of the deck's lift/synergy graph
+      why: >
+        Deck fitness is highly epistatic — combos are pairs and triples, and uniform crossover
+        shreds them. Without package-aware crossover, simulated annealing over the swap
+        neighbourhood beats the GA and the GA has no reason to exist.
+
+  budget:
+    ref: "7.5"
+    total_cost_constraint: hard
+    sampling_weight: log_price
+    price_distribution: heavy_tailed_lognormal
+    cost_model: min_over_acquisition_paths
+    cost_formula: |
+      cost(deck) = min(
+        sum(min_single_price(c) for c in deck),
+        min over precons P of [ price(P) + sum(min_single_price(c) for c in deck \ P) ]
+      )
+    note: >
+      Direction varies by precon and must be computed, not assumed. A precon with a valuable
+      reprint can exceed its retail price in singles; a weak precon's singles may total well
+      under retail. min() handles both.
+
+# ---------------------------------------------------------------------------
+# Skill brackets. Drives policy set, colour bound, search radius, budget, output size.
+# ---------------------------------------------------------------------------
+brackets:
+  ref: "5"
+  measurement:
+    method: policy_gap
+    definition: >
+      Skill requirement = performance delta between the deck run under a naive policy and
+      under the best available policy. Measured, not estimated from card features.
+    optimise_under: target_bracket_policy
+    optimise_under_note: >
+      NOT the best policy. Optimising an average-player deck with a professional policy
+      produces a deck that player cannot pilot.
+  levels:
+    - id: noob
+      policies: [greedy]
+      colours_max: 1
+      mutation_radius: 5
+      budget_anchor: lowest
+      decks_returned: 1
+      seed_from: precon
+      selection_criterion: most_forgiving
+    - id: beginner
+      policies: [greedy, curve-out]
+      colours_max: 2
+      mutation_radius: 12
+      budget_anchor: low
+      decks_returned: 2
+      seed_from: precon
+      selection_criterion: most_forgiving
+    - id: average
+      policies: [curve-out, role-aware]
+      colours_max: 2
+      mutation_radius: 25
+      budget_anchor: edhrec_avg
+      decks_returned: 4
+      seed_from: edhrec
+      selection_criterion: balanced
+    - id: experienced
+      policies: [role-aware, sequencing-aware, hold-interaction]
+      colours_max: 3
+      mutation_radius: 45
+      budget_anchor: above_avg
+      decks_returned: 8
+      seed_from: edhrec
+      selection_criterion: diverse
+    - id: professional
+      policies: [all]
+      colours_max: 5
+      mutation_radius: null      # unbounded
+      budget_anchor: cedh
+      decks_returned: 0          # reference tier only, never shipped
+      seed_from: cedh
+      selection_criterion: diverse
+      note: >
+        Retained solely as the upper reference point for the policy-gap measurement.
+        Without it the skill requirement cannot be computed.
+  axis_separation_warning:
+    ref: "5"
+    statement: mutation_radius and measured skill are SEPARATE axes that merely correlate.
+    why: >
+      EDHREC decks are built by average players for 4-player pods and are not skill-stratified.
+      Some very popular commanders are hard to pilot. "Close to EDHREC" is not "easy to play".
+      A 3-mutation deck measuring as high-skill must be rejected from the noob bracket.
+  colour_bound_scope:
+    note: >
+      Colour identity is fixed by the commander. This constrains GAUNTLET GENERATION and
+      COMMANDER SELECTION, not the optimisation of a deck the user already owns.
+
+policies:
+  ref: "4"
+  identity: strategy_is_policy
+  note: >
+    Not a label annotating results plus a separate implementation. Running deck D under
+    strategy S MEANS simulating D with policy S.
+  set: [greedy, curve-out, role-aware, sequencing-aware, hold-interaction, combo-assemble]
+  must_include:
+    - mulligan_rule       # keep/mull judgment is policy-owned; a large part of the skill gap
+    - london_bottom_rule  # which N to bottom after a mulligan is itself a policy decision
+  commander_handling:
+    always_available: true
+    model_commander_tax: true
+    note: Commander is a fixed anchor, not a draw. Tax expresses the cost of it being answered.
+  output_shape: matrix        # (deck x strategy) -> performance, NOT a scalar
+  fitness_reduction: max_over_admissible_strategies
+
+# ---------------------------------------------------------------------------
+# Phases. Exact early, aggregate late.
+# ---------------------------------------------------------------------------
+phases:
+  ref: "3"
+  list:
+    - id: opening
+      turns: "1-4"
+      simulation: exact
+      why_exact: >
+        Turns 1-4 are pure sequencing (which land first, tapland timing, ramp before payoff).
+        Aggregating destroys exactly what this phase is meant to measure. Also cheap.
+      role: gate_only
+      contributes_to_fitness: false
+      gate_note: >
+        Binary feasibility gate with a LOW bar, threshold conditional on the strategy under test.
+        Weighting opening strength in fitness would breed out every late-game archetype.
+    - id: development
+      turns: "5-7"
+      simulation: aggregate
+    - id: execution
+      turns: "8+"
+      simulation: aggregate
+
+fidelity_ladder:
+  ref: "9"
+  note: Each stage passes only the top X% upward.
+  stages:
+    - id: opening_gate
+      cost_per_eval: 1us
+      role: feasibility pass/fail
+    - id: aggregate_solo
+      cost_per_eval: 10us
+      role: bulk GA fitness
+    - id: full_solo
+      cost_per_eval: 100us
+      role: elite refinement
+    - id: versus_gauntlet
+      cost_per_eval: 1ms
+      role: bracket-relative fitness
+    - id: forge
+      cost_per_eval: 10s
+      role: validation of final top-K only
+      critical_note: >
+        Forge is NEVER the fitness function. A GA pointed at Forge's AI produces a deck tuned
+        to beat Forge's AI — reward hacking, not deck quality. It sees ~10k games, not 2.5M.
+  estimated_total: "~25 ms per deck evaluation; pop 100 x 200 generations ~ single-digit minutes on one core"
+
+gauntlet:
+  ref: "6"
+  matchup_rule: same_bracket_plus_minus_1
+  why: A beginner does not beat a professional absent extraordinary luck; modelling it wastes compute.
+  fitness_scope: bracket_relative
+  fitness_scope_warning: >
+    62% in the beginner bracket and 62% in the experienced bracket are NOT the same number.
+    Nothing downstream may average or rank across brackets.
+  holdout: true
+  holdout_note: Test gauntlet the GA never sees. Train climbs but test does not => overfitting, now visible.
+  coevolution: deferred
+  coevolution_note: More robust but a moving fitness target and much harder debugging. Start fixed.
+
+# ---------------------------------------------------------------------------
+# Data schemas.
+# ---------------------------------------------------------------------------
+schemas:
+
+  card_struct:
+    ref: "8, 10"
+    size_target_bytes: 32
+    size_hard_cap_bytes: 64
+    size_rationale: >
+      A real budget on the opcode encoding, not an aspiration. At 32 B a 99-card deck table is
+      ~3.1 KB (25 cache lines) and stays L1-resident. At 128 B the table stops being free.
+    fields:
+      - oracle_id
+      - name
+      - colour_identity
+      - cmc
+      - mana_cost
+      - type
+      - opcode_struct          # effects, produced mana, P/T
+      - equivalence_class_id   # post dominance-chaining
+      - class_multiplicity_limit
+      - dominance_edges
+      - min_price              # imputed where absent
+      - price_imputed_flag
+      - skill_floor
+      - commander_legal
+      - precon_membership_bitmask
+
+  side_tables:
+    ref: "8, 13.2"
+    note: Hand-maintained, date-stamped, content-hashed with the rest.
+    tables:
+      - id: precon_prices
+        rows: 68
+        source: manual
+        why_manual: Scryfall prices singles, not sealed product.
+      - id: precon_win_rates
+        rows: 67
+        source: "playgroup.gg (manual transcription; no API or bulk export)"
+
+  checkpoint:
+    ref: "16.3"
+    contents:
+      - generation_number
+      - resolved_config
+      - population_genomes
+      - elite_set
+      - elite_reevaluation_history   # must survive, or elites reset to lucky scores on resume
+      - rng_counter                  # entire random state; counter-based RNG (ref: 14.1)
+      - card_table_hash
+      - per_deck_best_strategy       # strategy inheritance (ref: 7.8)
+    excluded:
+      - id: fitness_memo_cache
+        why: It is a cache. Rebuilding costs repeated work; persisting risks drift against the card table.
+    write_protocol: [write_temp, fsync, rename]   # rename is atomic on APFS
+    write_protocol_note: Never overwrite in place — a crash mid-write would destroy both copies.
+    retain_count: 3
+    trigger:
+      primary: generation_boundary
+      note: A generation is seconds, not minutes, so this loses seconds — well inside the 5-minute requirement.
+      safety_valve:
+        condition: generation exceeds wall-clock budget
+        action: checkpoint mid-generation at a batch boundary
+        max_work_loss_seconds: 300
+    resume_validation:
+      card_table_hash_must_match: true
+      on_mismatch: refuse
+      override_flag_required: true
+      why: >
+        Prices move weekly. Silently resuming against a changed table means the second half of
+        the run optimises a different objective than the first.
+
+  run_artifact:
+    format: jsonl
+    append_only: true
+    flush: generation_boundary
+    must_contain: [resolved_config, card_table_hash, digests]
+    note: >
+      Deliberately not a database — a write per evaluation would violate no_io_in_loop, and a
+      CLI that requires a database to run is a CLI people stop using.
+
+# ---------------------------------------------------------------------------
+# Determinism digests + regression testing.
+# ---------------------------------------------------------------------------
+digests:
+  ref: "17.3"
+  hashed_over: semantic_output      # fitness values, deck contents, decisions
+  not_hashed_over: jsonl_text       # carries timestamps and paths
+  layers:
+    - id: preprocess
+      covers: card table, classes, dominance chains, prices
+    - id: opening
+      covers: phase-1 gate results over fixture decks
+    - id: solo
+      covers: full solo evaluation
+    - id: gauntlet
+      covers: versus-opponent results
+    - id: run
+      covers: final population and rankings
+  rationale: >
+    Layered rather than monolithic so a mismatch localises the change. A PR touching the mana
+    solver should move `solo` and `run` while leaving `preprocess` and `opening` untouched.
+  golden_policy:
+    frozen: false
+    workflow: >
+      A genuine model change SHOULD move digests. If a PR moves a digest, the PR updates the
+      golden value and states why in its description. A PR that moves a digest silently is the
+      exact failure this catches. The value is that changes are acknowledged, not prevented.
+
+# ---------------------------------------------------------------------------
+# Validation. The largest unmitigated risk is a wrong simulator, confidently reported.
+# ---------------------------------------------------------------------------
+validation:
+  ref: "13, 17.4"
+
+  analytic_ground_truth:
+    ref: "13.1"
+    note: Exact expected values, not plausible ones. Reference impls exist in the legacy TypeScript.
+    assertions:
+      - opening-hand land distribution converges to hypergeometric
+      - P(all land drops through turn T) matches computeLandDropProbabilities
+      - mulligan rate at a given keep rule matches closed form
+      - P(>=1 of K specific cards by turn T) matches closed form
+
+  precon_fixtures:
+    ref: "13.2"
+    corpus_size: 67
+    corpus_games: ~11700
+    source: playgroup.gg
+    method: spearman_rank_correlation
+    do_not: fit_absolute_win_rates
+    filters:
+      min_games_per_precon: 100
+    caveats:
+      - "Data is 4-player-normalised; this simulator is 2-player. Ordinal transfer plausible, cardinal not."
+      - "Per-precon n ranges ~40-310. At n=41 a 36% win rate carries roughly +/-15pp — rank barely determined."
+    why_precons: [fixed_and_citable, measured_outcomes, intra_cycle_balance_is_a_design_goal, known_power_drift]
+
+  synthetic_known_bad:
+    ref: "13.3"
+    note: Precons cover only the plausible band. These are the cases no data source contains.
+    cases:
+      - 20 lands
+      - 60 lands
+      - curve topping out at 8 with no ramp
+      - five-colour version of a mono-colour spell suite on a bad mana base
+      - $30 build vs $2000 build of the same commander
+
+  opcode_coverage:
+    ref: "13.5"
+    type: go_no_go
+    run_when: first_slice
+    metric: fraction of a real commander's candidate pool representable by the opcode set
+    thresholds:
+      sound: ">= 0.60"
+      compromised: "<= 0.30"
+    why: >
+      Unrepresentable cards are excluded, so coverage is a hard ceiling on how meaningful the
+      output is. At 30% the "optimal" deck is an artefact of what happened to be modellable.
+      A couple of hours of work that can invalidate months.
+
+  determinism_matrix:
+    ref: "17.4"
+    fixture: "5 generations, small population, fixed seed"
+    axes:
+      thread_count: [1, 4, 8]
+      execution: [fresh, resumed_from_generation_3]
+    combinations: 6
+    requirement: all combinations produce identical digests
+    catches: [reduction_order_bugs, hidden_state, unserialised_counters, thread_order_dependencies, cache_induced_variation]
+
+  self_consistency:
+    ref: "13.4"
+    assertion: end-of-opening score correlates with end-of-game outcome within the simulator
+    caveat: Necessary, not sufficient. Does not prove correctness — only internal agreement.
+
+# ---------------------------------------------------------------------------
+# Power management (macOS specific).
+# ---------------------------------------------------------------------------
+power:
+  ref: "10"
+  prevent_sleep:
+    supported: true
+    api: IOPMAssertionCreateWithName
+    type: kIOPMAssertionTypePreventUserIdleSystemSleep
+    header: IOPMLib.h        # present in installed SDK
+    alternative: "caffeinate -i"
+  force_low_power_mode_off:
+    supported: false
+    why: LPM is a user setting with no app-facing override. Do not attempt.
+  low_power_mode_detection:
+    check_at: generation_boundary
+    sources: ["pmset -g (field: lowpowermode)", "NSProcessInfo.isLowPowerModeEnabled"]
+    on_detected:
+      - finish current generation and checkpoint
+      - print explanatory message
+      - release sleep assertion
+      - pause
+    poll_backoff:
+      initial_seconds: 30
+      multiplier: 2
+      max_seconds: 300
+    why_pause_not_continue: >
+      An LPM run is not merely slower — it is slower by a large unstated factor, which corrupts
+      any wall-clock figure recorded in the artifact. Crashing would be worse: the work is fine,
+      the machine's power policy simply changed.
+  power_source_check:
+    at: startup
+    api: IOPSGetProvidingPowerSourceType
+    on_battery: warn_only
+
+# ---------------------------------------------------------------------------
+# Build order. First slice is deliberately small and contains a kill-switch.
+# ---------------------------------------------------------------------------
+build_order:
+  ref: "12"
+  steps:
+    - id: first_slice
+      scope: turns 1-4 exact, stratified openers with Neyman allocation, one deck, two policies (naive + careful)
+      output: two performance numbers and their gap
+      tests:
+        - a phase-end state is evaluable at all
+        - the policy gap separates known-forgiving from known-demanding decks
+        - opcode coverage go/no-go
+    - id: greedy_baseline
+      before: genetic_algorithm
+      method: rank pool by marginal contribution, take top 99, backward-eliminate
+      why: >
+        Deck construction is roughly submodular, so greedy has approximation guarantees and runs
+        in a fraction of the time. It is also the control experiment: if the GA cannot beat greedy,
+        either the landscape is too noisy for population methods or the crossover preserves
+        nothing. Worth learning in an afternoon rather than after a week of tuning.
+    - id: genetic_algorithm
+    - id: forge_validation
+      optional: true
+
+deferred:
+  ref: "11"
+  note: Not v1 unless trivially cheap. Do in order; stop when profiling says the next is not worth it.
+  gpu_offload: removed_out_of_scope_for_this_target
+  steps:
+    - id: soa_branch_free_autovectorisation
+      expected: most of the available win, free
+    - id: thread_pool
+      expected: near-linear
+      before: hand_written_simd
+    - id: neon_intrinsics
+      batch_width: 16          # 128-bit / uint8 indices
+      applies_to: aggregate phases only
+      does_not_apply_to: exact turn-by-turn opening (branchy, vectorises poorly)
