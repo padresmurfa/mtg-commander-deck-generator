@@ -190,6 +190,18 @@ Carlo samples — sort, average the bottom 10%.
 
 Optimise `mean + λ·CVaR₁₀`, with λ tuning ceiling vs consistency.
 
+*(Added after 3.2.)* **λ is 0.5 and is deliberately untuned.** It trades ceiling against
+consistency, and there is nothing to judge that trade against until G4 has a ranking to validate
+— fitting a constant before there is anything to fit it to is how a metric acquires a value nobody
+can defend. §15.5 argues for modest anyway, since CVaR₁₀ is estimated from n/10 games.
+
+*(Added after 3.2.)* **The score is taken over the aggregate phases only.** This section already
+said so — the opening is a gate "contributing zero to fitness beyond pass/fail" — and sprint 3.1's
+score summed the whole run, so it weighted turns 1–4 after all. The design of record was right and
+the code had drifted from it. The opening still matters exactly as intended: through pass/fail and
+through the board it hands to turn 5. A turn-two ramp spell is credited with the mana it makes, not
+with having been cast.
+
 Do **not** make it adversarial over opponent hands. That turns each evaluation into a game-tree
 search and forfeits the entire tractability win.
 
@@ -271,6 +283,38 @@ is one competitor's objective cannot rank competitors. Fixing the metric in the 
 gate it failed is the move pre-registration forbids, so it is E3's next sprint that chooses the
 replacement. Recorded here because the flaw was available a priori and was missed: **pre-registering
 a metric protects against fitting it to the answer, and not against picking a degenerate one.**
+
+*(Added after 3.2.)* **Every quantity this model can observe is some rung's greedy target**, and
+that closes a question 3.1 left open. 3.1 disclosed that its score was close to one policy's own
+rule and asked its successor for an objective that was not; there is none.
+
+| Observable | The rung that maximises it |
+| ---------- | -------------------------- |
+| mana value deployed | `expensive-first` |
+| spells cast, cards left in hand | `cheapest-first` |
+| mana producible, permanents | `ramp-first` |
+| mana wasted | the careful land rule |
+| mulligans taken | the mulligan policy |
+
+It is not a coincidence to be designed around. §5's rungs are greedy rules over exactly the
+quantities the state vector records, because the rungs and the vector were derived from the same
+model of what a turn does — so **looking for an objective no rung optimises is looking for a
+quantity the model cannot see**, and picking an unobservable one would be worse than the defect it
+was meant to fix. What replaces the instruction is a checkable condition: *no single rung may win
+on every deck.*
+
+*(Added after 3.2.)* **§5's rungs are a ladder, not a plan set, and the max over an ordered ladder
+is supposed to be constant.** This section's matrix wants *incomparable* plans — aggro, ramp,
+control — so that a deck excellent under one is a find. §5's rungs are ordered by skill by
+construction: if rung 4 were not better than rung 1 it would not be a ladder. Measured in sprint
+3.2, the max over them is attained by **`greedy` on every deck** — so the matrix has **one
+meaningful column at the solo rung of the fidelity ladder**, and the ladder is *inverted* besides,
+which is §5's own finding about a null-opponent model arriving again.
+
+The structure is built anyway, because it is the design of record and the collapse is a property of
+the model rather than of the code. Widening the column count needs `hold-interaction` and
+`combo-assemble` — precisely the two policies §5 records as inexpressible without an opponent — so
+it is E5's, not a knob.
 
 *(Amended sprint 2.2, when the vector was built.)* It is thirteen bytes, every field an integer, with
 **no padding** — asserted statically, because the struct is folded into a run digest byte by byte and
@@ -562,6 +606,31 @@ handful of samples each while the estimator stays unbiased. Compute goes to the 
 where games are decided.
 
 General rule: **anything computable in closed form is never sampled.**
+
+*(Amended after 3.2, and the amendment is to the premise.)*
+
+> **The opening-hand land count is not the dominant variance source.**
+
+Built and measured. On a midrange probe deck it accounts for **4.8%** of the variance of the solo
+objective, **7.2%** of the mana entering turn 5, and **3.2%** of §3's gate pass rate — within-stratum
+σ is 6.1 to 7.0 in *every* stratum while the stratum means span 25.5 to 33.1. The best a perfect
+stratification on it could buy is about **1.06×**, not the 3–5× above, and that ceiling holds at
+every horizon from one aggregate turn to eight.
+
+**End to end it is a loss**, variance ratio 0.5–0.8. Neyman needs σ_h, σ_h has to be bought with a
+pilot, and an allocation that varies from run to run adds more variance than a 5% between-stratum
+share can repay. The estimator is exactly unbiased; it is simply not worth its overhead.
+
+**The reason is the mulligan, and the paragraph above half saw it.** "Those hands do not vanish,
+they become mulligans" is offered as the argument against truncating the extreme strata. It is also
+why conditioning on the count pays so little: the policy throws away and redraws precisely the hands
+the conditioning made unusual, so the variable is partly erased before the game begins. A
+stratification is worth its overhead when the strata stay distinct, and a mulligan exists to make
+them not.
+
+**What to stratify on instead**, when evaluation cost starts to bite: a property of the **kept**
+hand rather than of the dealt one. The mulligan does not erase that, so the argument above does not
+apply to it. The machinery takes any variable; choosing the right one is a sprint's work.
 
 ### 7.4 Skill floor per card
 
@@ -901,6 +970,15 @@ list, not a field.
 Each stage passes only the top X% upward. Forge sees ~10k games, not 2.5M — which defuses the
 compute problem and the reward-hacking problem simultaneously, since the GA never touches Forge and
 therefore cannot learn to exploit it.
+
+*(Added after 3.2.)* **The solo rung promotes on feasibility and ranks on fitness, and those are
+two numbers doing two jobs.** The tempting wiring multiplies — a game that misses §3's feasibility
+bar contributes nothing to the mean — and that is exactly what §3 forbids, because it makes the
+turn-four board a fitness term through the back door and does it hardest to the control and stax
+archetypes the gate exists to protect. So **the gate is per deck, not per game**: the pass *rate* is
+counted beside the score. The bar is 0.5, taken from sprint 2.3's measurement of real decks at 0.86
+and 0.94 rather than guessed — a bar tight enough to bind on a real deck would be a second fitness
+term wearing a gate's name.
 
 *(Mirror added after 3.1.)* **It is the one rung that is not a filter**, and the table would mislead
 without saying so: every other stage narrows a field, and this one passes nothing upward because it
@@ -1474,6 +1552,33 @@ contain because nobody plays them:
 
 None are close calls. If the simulator shrugs at the 20-land deck it is wrong, and you know before
 the GA ever runs. Cheap, brutal, and the regression suite for every later model change.
+
+*(Measured in sprint 3.2, and it shrugs.)* Four of the five are built and standing in `make check`.
+**Two are caught and two are not.**
+
+| Deck | Fitness vs. a real deck | Gate pass rate | Caught? |
+| ---- | ----------------------- | -------------- | ------- |
+| curve topping at 8, no ramp | 0.32× | 0.000 | yes |
+| five colours, bad mana base | 0.42× | 0.117 | yes |
+| 20 lands | 0.81× | 0.645 | **no** |
+| 60 lands | 0.94× | **0.914** | **no** |
+
+The two that are caught fail on **mana** — never enough of it, or never the right colours — and mana
+is what a solo model can see. The two that are not fail on **tempo**: flooding costs the turns spent
+drawing lands and screw costs the turns spent not casting, and a null-opponent model with a fixed
+horizon has no clock to charge either against. Given twelve turns and nobody attacking, a flooded
+deck simply casts its few spells later. The sharpest form of it is the last row: **the 60-land deck
+clears §3's feasibility gate more often than the deck it ought to lose to**, because it makes every
+land drop of every game.
+
+This is the third finding to land on the same sentence, after G3's failure and the mulligan term of
+3.2's own decomposition. It is **disclosed rather than patched** — replacing a pre-registered metric
+inside the sprint that measured it failing is the move pre-registration forbids — and the measured
+numbers are asserted in the suite, so a later change that fixes this *fails* there and forces the
+record to be updated rather than quietly improving.
+
+The `$30 versus $2,000` case is not built: the pipeline has prices and `mf_deck` does not carry
+them.
 
 ### 13.4 Self-consistency
 

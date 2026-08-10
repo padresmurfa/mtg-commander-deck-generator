@@ -154,6 +154,24 @@ tracked games. Rank correlation, not absolute win-rate fitting — the data is 4
 and this simulator is 2-player. *On failure:* the objective is wrong. Redesign §3 rather than
 tuning λ until the numbers look nice.
 
+**Three blind spots are known in advance and must be reported beside the correlation**, recorded
+here before the measurement rather than in its retro afterwards.
+
+- **Two of §13.3's four known-bad decks are not caught** (3.2): 20 lands ranks at 0.81× a real deck
+  and 60 lands at 0.94×, both clearing the feasibility gate — the 60-land deck clears it *more
+  often* than the deck it should lose to. Precons are built to a sensible land count, so this may
+  not bite; a good Spearman would then be reassuring and would **not** be evidence the blind spot
+  closed.
+- **The aggregation error is deck-differential** (3.1) at 10–20%: +22% on high curves, −10% on
+  artifact ramp. A uniform bias cancels in a ranking and this one does not.
+- **The objective ranks decks and does not rank strategies** (3.2). §4's fitness is a max over
+  admissible plans and that max is currently attained by the same rung on every deck, so G4 grades
+  a ranking produced under one policy.
+
+**And the sample size is fixed in advance alongside the threshold**, which is 2.3's correction
+applied rather than restated: a threshold in standard errors leaves the sample size blank, and
+significance is free at scale.
+
 **G5 — GA beats greedy.** Greedy is the control experiment. *On failure:* either the landscape is
 too noisy for population methods or the crossover preserves nothing. Ship greedy, drop the GA —
 this is an acceptable outcome, not a defeat.

@@ -13,8 +13,8 @@
 
 meta:
   status: in_progress
-  current_sprint: "3.2"
-  task_split_valid_for: "3.2"     # task-splitting any other sprint is speculative
+  current_sprint: "3.3"
+  task_split_valid_for: "3.3"     # task-splitting any other sprint is speculative
   baseline: greenfield
   language: c
   deliverable: cli
@@ -423,7 +423,43 @@ epics:
           - full solo run produces a phase-end state
       - id: "3.2"
         name: Objective & sampling
-        status: not_started
+        status: done
+        retro: docs/plan/retros/3.2-objective-sampling.md
+        tasks_doc: docs/plan/sprints/3.2-objective-sampling.md
+        result:
+          checks: 44974
+          line_coverage: 100.00
+          branch_coverage: 95.58
+          modules_added: [objective, strata]
+          mutations: "15 applied, 13 caught, 2 recorded survivors"
+          objective: >
+            Total mana value cast in the AGGREGATE phases, commander included, printed cost, lands
+            zero. Pre-registered before measurement. The fourth clause corrects 3.1: section 3 says
+            the opening contributes zero to fitness beyond pass/fail and 3.1's score summed the
+            whole run.
+          degeneracy_check:
+            ranks_decks: pass          # 4.6x separation against a 0.20 bar
+            ranks_strategies: fail     # greedy is the argmax on all four decks
+            finding: >
+              The carried-in instruction could not be satisfied as written: every observable is
+              some rung's greedy target, because the rungs and the state vector came from the same
+              model of a turn. Decomposed, the mulligan is worth +0.93 to +4.39 and the cast rule
+              -0.17 to -0.83 - OPPOSITE SIGNS, and the worst rung wins DESPITE its cast rule. It
+              also corrects 3.1's disclosure, which named the wrong rung.
+          stratification:
+            verdict: measured_a_loss
+            between_stratum_share: 0.048
+            best_possible_gain: 1.06
+            measured_gain: "0.5-0.8"
+            finding: >
+              Section 7.3's premise is false: the opening-hand land count is not the dominant
+              variance source. The reason is the mulligan, which 7.3 half saw - it discards and
+              redraws exactly the hands the conditioning made unusual.
+          known_bad_decks: "2 of 4 caught; 20-land at 0.81x and 60-land at 0.94x are not"
+          headline: >
+            Three independent measurements landed on one sentence 3.1 wrote: a null-opponent model
+            with a fixed horizon prices position at zero. Nothing was patched to make any of them
+            pass.
         exit_criteria:
           - per-strategy scalarisation
           - "mean + lambda * CVaR_10"
@@ -577,55 +613,71 @@ epics:
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
 tasks:
-  sprint: "3.2"
-  doc: docs/plan/sprints/3.2-objective-sampling.md
+  sprint: "3.3"
+  doc: docs/plan/sprints/3.3-fixture-validation.md
   goal: >
-    An objective worth optimising - chosen against the degeneracy 3.1 disclosed - plus CVaR
-    scalarisation and stratified sampling, so the solo evaluation produces a fitness rather than a
-    number that happens to accumulate.
+    Validate the objective against real decks with measured outcomes: transcribe the 67 precons
+    that have win rates, rank them with the solo objective, and run G4.
   why_now: >
-    3.1 shipped a continuous score and measured it into the ground: it is close to one policy's own
-    objective, and G3 failed against it for a reason that is about the model rather than the metric.
-    This sprint is titled "Objective & sampling" and the objective is now the thing most in need of
-    being chosen deliberately.
+    3.2 chose the objective and got one pass and one failure out of its own degeneracy check. Both
+    results are about this project's model rather than about the world, and nothing inside E3 can
+    tell the difference. G4 is the first measurement that meets outcomes the objective did not
+    generate.
   carried_in:
     - >
-      Choose an objective that is not any policy's own objective, pre-registered before measurement,
-      with the degeneracy check applied. Mana value deployed is close to "spend the most mana
-      available", which is what expensive-first optimises.
+      Fix the Spearman threshold AND the sample size before measuring. 2.1 established the first;
+      2.3 established the second, because significance is free at scale.
     - >
-      Decide what the solo objective is FOR, now that it cannot measure skill. Section 3 wants
-      fitness and section 5 wants a gap, and 3.1 showed those want different instruments.
+      Write G4's failure branches down before the number exists. 3.1's G3 failure engaged a written
+      branch and correctly did not take it; that only worked because the branch was written first.
   input_from_previous_retro:
     - >
-      A null-opponent model with a fixed horizon prices position at zero, so every skilled decision
-      in section 5's ladder looks like a loss. Do not build an objective that assumes otherwise.
+      Two of section 13.3's four known-bad decks are NOT caught - 20 lands at 0.81x a real deck and
+      60 lands at 0.94x, both feasible. Precons are built to a sensible land count so the specific
+      blind spot may not bite, but a rank correlation computed with a known blind spot must be
+      reported WITH it and not after it.
     - >
-      The aggregation error is DECK-DIFFERENTIAL: +22% on high curves, -10% on artifact ramp. Any
-      objective built on the aggregate phases inherits that bias, and G4 in 3.3 must be read knowing
-      it.
+      The clock is now three findings deep (3.1 G3, 3.2 T1's mulligan term, 3.2 T6's flood/screw).
+      A null-opponent model with a fixed horizon prices position at zero, and G4 inherits it.
     - >
-      A gate threshold in standard errors leaves the sample size blank (2.3). Effect size beside
-      significance, for G4 too.
+      The aggregation error is DECK-DIFFERENTIAL at 10-20% (3.1) and G4 cannot see it.
     - >
-      Pre-registration protects against fitting a metric to the answer, NOT against picking one that
-      is degenerate by construction. Check for degeneracy explicitly this time.
-  split:
-    - id: T1
-      name: choose the objective - what it measures, and the degeneracy check that clears it
-    - id: T2
-      name: per-strategy scalarisation, and what "max over admissible strategies" means in code
-    - id: T3
-      name: CVaR_10 and mean + lambda*CVaR, sorted and reduced in index order
-    - id: T4
-      name: stratified openers under Neyman allocation
-    - id: T5
-      name: the solo gate wired as pass/fail, feeding the fidelity ladder
-    - id: T6
-      name: known-bad decks (13.3) as the regression suite the objective must not shrug at
-    - id: T7
-      name: retro and amendments
+      A loose bar is worse than no bar (3.2 T4): a 0.4-mana bias passed an agreement test whose bar
+      was wide enough to hold one. Prefer a test that names the exact quantity.
+  split: []      # task-split happens at sprint start
 retros:
+  - sprint: "3.2"
+    doc: docs/plan/retros/3.2-objective-sampling.md
+    gates: []
+    design_amendments: 12
+    headline: >
+      The sprint set out to fix a metric and found that three of its four measurements point at the
+      same thing, which is not the metric. The objective was chosen and pre-registered - total mana
+      value cast in the AGGREGATE phases - and the fourth clause is a correction to 3.1, since
+      section 3 says the opening contributes zero to fitness beyond pass/fail and 3.1's score summed
+      the whole run. The carried-in instruction, "choose an objective that is not any policy's own
+      objective", CANNOT BE SATISFIED AS WRITTEN: every quantity the state vector records is some
+      rung's greedy target, because the rungs and the vector came from the same model of a turn, so
+      looking for an objective no rung optimises is looking for a quantity the model cannot see.
+      What replaces it is two checkable conditions - does it rank DECKS, does it rank STRATEGIES.
+      The first passes at 4.6x against a 0.20 bar. The second FAILS: greedy is the argmax on all
+      four decks, and decomposed one parameter at a time the mulligan is worth +0.93 to +4.39 while
+      the cast rule is worth -0.17 to -0.83. OPPOSITE SIGNS - the worst rung wins DESPITE its cast
+      rule - which also corrects 3.1's disclosure, since expensive-first loses everywhere and the
+      score is nearer cheapest-first's rule. Then the same root cause turned up twice more in
+      unrelated tasks. Section 7.3's premise is FALSE: the opening-hand land count is not the
+      dominant variance source but 3-7% of it, the ceiling on stratifying is 1.06x against a
+      predicted 3-5x, and end to end it is a LOSS - because the mulligan discards and redraws
+      exactly the hands the conditioning made unusual, which 7.3 half saw and drew the opposite
+      conclusion from. And two of section 13.3's four known-bad decks are not caught: sixty lands
+      scores 0.94 of a real deck and clears the feasibility gate MORE OFTEN than the deck it should
+      lose to. All three are one sentence 3.1 wrote - a null-opponent model with a fixed horizon
+      prices position at zero. Nothing was patched to make any of it pass. Two defects the work
+      found: a conditional shuffle that biased the library UNDER the hand by 0.4 mana and slipped
+      past an agreement test whose bar was wide enough to hold a bias, and a clean, plausible,
+      WRONG subset-sum explanation refuted by a hand of {2,3} against a budget of 3 - now a test so
+      it cannot come back.
+    carry_over: [the_clock, price_pair_fixture, stratify_the_kept_hand, lambda]
   - sprint: "3.1"
     doc: docs/plan/retros/3.1-aggregate-phases.md
     gates: [G3, G1]

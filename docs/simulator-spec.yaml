@@ -445,17 +445,95 @@ parameters:
         than inheriting the launching shell's class.
 
   objective:
-    ref: "3"
+    ref: "3, 4"
     formula: "mean + lambda * CVaR_10"
+    # --- chosen and pre-registered in sprint 3.2 T1 ----------------------
+    definition: Total mana value of every spell cast in the AGGREGATE phases, commander included.
+    scored_phases: aggregate_only
+    scored_phases_why: >
+      Section 3 says the opening contributes "zero to fitness beyond pass/fail" - control decks
+      intend to do nothing early and stax decks look terrible on turn 4 by design, so weighting
+      turns 1-4 breeds out every late-game archetype. Sprint 3.1's score summed the whole run and
+      so weighted them; the design was right and the code had drifted. The opening still reaches
+      fitness through the board it hands to turn 5, which is the intended route.
+    printed_not_paid: true
+    lands_score_zero: true
     lambda:
       type: float
       default: 0.5
+      tuned: false
+      why_untuned: >
+        It trades ceiling against consistency and there is no ranking to judge the trade against
+        until G4 in sprint 3.3. Fitting a constant before there is anything to fit it to is how a
+        metric acquires a value nobody can defend.
       note: >
         A large lambda is expensive in a way the formula does not reveal — CVaR_10 uses the
         bottom decile only, so its effective sample size is ~n/10 (ref: 15.5).
     cvar_quantile:
       type: float
       default: 0.10
+    cvar_tail_rounding: floor_min_one
+    cvar_tail_rounding_why: >
+      floor(n/10), never more than a tenth, floored at one game. Rounding up would make CVaR_10 a
+      CVaR over an eighth at eleven games and soften exactly the statistic section 3 wants sharp.
+    cvar_sort: counting
+    cvar_sort_why: >
+      A determinism decision before a speed one. A comparison sort needs a tie-break rule to be
+      reproducible and a rule nobody wrote down differs between partitions; a counting sort never
+      compares two elements, so the multiset determines the answer and nothing else can reach it.
+    degeneracy_check:
+      added: sprint 3.2
+      ref: "4"
+      note: >
+        The carried-in instruction - "an objective that is not any policy's own objective" - cannot
+        be satisfied as written. EVERY quantity the state vector records is some rung's greedy
+        target, because the rungs and the vector came from the same model of a turn. What replaces
+        it is two conditions, both fixed before measuring.
+      conditions:
+        ranks_decks:
+          threshold: 0.20        # (best - worst) / best across a structurally diverse deck set
+          why: >
+            A fifth, because 3.1 measured the aggregation error at 10-20% and DECK-DIFFERENTIAL: a
+            separation below that is indistinguishable from a known artefact.
+          fatal_if_false: true
+          measured: "pass - 4.6x separation across four decks"
+        ranks_strategies:
+          threshold: ">= 2 distinct argmax rungs, each stable across 3 independent seed blocks"
+          fatal_if_false: false   # sprint 5.0 owns the policy gap; the GA needs a deck ranking
+          measured: "FAIL - greedy is the argmax on all four decks"
+      calibration: >
+        A mirror win rate is the worked example the check must reject: exactly 0.5 on every deck by
+        symmetry (13.6). It fails ranks_decks with room to spare.
+      decomposition:                # signed contribution of swapping ONE policy parameter
+        greedy_mulligan: {aggro: 1.18, midrange: 0.93, ramp: 4.39, fixing: 0.98}
+        greedy_cast_rule: {aggro: -0.83, midrange: -0.36, ramp: -0.17, fixing: -0.58}
+      finding: >
+        The two components have OPPOSITE SIGNS and the worst rung wins DESPITE its cast rule. The
+        mulligan term re-confirms 3.1 - a mulligan costs a card and a fixed-horizon null-opponent
+        model prices the early game it buys at zero. The cast-rule term CORRECTS 3.1's disclosure,
+        which named expensive-first: it loses on every deck, so if the score is any rung's rule it
+        is cheapest-first's.
+      not_rescued_by_cvar: >
+        Checked, because it is the obvious next hope: a loose mulligan should own the worst decile
+        and be punished by it. Ranking strategies by the composite rather than the mean leaves
+        greedy the argmax on all four decks.
+      matrix_has_one_column: >
+        Section 5's rungs are a LADDER, not a plan set, and the max over an ordered ladder is
+        supposed to be constant. Section 4's matrix wants incomparable plans; the two that would
+        be - hold-interaction and combo-assemble - are exactly the two a solo model cannot express.
+        Widening it is E5's.
+    solo_gate:
+      ref: "9"
+      added: sprint 3.2
+      scope: per_deck              # NOT per game
+      min_pass_rate: 0.5
+      why_not_per_game: >
+        Multiplying the score by the gate would make the turn-four board a fitness term through the
+        back door, and hardest on the control and stax archetypes the gate exists to protect. Pass
+        rate promotes, fitness ranks: two numbers doing two jobs.
+      why_this_bar: >
+        Set from 2.3's measurement of real decks at 0.86 and 0.94, not guessed. A bar tight enough
+        to bind on a real deck would be a second fitness term wearing a gate's name.
     forbidden_alternatives:
       - id: minimax
         why: >
@@ -504,6 +582,37 @@ parameters:
         Extreme strata become MULLIGANS, and mulligan rate is a primary consistency signal.
         Truncating deletes exactly that difference. Neyman allocation starves them naturally
         because their outcome is nearly determined, while keeping the estimator unbiased.
+      # --- built and measured in sprint 3.2 T4 --------------------------
+      enabled: false
+      premise_measured_false: >
+        Section 7.3 names this "the dominant variance source". It is not. On the midrange probe
+        deck it accounts for 4.8% of the variance of the objective, 7.2% of the mana entering turn
+        5, and 3.2% of the section 3 gate's pass rate - within-stratum sigma is 6.1 to 7.0 in
+        EVERY stratum while the stratum means span 25.5 to 33.1.
+      between_stratum_share: {objective: 0.048, opening_mana: 0.072, gate_pass: 0.032}
+      best_possible_gain: 1.06     # against the 3-5x predicted
+      measured_gain: "0.5-0.8 - a LOSS"
+      measured_gain_why: >
+        Neyman needs sigma_h, sigma_h has to be bought with a pilot, and an allocation that varies
+        from run to run adds more variance than a 5% between-stratum share can repay. The estimator
+        is exactly unbiased; it is not worth its overhead.
+      root_cause: >
+        The MULLIGAN, which section 7.3 half saw. "Those hands do not vanish, they become
+        mulligans" is offered as the argument against truncating the extreme strata; it is also why
+        conditioning on the count pays so little, since the policy discards and redraws precisely
+        the hands the conditioning made unusual. A stratification pays when the strata stay
+        distinct, and a mulligan exists to make them not.
+      what_to_try_instead: >
+        A property of the KEPT hand rather than the dealt one - the mulligan does not erase that.
+        The machinery takes any variable; choosing the right one is a sprint's work, for E4 when
+        evaluation cost starts to bite.
+      two_phase:
+        pilot_fraction: 0.25
+        pilot_allocation: proportional
+        disclosed: >
+          Pooling the pilot into the estimate makes it very slightly dependent on the pilot data.
+          Standard two-phase design; the bias is O(1/n) and discarding a quarter of every
+          evaluation to remove it would cost more than it removes.
     common_random_numbers:
       enabled: true
       note: Same shuffle seeds, gauntlet, and play/draw split per generation; run each matchup on the play and on the draw with mirrored seeds.
@@ -821,6 +930,9 @@ fidelity_ladder:
     - id: full_solo
       cost_per_eval: 100us
       role: elite refinement
+      promote_on: feasibility     # pass rate >= parameters.objective.solo_gate.min_pass_rate
+      rank_on: fitness            # mean + lambda * CVaR_10, max over the admissible band
+      added: sprint 3.2
     - id: mirror
       cost_per_eval: 1ms
       added_after: sprint 3.1
@@ -1199,6 +1311,26 @@ validation:
       - curve topping out at 8 with no ramp
       - five-colour version of a mono-colour spell suite on a bad mana base
       - $30 build vs $2000 build of the same commander
+    # --- built and measured in sprint 3.2 T6 ---------------------------
+    status: standing_regression_suite      # runs in make check
+    measured:
+      top_heavy:    {fitness_vs_real: 0.32, gate_pass: 0.000, caught: true}
+      five_colour:  {fitness_vs_real: 0.42, gate_pass: 0.117, caught: true}
+      twenty_land:  {fitness_vs_real: 0.81, gate_pass: 0.645, caught: false}
+      sixty_land:   {fitness_vs_real: 0.94, gate_pass: 0.914, caught: false}
+      price_pair:   not_built
+    verdict: >
+      TWO OF FOUR ARE NOT CAUGHT, and section 13.3's own standard is "none are close calls". The
+      two that are caught fail on MANA - never enough, or never the right colours - which a solo
+      model can see. The two that are not fail on TEMPO, and a null-opponent model with a fixed
+      horizon has no clock to charge tempo against. The sixty-land deck clears the feasibility gate
+      MORE OFTEN than the deck it should lose to, because it makes every land drop of every game.
+    disposition: >
+      Disclosed rather than patched, on 3.1's precedent: replacing a pre-registered metric inside
+      the sprint that measured it failing is the move pre-registration forbids. The measured numbers
+      are asserted in the suite, so a later change that fixes this FAILS there and forces the record
+      to be updated rather than quietly improving.
+    price_pair_note: The pipeline has prices; mf_deck does not carry them. Not attempted.
 
   opcode_coverage:
     ref: "13.5"
