@@ -1252,6 +1252,100 @@ MF_TEST(the_state_vector_carries_no_float) {
     MF_CHECK(memcmp(&a, &b, sizeof a) == 0);
 }
 
+/* ---- the handoff into phases 5+ (sprint 3.1 T1) -------------------------- */
+
+MF_TEST(the_state_vector_is_not_a_sufficient_initial_condition) {
+    /* The sprint's D3 decision, **proved rather than asserted**. The thirteen
+       bytes say how much mana there is and not what is left to spend it on, so
+       two games can agree on every scored field and disagree about the whole of
+       their future.
+
+       If this search came up empty the decision would be the wrong one and the
+       vector could have been handed over as it stands. That is why it is a
+       search rather than a comment. */
+    uint8_t d1[C_COUNT] = {[C_FOREST] = 36, [C_BEAR] = 30, [C_THREE] = 20, [C_HUGE] = 13};
+    mf_deck d;
+    deck_of(&d, d1, C_ELVES);
+    mf_turn_policy p = plain();
+
+    enum { N = 64 };
+    static mf_phase_state s[N];
+    static mf_live live[N];
+    for (unsigned g = 0; g < N; g++) {
+        mf_opening o;
+        mf_phase_open(&d, &p, 909, g, &o);
+        mf_phase_play_live(&d, &p, g, &o, &s[g], &live[g]);
+    }
+
+    unsigned agreed = 0, agreed_and_differed = 0;
+    for (unsigned i = 0; i < N; i++) {
+        for (unsigned j = i + 1; j < N; j++) {
+            if (memcmp(&s[i], &s[j], sizeof s[0]) != 0) continue;
+            agreed++;
+            /* `hand` is one of the thirteen, so the sizes already match. What
+               the vector cannot see is *which* cards, and where the library
+               was left — the two things phases 5+ read first. */
+            if (memcmp(live[i].lib.hand, live[j].lib.hand, live[i].lib.hand_size) != 0 ||
+                live[i].lib.drawn != live[j].lib.drawn) {
+                agreed_and_differed++;
+            }
+        }
+    }
+    MF_CHECK(agreed > 0);
+    MF_CHECK(agreed_and_differed > 0);
+}
+
+MF_TEST(the_live_state_agrees_with_the_vector_where_they_overlap) {
+    /* The handoff is a second view of one game, not a second game. Every field
+       the vector scores has to be recoverable from the state that carries. */
+    uint8_t d1[C_COUNT] = {[C_FOREST] = 40, [C_ELVES] = 30, [C_GROWTH] = 29};
+    mf_deck d;
+    deck_of(&d, d1, C_THREE);
+    mf_turn_policy p = plain();
+
+    for (unsigned g = 0; g < 32; g++) {
+        mf_phase_state s;
+        mf_live live;
+        mf_opening o;
+        mf_phase_open(&d, &p, 77, g, &o);
+        mf_phase_play_live(&d, &p, g, &o, &s, &live);
+
+        MF_EQ_INT(live.lib.hand_size, s.hand);
+        MF_EQ_INT(live.commander_cast, s.commander_cast);
+        MF_EQ_INT(live.turns, s.turns);
+        unsigned lands = 0, others = 0;
+        for (uint8_t i = 0; i < live.board.count; i++) {
+            if (d.key[live.board.card[i]].types & MF_TYPE_LAND) lands++;
+            else others++;
+        }
+        MF_EQ_INT(lands, s.lands);
+        MF_EQ_INT(others, s.permanents);
+        /* And the library cursor is past everything the game has seen. */
+        MF_CHECK(live.lib.drawn >= live.lib.hand_size);
+    }
+}
+
+MF_TEST(handing_out_the_live_state_changes_nothing_about_the_phase) {
+    /* The refactor's whole obligation. `mf_phase_play` is `mf_phase_play_live`
+       with the state discarded, and the golden files say so at the run level —
+       this says it per game, which is where a divergence is readable. */
+    uint8_t d1[C_COUNT] = {[C_FOREST] = 34, [C_GUILDGATE] = 10, [C_BEAR] = 30, [C_SOLRING] = 25};
+    mf_deck d;
+    deck_of(&d, d1, C_HUGE);
+    for (mf_rung r = 0; r < MF_RUNG_COUNT; r++) {
+        mf_turn_policy p = mf_policy_rung(r);
+        for (unsigned g = 0; g < 24; g++) {
+            mf_phase_state plain_out, live_out;
+            mf_live live;
+            mf_phase_run(&d, &p, 1234, g, &plain_out);
+            mf_opening o;
+            mf_phase_open(&d, &p, 1234, g, &o);
+            mf_phase_play_live(&d, &p, g, &o, &live_out, &live);
+            MF_CHECK(memcmp(&plain_out, &live_out, sizeof plain_out) == 0);
+        }
+    }
+}
+
 void run_turn_tests(void) {
     MF_RUN(an_empty_pool_pays_for_nothing_but_a_free_spell);
     MF_RUN(a_plains_pays_a_white_pip_and_not_a_blue_one);
@@ -1304,5 +1398,8 @@ void run_turn_tests(void) {
     MF_RUN(a_ritual_may_name_a_choice_of_colour);
     MF_RUN(the_gate_is_a_threshold_the_vector_does_not_carry);
     MF_RUN(the_state_vector_carries_no_float);
+    MF_RUN(the_state_vector_is_not_a_sufficient_initial_condition);
+    MF_RUN(the_live_state_agrees_with_the_vector_where_they_overlap);
+    MF_RUN(handing_out_the_live_state_changes_nothing_about_the_phase);
     mf_arena_destroy(TA);
 }

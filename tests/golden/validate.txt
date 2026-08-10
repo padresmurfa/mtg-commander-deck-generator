@@ -23,6 +23,18 @@ g3.land_rule.demanding_gap 0.01231250000000006
 g3.land_rule.sigma 3.9502841255150183
 g3.mulligan.forgiving_gap 0.076125
 g3.mulligan.demanding_gap 0.07450000000000001
+g3s.separation -0.5178124999999998
+g3s.noise_sd 0.2274293760571612
+g3s.sigma -2.276805701079947
+g3s.ratio 0
+g3s.verdict fail
+g3s.agg_error.forgiving 0
+g3s.agg_error.demanding 0.11717358006939452
+g3s.decay.4 0 1.308
+g3s.decay.6 0 1.2483333333333333
+g3s.decay.8 0 0.8246666666666667
+g3s.decay.12 0 0.127
+g3s.decay.20 0 0.0013333333333333333
 cards.cards 6
 cards.printings 8
 cards.other_games 2

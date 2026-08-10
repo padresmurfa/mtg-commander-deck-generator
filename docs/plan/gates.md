@@ -14,9 +14,9 @@ a reason — never "done".
 
 | Gate | Sprint | Question | Threshold | Outcome |
 | ---- | ------ | -------- | --------- | ------- |
-| **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9325**, conditional. Re-measured in 1.2.1, superseding 0.9357 ([retro](retros/1.2.1-clause-reachability.md)) |
+| **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9301**, conditional, inert 90.33%. Re-measured in 3.1, superseding 0.9325 and 0.9357 ([retro](retros/3.1-aggregate-phases.md)) |
 | **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | 5σ per cell, `SE = sqrt(p(1-p)/N)`, fixed in advance | **PASS — worst 2.43σ** ([retro](retros/2.1-shuffle-draw-mulligan.md)) |
-| **G3** Policy gap discriminates | 2.3 | Does naive-vs-careful separate known-forgiving from known-demanding decks? | 5x a noise floor measured first, **and** a 2x effect size | **DEFER — 2.24σ, ratio 1.14**; secondary 17.72σ ([retro](retros/2.3-policies-policy-gap.md)) |
+| **G3** Policy gap discriminates | 2.3 | Does naive-vs-careful separate known-forgiving from known-demanding decks? | 5x a noise floor measured first, **and** a 2x effect size | **DEFER — 2.24σ, ratio 1.14** (2.3). **Re-measured 3.1 against a continuous score: FAIL, −2.28σ** — and the reason moves it to E5 ([retro](retros/3.1-aggregate-phases.md)) |
 | **G4** Precon rank correlation | 3.3 | Does the objective rank real decks in the right order? | Spearman above threshold, precons with n≥100 | *pending* |
 | **G5** GA beats greedy | 4.3 | Is the landscape optimisable by population methods? | Margin exceeding the GA's own noise | *pending* |
 
@@ -38,6 +38,19 @@ large corrections in opposite directions, not evidence the first classifier was 
 also exposed a hazard in the metric itself: **G1 rises when less is simulated**, because moving a
 clause out of scope and modelling it both count the same way. In the limit a model that simulates
 nothing scores 1.0. The inert share is therefore quoted beside the fraction, always.
+
+**Re-measured again in sprint 3.1 when E3 widened the phases: 0.9301, inert 90.33%.** It fell, as
+1.2, 1.2.1 and 1.3 all predicted — **and all three predicted it for the wrong reason.** They expected
+more clause *kinds* to become reachable. Aggregate phases with a **null opponent** observe more
+*turns*, not more kinds of event: nothing dies, attacks or leaves the battlefield. Every reachability
+rule was audited individually and none changed, and the inert share went marginally *up*. **G1 falls
+on reachability when E5 supplies an opponent, not here.**
+
+What moved it was a defect the widening exposed: `"At the beginning of your upkeep, draw a card"` was
+classified `MF_OP_DRAW`, an opcode meaning *draw once, when cast*. Classification gains a fourth
+step — **recurrence** — kept separate from expressibility because the reason differs: the count is
+not unknown, it is unwritable, since `ops` has no repetition marker. 88 clauses moved to unmatched
+and 6 to inert.
 
 Unrepresentable cards are excluded from the pool
 ([spec §13.5](../simulator-spec.yaml)), so coverage is a hard ceiling on how meaningful any
@@ -89,6 +102,33 @@ scale. The same comparison read 1.26σ at 500 games a block and 5.32σ at 8,000:
 verdict, and the sample size was never fixed the way the multiple was. Gates now also require an
 **effect size**, which no sample size can inflate. Re-measured under both criteria the verdict is
 unchanged at every sample size and all eight seeds tried.
+
+**Re-measured in sprint 3.1 against the continuous objective 2.3 asked for: FAILED at −2.28σ, ratio
+0 — and the instruction is what was wrong.** Both thresholds were left unchanged; only the instrument
+improved. The gap is *negative*: careful play deploys less.
+
+> **A longer horizon makes the policy gap smaller, not larger.**
+
+Measured on the land rule alone, the gap runs 1.308 → 0.825 → 0.127 → 0.001 at turns 4 → 8 → 12 → 20,
+with the forgiving deck at exactly 0.000 throughout, consistent across six seeds. A 19× decay between
+turn 4 and turn 12. The reason is structural: the careful policy's advantage is **tempo**, and a
+null-opponent model has **no clock**. It generalises — the mulligan component *reverses sign* against
+a 12-turn score, because a mulligan costs cards and the early game it buys is priced at zero.
+
+> Every skilled decision in §5's ladder trades long-run resources for short-run position, and a
+> null-opponent model with a fixed horizon prices position at zero.
+
+**The failure branch above — "§5 is unfounded" — is engaged and NOT taken.** §5's ladder produces
+exactly the separation it claims at every horizon tried: 0.000 where there is nothing to sequence,
+positive where there is. What is unfounded is the measurement scheme. **G3 moves to E5**, where an
+opponent supplies the clock. Following the written branch here would have been following a procedure
+into a wrong conclusion.
+
+Also disclosed: the score it was measured against is close to `expensive-first`'s own objective
+("spend the most mana available"), and a fitness function that is one competitor's objective cannot
+rank competitors. It contributed +0.107 of the −0.518 separation, so it did not decide the verdict.
+**Pre-registering a metric protects against fitting it to the answer and not against picking a
+degenerate one** — a lesson for G4 as much as this.
 
 **G4 — precon rank correlation.** The objective is validated against 67 precons with ~11,700
 tracked games. Rank correlation, not absolute win-rate fitting — the data is 4-player-normalised

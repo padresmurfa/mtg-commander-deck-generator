@@ -111,6 +111,37 @@ g3_mull=${g3#*\"mulligan_only\":}
     done
 } >> "$WORK/actual.txt"
 
+# --- G3 re-measured against the continuous score (sprint 3.1) ---------------
+# Recorded even though it FAILED, for the same reason the defer above is: a gate
+# is passed, failed or deferred with a reason, never quietly dropped. Pinned
+# separately from the 2.3 record so both numbers stay readable side by side.
+g3s=$(grep '"record":"g3_score"' "$WORK/run.jsonl") || fail "no g3_score record"
+g3s_head=${g3s%%\"aggregation_error\"*}
+g3s_agg=${g3s#*\"aggregation_error\":}
+g3s_agg=${g3s_agg%%\"gap_by_horizon\"*}
+g3s_hz=${g3s#*\"gap_by_horizon\":}
+{
+    for field in separation noise_sd sigma ratio; do
+        val=$(printf '%s' "$g3s_head" | sed -n "s/.*\"$field\":\([0-9.e+-]*\).*/\1/p")
+        [ -n "$val" ] || fail "the g3_score record has no '$field'"
+        echo "g3s.$field $val"
+    done
+    verdict=$(printf '%s' "$g3s_head" | sed -n 's/.*"verdict":"\([a-z]*\)".*/\1/p')
+    [ -n "$verdict" ] || fail "the g3_score record has no verdict"
+    echo "g3s.verdict $verdict"
+    # The aggregation error, which bounds what the verdict is worth: it is
+    # deck-differential, so it is a bias a rank correlation cannot fully see.
+    for field in forgiving demanding; do
+        val=$(printf '%s' "$g3s_agg" | sed -n "s/.*\"$field\":\([0-9.e+-]*\).*/\1/p")
+        [ -n "$val" ] || fail "the aggregation_error diagnostic has no '$field'"
+        echo "g3s.agg_error.$field $val"
+    done
+    # And the decay, which is the finding: the sequencing signal shrinks as the
+    # horizon grows, because a model with no opponent has no clock. One line per
+    # horizon, so a diff points at where the curve moved.
+    printf '%s\n' "$g3s_hz" | tr '{' '\n' | sed -n 's/.*"turns":\([0-9]*\),"forgiving":\([0-9.e+-]*\),"demanding":\([0-9.e+-]*\).*/g3s.decay.\1 \2 \3/p'
+} >> "$WORK/actual.txt"
+
 # --- and the card table, which is the first real data the harness measures ---
 cat > "$WORK/pre.json" <<EOF
 {"artifact_path":"$WORK/pre.jsonl","card_table_path":"$WORK/cards.bin",

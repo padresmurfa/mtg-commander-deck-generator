@@ -92,8 +92,19 @@ MF_TEST(a_trigger_inside_turns_one_to_four_still_counts) {
     MF_EQ_INT(of("When this creature enters, you may search your library for a basic land card, "
                  "put it onto the battlefield tapped, then shuffle"),
               MF_OP_FETCH_LAND);
-    MF_EQ_INT(of("At the beginning of your upkeep, draw a card"), MF_OP_DRAW);
     MF_EQ_INT(of("When this creature enters, add {R}{G}"), MF_OP_ADD_MANA);
+    /* **Changed in sprint 3.1 T6, and the change is an addition rather than a
+       reversal.** This test asserted that "At the beginning of your upkeep,
+       draw a card" classifies as `MF_OP_DRAW`, on the argument that the turn
+       structure is simulated so the trigger fires. That argument is about
+       *reachability* and it is still correct — the clause is not inert, and
+       `a_trigger_that_fires_every_turn_is_not_a_fixed_opcode` asserts it lands
+       at UNMATCHED rather than INERT for exactly that reason.
+       What the original assertion missed is step 3: reachable is not the same
+       as expressible, and the opcode set has no way to write down "every
+       turn". Conflating the two steps is the defect 1.2.1 existed to remove,
+       and this was one it left behind. */
+    MF_CHECK(of("At the beginning of your upkeep, draw a card") != MF_OP_INERT);
 }
 
 /* ---- step 3: expressibility, on every branch ------------------------------ */
@@ -511,7 +522,37 @@ MF_TEST(every_opcode_has_a_name) {
     MF_EQ_STR(mf_opcode_name(MF_OP_COUNT), "?");
 }
 
+MF_TEST(a_trigger_that_fires_every_turn_is_not_a_fixed_opcode) {
+    /* Sprint 3.1 T6. The expressibility rule already says this about
+       "whenever" — *"a one-shot trigger fires once at a moment the model knows
+       ... while a repeating one fires a number of times set by what else was
+       drawn and cast"* — and "at the beginning of" is the same shape and was
+       not in the list.
+
+       So `MF_OP_DRAW` was standing in for "draw a card every upkeep", which is
+       the 1.2.1 defect exactly: a fixed opcode standing in for a variable effect
+       is not an approximation, it is a wrong answer that inflates the gate.
+       Widening the phases from four turns to twelve is what made it worth
+       finding — the same clause now fires twelve times in the game and once in
+       the model. */
+    MF_EQ_INT(of("At the beginning of your upkeep, draw a card"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("At the beginning of your precombat main phase, add {G}"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("At the beginning of your end step, draw a card"), MF_OP_UNMATCHED);
+
+    /* A one-shot still is one. "When this enters, draw a card" fires at a
+       moment the model runs and knows the count of, so it stays modelled — the
+       distinction is repetition, not the word "trigger". */
+    MF_EQ_INT(of("When this creature enters, draw a card"), MF_OP_DRAW);
+    MF_EQ_INT(of("Draw a card"), MF_OP_DRAW);
+
+    /* And a repeating trigger on an unreachable event is still inert rather
+       than unmatched: reachability runs first, and charging the opcode set for
+       a combat trigger would count the narrowness of the phases twice. */
+    MF_EQ_INT(of("At the beginning of combat on your turn, this creature attacks"), MF_OP_INERT);
+}
+
 void run_opcode_tests(void) {
+    MF_RUN(a_trigger_that_fires_every_turn_is_not_a_fixed_opcode);
     A = mf_arena_create("opcode-test", 1u << 20);
 
     MF_RUN(mana_production_is_recognised_in_the_shapes_it_is_printed_in);

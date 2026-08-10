@@ -1,5 +1,7 @@
 #include "mf/gap.h"
 
+#include "mf/solo.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -163,4 +165,75 @@ void mf_g3_measure(const mf_deck *forgiving, const mf_deck *demanding, const mf_
     } else {
         out->verdict = MF_G3_FAIL;
     }
+}
+
+/* ---- the same gate against the continuous score -------------------------- */
+
+static void score_gap(const mf_deck *d, const mf_turn_policy *naive, const mf_turn_policy *careful,
+                      uint64_t seed, unsigned games, unsigned first_game, uint8_t turns,
+                      mf_score_gap *out) {
+    memset(out, 0, sizeof *out);
+    out->games = games;
+
+    /* Integer accumulators divided once at the end (§17.1) — the score is an
+       integer per game precisely so this reduction cannot depend on the order
+       the games arrived in. */
+    unsigned long ns = 0, cs = 0;
+    for (unsigned g = 0; g < games; g++) {
+        uint64_t game = first_game + g;
+        mf_solo_state a, b;
+        mf_solo_run_turns(d, naive, seed, game, turns, &a);
+        mf_solo_run_turns(d, careful, seed, game, turns, &b);
+        ns += mf_solo_score(&a);
+        cs += mf_solo_score(&b);
+    }
+
+    if (!games) return;
+    double n = (double)games;
+    out->naive_score = (double)ns / n;
+    out->careful_score = (double)cs / n;
+    out->gap = out->careful_score - out->naive_score;
+}
+
+static void score_blocks(const mf_deck *d, const mf_turn_policy *naive,
+                         const mf_turn_policy *careful, uint64_t seed, unsigned games_per_block,
+                         unsigned blocks, uint8_t turns, double *gaps) {
+    for (unsigned b = 0; b < blocks; b++) {
+        mf_score_gap g;
+        score_gap(d, naive, careful, seed, games_per_block, b * games_per_block, turns, &g);
+        gaps[b] = g.gap;
+    }
+}
+
+void mf_g3_score_measure(const mf_deck *forgiving, const mf_deck *demanding,
+                         const mf_turn_policy *naive, const mf_turn_policy *careful, uint64_t seed,
+                         unsigned games_per_block, unsigned blocks, uint8_t aggregate_turns,
+                         mf_g3_score *out) {
+    memset(out, 0, sizeof *out);
+    if (blocks > MF_GAP_BLOCKS_MAX) blocks = MF_GAP_BLOCKS_MAX;
+    unsigned total = games_per_block * blocks;
+
+    score_gap(forgiving, naive, careful, seed, total, 0, aggregate_turns, &out->forgiving);
+    score_gap(demanding, naive, careful, seed, total, 0, aggregate_turns, &out->demanding);
+    out->separation = out->demanding.gap - out->forgiving.gap;
+
+    /* A difference of two gaps, so its noise floor is measured as a difference
+       of two gaps block by block — assembling it from two independent floors
+       would throw away the correlation the common random numbers create. */
+    double fg[MF_GAP_BLOCKS_MAX], dg[MF_GAP_BLOCKS_MAX], sep[MF_GAP_BLOCKS_MAX];
+    score_blocks(forgiving, naive, careful, seed, games_per_block, blocks, aggregate_turns, fg);
+    score_blocks(demanding, naive, careful, seed, games_per_block, blocks, aggregate_turns, dg);
+    for (unsigned b = 0; b < blocks; b++) sep[b] = dg[b] - fg[b];
+    double mean, sd;
+    spread(sep, blocks, &mean, &sd);
+    out->noise_sd = sd;
+
+    bool measurable = total > 0 && blocks > 1;
+    out->sigma = measurable && out->noise_sd > 0.0 ? out->separation / out->noise_sd : 0.0;
+    double f = out->forgiving.gap, dm = out->demanding.gap;
+    out->ratio = f > 0.0 ? dm / f : (dm > 0.0 ? MF_G3_RATIO_UNBOUNDED : 0.0);
+
+    out->verdict = measurable && out->sigma > MF_G3_SIGMA && out->ratio >= MF_G3_RATIO
+                       ? MF_G3_PASS
+                       : MF_G3_FAIL;
 }

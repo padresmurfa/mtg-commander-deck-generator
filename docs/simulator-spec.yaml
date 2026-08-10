@@ -701,12 +701,112 @@ phases:
         - >
           The greedy policy will not cast a ritual to enable a bigger spell. Deliberate: the value
           it leaves on the table is exactly what makes the skill gap measurable.
+    # --- built in sprint 3.1 --------------------------------------------
     - id: development
       turns: "5-7"
       simulation: aggregate
     - id: execution
-      turns: "8+"
+      turns: "8-12"
       simulation: aggregate
+      horizon_decision:
+        value: 12
+        sprint: "3.1"
+        why: >
+          Section 3 leaves this open ("8+"). A solo model has no opponent and therefore no clock, so
+          every additional turn only adds mana and cards; past some point every deck deploys its
+          whole hand and the score converges on how much of the library was drawn, which is a
+          property of the shuffle rather than of the deck. The horizon has to stop while the mana
+          constraint still binds.
+        chosen_before_measuring: true
+
+  aggregate_model:
+    ref: "3"
+    added: sprint 3.1
+    definition: The cards are real; the turn they arrive on is not.
+    cards_are_real: >
+      The phase draws exactly what the shuffle dealt, which keeps it a sample from the same
+      distribution as the exact phase and keeps common random numbers (7.8) intact.
+    turn_is_not: >
+      The whole phase is ONE mana budget and ONE pool of castable cards. A land drawn on the last
+      turn pays into the whole phase. That over-count IS the claim under test.
+    budget_closed_form: |
+      Each land pays for every turn after it arrives:
+        budget = T * base + sum over drops j of  m_j * (T - j + 1)
+        peak   = base + sum of m_j
+      Arithmetic rather than a turn loop with the decisions taken out, which is the honest shape for
+      a claim that order does not matter.
+    constraints_that_survive:
+      colour: >
+        Hall's condition against the PEAK pool with no accumulated demand - asked of the mana base
+        rather than of a turn. Decoupling colour from quantity IS the aggregation; the exact phase
+        couples them per turn.
+      per_turn_ceiling: >
+        Mana is not saved between turns, so cost <= peak. Not a separate check: mf_mana_can_pay
+        already refuses a cost larger than the pool's total, so one call asks both questions.
+    mana_arriving_mid_phase: >
+      A PERMANENT mana source deployed in a phase pays into the NEXT phase; a ONE-SHOT pays into its
+      own. Tapping needs a turn an aggregate phase does not have; a ritual is instantaneous by
+      construction. One rule, and it is the game's own.
+    no_untap_step: >
+      There is none, and nothing for one to do: this phase never asks what can be tapped NOW.
+      Mutation testing removed the call and nothing failed. That is also the sharper reason a
+      tapland costs nothing here - not that it untapped, but that nothing reads the flag.
+    known_simplifications:
+      - Which land is played is hand order, not a colour decision. A policy gap, not a modelling limit.
+      - A tapland costs nothing, because its whole cost is a turn of tempo and there are no turns.
+
+  aggregate_error:
+    ref: "3"
+    added: sprint 3.1
+    what: The first measurement of section 3's own exact/aggregate boundary.
+    method: >
+      The exact model is NOT restricted to four turns - section 3 stops it there for cost, and the
+      turn count is a parameter. So both models run to turn twelve and are compared, on games that
+      are on the draw so each sees one card per turn.
+    statistic: relative_error
+    statistic_note: >
+      "Dominated by totals" is a claim about a PROPORTION. Measured as absolute error per turn the
+      error RISES with the horizon and section 3 looks refuted; the first attempt used that figure
+      and was refuting a reading nobody held.
+    measured:                      # relative error, aggregate vs exact
+      low_curve:     {4: -0.174, 7: -0.029, 12:  0.001}
+      high_curve:    {4:  0.387, 7:  0.326, 12:  0.224}
+      taplands:      {4:  0.793, 7:  0.437, 12:  0.124}
+      artifact_ramp: {4: -0.562, 7: -0.299, 12: -0.104}
+    verdict: >
+      The claim HOLDS - relative error falls monotonically on all four decks.
+    caveat_that_matters: >
+      The error is DECK-DIFFERENTIAL, and a uniform bias would cancel in a ranking while this one
+      does not. A fungible budget flatters decks that cannot spend on curve (+22% on a high curve);
+      deferring a deployed rock's mana penalises artifact ramp (-10%). A deck with neither lands
+      within 0.1% of exact, confirming these two are the whole of it. G4 must be read knowing it.
+
+  solo_score:
+    ref: "3, 4"
+    added: sprint 3.1
+    definition: Total mana value of every spell cast, commander included.
+    printed_not_paid: >
+      A cost reducer is an efficiency the deck earned; scoring the discounted number would penalise
+      it. A six-drop cast for four deployed six.
+    lands_score_zero: >
+      Load-bearing rather than incidental: 13.3 requires the 60-land deck to rank badly, and if board
+      presence scored it would rank WELL - it makes every land drop of every game.
+    state_vector:
+      bytes: 26
+      padding: none              # statically asserted; pad byte explicit, on the metacard precedent
+      contains: the opening's 13 bytes unchanged, plus the run's totals
+    handoff:
+      what: the live game - board, hand, library cursor
+      why_not_the_opening_vector: >
+        It says how much mana there is and NOT what is left to spend it on. Two games can agree on
+        all thirteen bytes and hold different cards - exhibited by a test rather than asserted. One
+        vector is read by a fitness function and the other by the next phase; they want different
+        things, so the scored vector does not grow.
+    known_defect:
+      what: >
+        Close to the expensive-first cast rule's own stated objective, "spend the most mana
+        available". A fitness function that is one competitor's objective cannot rank competitors.
+      status: shipped as specified, disclosed, replacement is sprint 3.2's first task
 
 fidelity_ladder:
   ref: "9"
@@ -1142,17 +1242,51 @@ validation:
   opcode_coverage:
     ref: "13.5"
     added: sprint 1.2
-    remeasured: sprint 1.2.1
+    remeasured: [sprint 1.2.1, sprint 3.1]
     gate: G1
     threshold: {sound: 0.60, compromised: 0.30}
     measured:
-      value: 0.9325
-      date: 2026-08-09
+      value: 0.9301
+      date: 2026-08-10
+      sprint: "3.1"
       pool: commander-legal paper cards from the Scryfall export
-      representable: 29681
+      representable: 29604
       legal: 31829
+      inert_share: 0.9033        # ALWAYS quoted beside the fraction (1.2.1 rule)
+      inert_clauses: 69871
+      total_clauses: 77348
       verdict: pass
+    classification_steps: 4      # reachability, shape, expressibility, recurrence
+    recurrence_rule:
+      added: sprint 3.1
+      what: >
+        A repeating trigger ("at the beginning of ...") is UNMATCHED. Not because its count is
+        unknown - it is exactly the turns the permanent has been out, which the model knows at
+        runtime - but because `ops` is a bitmask with no repetition marker, so there is nothing to
+        write it down with. Deliberately a separate step from expressibility, whose reason is
+        different; conflating the steps is the defect 1.2.1 existed to remove.
+      order: >
+        Reachability still runs FIRST, so a repeating trigger on an unreachable event stays inert.
+        Charging the opcode set for it would count the narrowness of the phases twice.
+      also_added_to_unreachable: "beginning of combat"   # no combat phase is ever run
+      moved: {to_unmatched: 88, to_inert: 6}
+    prediction_that_was_wrong:
+      predicted_by: [sprint 1.2, sprint 1.2.1, sprint 1.3]
+      claim: G1 falls when E3 widens the phases, because more clause KINDS become reachable
+      outcome: >
+        It fell, for a different reason. Aggregate phases with a NULL OPPONENT observe more TURNS,
+        not more kinds of event - nothing dies, attacks or leaves the battlefield - and every
+        reachability rule was audited individually and none changed. The inert share went marginally
+        UP (0.90325 -> 0.90333). What moved the number was a defect the widening exposed. G1 falls
+        on reachability when E5 supplies an opponent, not here.
     superseded:
+      - value: 0.9325
+        sprint: "1.2.1"
+        inert_share: 0.9032
+        why: >
+          A recurring trigger was classified as a one-shot opcode: "At the beginning of your upkeep,
+          draw a card" reached MF_OP_DRAW, an opcode meaning draw once when cast. A card that draws
+          every turn was counted as fully modelled.
       - value: 0.9357
         sprint: "1.2"
         why: >
@@ -1324,6 +1458,58 @@ validation:
       hold-interaction: no opponent to hold mana up for
       combo-assemble: needs combo detection nothing builds yet
       role-aware: partial - ramp is observable, removal and interaction are not
+    remeasured:
+      sprint: "3.1"
+      date: 2026-08-10
+      metric: mana value deployed over a 12-turn solo run
+      thresholds_unchanged: true       # same 5 sigma and 2x; only the instrument changed
+      separation: -0.5178
+      noise_sd: 0.2274
+      sigma: -2.28
+      ratio: 0.0
+      verdict: fail
+      recorded_beside_not_over: >
+        The 2.3 gate measurement is untouched and still reports 2.24 sigma / 1.14 / defer. Both are
+        separate records in the run artifact and separate blocks in the golden file, on the 1.2.1
+        rule that a published measurement is superseded in the open.
+      decomposition:
+        mulligan_only: {forgiving: -0.424, demanding: -0.918}
+        cast_rule_only: {forgiving: 0.000, demanding: 0.107}
+        land_rule_only: {forgiving: 0.000, demanding: 0.070}
+      finding:
+        headline: A longer horizon makes the policy gap SMALLER, not larger.
+        gap_by_horizon:                # land rule only; forgiving deck is 0.000 at every horizon
+          4:  1.308
+          6:  1.248
+          8:  0.825
+          12: 0.127
+          20: 0.001
+        seeds_checked: 6               # 1.26-1.31 at turn 4, 0.066-0.098 at turn 12, ~0 at turn 20
+        why: >
+          The careful policy's whole advantage is TEMPO, and a null-opponent model has NO CLOCK -
+          being a turn behind costs nothing given enough turns. It generalises past sequencing: the
+          mulligan component REVERSES SIGN against a 12-turn score, because a mulligan costs cards
+          and the early game it buys is priced at zero. Every skilled decision in the ladder trades
+          long-run resources for short-run position, and this model prices position at zero.
+        consequence: >
+          Section 5 is NOT unfounded and its failure branch is not taken - the separation is exactly
+          zero where there is nothing to sequence and positive where there is, at every horizon.
+          What cannot be done is measuring it against a SOLO objective at all. G3 belongs in E5.
+      metric_defect:
+        what: >
+          "Mana value deployed" is close to the expensive-first cast rule's own stated objective,
+          "spend the most mana available". A fitness function that is one competitor's objective
+          cannot rank competitors.
+        size: >
+          The cast rule contributes +0.107 of the -0.518 separation against the mulligan's -0.918,
+          so it is not what decided the verdict.
+        lesson: >
+          Pre-registering a metric protects against fitting it to the answer. It does NOT protect
+          against picking one that is degenerate by construction, and this was available a priori
+          from the enum's own comment.
+        not_fixed_here: >
+          Replacing a metric in the same sprint whose gate it failed is the move pre-registration
+          forbids. It goes to sprint 3.2 under fresh pre-registration.
 
   class_reduction:
     ref: "7.1, 7.6"

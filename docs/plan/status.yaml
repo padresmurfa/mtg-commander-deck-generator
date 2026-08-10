@@ -13,8 +13,8 @@
 
 meta:
   status: in_progress
-  current_sprint: "3.1"
-  task_split_valid_for: "3.1"     # task-splitting any other sprint is speculative
+  current_sprint: "3.2"
+  task_split_valid_for: "3.2"     # task-splitting any other sprint is speculative
   baseline: greenfield
   language: c
   deliverable: cli
@@ -91,18 +91,26 @@ gates:
     threshold: ">= 0.60 sound; <= 0.30 compromised"
     spec_ref: "13.5"
     on_failure: grow the opcode set, or stop
+    result: "pass - 0.9301, inert 90.33% (re-measured 3.1, superseding 0.9325 and 0.9357)"
+
   - id: G2
     sprint: "2.1"
     name: analytic_agreement
     question: Does the sampler converge to closed-form hypergeometric truth?
     spec_ref: "13.1"
     on_failure: the simulation core is wrong; fix before anything builds on it
+    result: "pass - worst cell 2.43 sigma against a 5 sigma tolerance fixed in advance (2.1)"
   - id: G3
     sprint: "2.3"
     name: policy_gap_discriminates
     question: Does naive-vs-careful separate known-forgiving from known-demanding decks?
     spec_ref: "5"
     on_failure: the skill ladder is unfounded; redesign section 5
+    result: >
+      defer (2.3, gate pass rate) then FAIL (3.1, continuous score, -2.28 sigma). The failure branch
+      was engaged and NOT taken: section 5 separates the decks perfectly at every horizon, and what
+      fails is measuring it against a SOLO objective at all. Moved to E5, where an opponent supplies
+      the clock a tempo signal needs.
   - id: G4
     sprint: "3.3"
     name: precon_rank_correlation
@@ -367,7 +375,37 @@ epics:
     sprints:
       - id: "3.1"
         name: Aggregate phases 5+
-        status: not_started
+        status: done
+        retro: docs/plan/retros/3.1-aggregate-phases.md
+        tasks_doc: docs/plan/sprints/3.1-aggregate-phases.md
+        result:
+          checks: 12584
+          line_coverage: 100.00
+          branch_coverage: 95.34
+          g3_score_sigma: -2.28
+          g3_score_ratio: 0.0
+          g3_score_verdict: fail
+          g3_score_note: >
+            Recorded BESIDE the 2.3 defer, not over it. Both thresholds unchanged; only the
+            instrument changed. The gap is NEGATIVE - careful play deploys less.
+          g3_finding: >
+            A longer horizon makes the policy gap SMALLER. On the land rule alone the gap runs
+            1.308 -> 0.825 -> 0.127 -> 0.001 at turns 4 -> 8 -> 12 -> 20, forgiving deck at exactly
+            0.000 throughout, consistent across six seeds. The careful policy's advantage is TEMPO
+            and a null-opponent model has NO CLOCK. The mulligan component reverses sign for the
+            same reason. Section 5 is not unfounded; a solo objective cannot measure it.
+          g1_coverage: 0.9301
+          g1_inert_share: 0.9033
+          g1_verdict: pass_conditional
+          g1_note: >
+            Three retros predicted this fall and all three predicted it for the wrong reason.
+            Aggregate phases with a null opponent observe more TURNS, not more kinds of event; no
+            reachability rule changed and the inert share went marginally UP. What moved it was a
+            defect the widening exposed - a recurring trigger classified as a one-shot opcode.
+          aggregation_error_relative: {low_curve: 0.001, high_curve: 0.224, taplands: 0.124, artifact_ramp: -0.104}
+          solo_state_bytes: 26
+          mutations: "20/22, 1 dead call removed, 6 tests rewritten"
+          modules_added: [solo]
         exit_criteria:
           - development and execution phases in aggregate
           - full solo run produces a phase-end state
@@ -496,50 +534,83 @@ epics:
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
 tasks:
-  sprint: "3.1"
-  doc: docs/plan/sprints/3.1-aggregate-phases.md
+  sprint: "3.2"
+  doc: docs/plan/sprints/3.2-objective-sampling.md
   goal: >
-    Turns 5+ in aggregate - development and execution - so a full solo run produces a phase-end
-    state rather than stopping at the opening gate.
+    An objective worth optimising - chosen against the degeneracy 3.1 disclosed - plus CVaR
+    scalarisation and stratified sampling, so the solo evaluation produces a fitness rather than a
+    number that happens to accumulate.
   why_now: >
-    E2 is closed and its gate deferred for a reason that names this sprint: the opening produces
-    pass/fail and nothing else, which is right for fitness and too coarse to measure a policy gap
-    against. A continuous objective is what G3 needs re-measuring against, and it does not exist
-    until phases 5+ do.
-  carried_in: []
+    3.1 shipped a continuous score and measured it into the ground: it is close to one policy's own
+    objective, and G3 failed against it for a reason that is about the model rather than the metric.
+    This sprint is titled "Objective & sampling" and the objective is now the thing most in need of
+    being chosen deliberately.
+  carried_in:
+    - >
+      Choose an objective that is not any policy's own objective, pre-registered before measurement,
+      with the degeneracy check applied. Mana value deployed is close to "spend the most mana
+      available", which is what expensive-first optimises.
+    - >
+      Decide what the solo objective is FOR, now that it cannot measure skill. Section 3 wants
+      fitness and section 5 wants a gap, and 3.1 showed those want different instruments.
   input_from_previous_retro:
     - >
-      G3 is DEFERRED, not passed. Re-measure the policy gap here against whatever continuous score
-      this sprint produces, and record it beside the 2.3 numbers rather than over them.
+      A null-opponent model with a fixed horizon prices position at zero, so every skilled decision
+      in section 5's ladder looks like a loss. Do not build an objective that assumes otherwise.
     - >
-      A gate threshold expressed in standard errors has the sample size left blank. Significance is
-      free at scale. Every gate from here also needs an EFFECT SIZE. This applies to G4 in 3.3.
+      The aggregation error is DECK-DIFFERENTIAL: +22% on high curves, -10% on artifact ramp. Any
+      objective built on the aggregate phases inherits that bias, and G4 in 3.3 must be read knowing
+      it.
     - >
-      The skill gap is ~88% mulligan, and the mulligan component is the same on every deck. A
-      scalar gap is the wrong summary - report the components.
+      A gate threshold in standard errors leaves the sample size blank (2.3). Effect size beside
+      significance, for G4 too.
     - >
-      G1 counted a clause as modelled when the opcode exists, but the metacard cannot carry the
-      AMOUNT the opcode needs (draw and cost reduction both assume one). Widening the phases
-      re-opens G1, and this is part of what it will find.
-    - >
-      Inert is relative to what is simulated. 90.3% of clauses are inert for turns 1-4; that number
-      falls here, and G1 falls with it. That is the model growing rather than breaking.
+      Pre-registration protects against fitting a metric to the answer, NOT against picking one that
+      is degenerate by construction. Check for degeneracy explicitly this time.
   split:
     - id: T1
-      name: what aggregate means - the state that carries from turn 4 into turn 5
+      name: choose the objective - what it measures, and the degeneracy check that clears it
     - id: T2
-      name: development phase, turns 5-7, in aggregate
+      name: per-strategy scalarisation, and what "max over admissible strategies" means in code
     - id: T3
-      name: execution phase, turns 8+, in aggregate
+      name: CVaR_10 and mean + lambda*CVaR, sorted and reduced in index order
     - id: T4
-      name: a continuous phase-end score, and what it is a score OF
+      name: stratified openers under Neyman allocation
     - id: T5
-      name: re-measure G3 against it, beside the 2.3 numbers
+      name: the solo gate wired as pass/fail, feeding the fidelity ladder
     - id: T6
-      name: re-measure G1 now that more is simulated, beside 0.9325
+      name: known-bad decks (13.3) as the regression suite the objective must not shrug at
     - id: T7
       name: retro and amendments
 retros:
+  - sprint: "3.1"
+    doc: docs/plan/retros/3.1-aggregate-phases.md
+    gates: [G3, G1]
+    design_amendments: 5
+    headline: >
+      The sprint existed because 2.3 deferred G3 with an instruction - re-measure against a
+      continuous objective - and the measurement says the instruction rested on a false premise. A
+      LONGER HORIZON MAKES THE POLICY GAP SMALLER. On the land rule alone the gap runs 1.308 at turn
+      4, 0.127 at turn 12 and 0.001 at turn 20, with the forgiving deck at exactly 0.000 throughout
+      and the same shape on all six seeds tried - a 19x decay. The careful policy's whole advantage
+      is TEMPO and a null-opponent model has NO CLOCK, so being a turn behind costs nothing given
+      enough turns. It generalises past sequencing: the mulligan component REVERSES SIGN against a
+      12-turn score, because a mulligan costs cards and the early game it buys is priced at zero.
+      Every skilled decision in section 5's ladder trades long-run resources for short-run position,
+      and this model prices position at zero. So G3 FAILED at -2.28 sigma - and its written failure
+      branch, "section 5 is unfounded", was engaged and NOT taken, because section 5 separates the
+      decks perfectly at every horizon. What cannot be done is measuring it solo; G3 moves to E5.
+      Also disclosed rather than patched: the score it was measured against is close to
+      expensive-first's own objective, so pre-registration protected against fitting the metric to
+      the answer and not against picking a degenerate one. G1 fell to 0.9301 as three retros
+      predicted and for a reason none of them gave - aggregate phases with a null opponent observe
+      more TURNS, not more kinds of event, so no reachability rule changed and the inert share went
+      marginally UP; what moved it was a recurring trigger classified as a one-shot opcode. Section
+      3's exact/aggregate boundary was measured for the first time and HOLDS, once the statistic is
+      the relative error rather than the absolute one - but the error is deck-differential at 10-20%,
+      which is a bias G4 cannot see. Mutation testing removed a dead untap call that looked like
+      diligence and stated a rule the code did not follow.
+    carry_over: [objective_choice, what_the_solo_objective_is_for]
   - sprint: "2.3"
     doc: docs/plan/retros/2.3-policies-policy-gap.md
     gates: [G3]

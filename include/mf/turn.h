@@ -252,4 +252,37 @@ void mf_phase_play(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
    put whatever the stack last held into the run digest. */
 uint64_t mf_phase_key(const mf_phase_state *s);
 
+/* ---- the handoff into phases 5+ (sprint 3.1) -----------------------------
+ * **The state vector is not a sufficient initial condition, and the sprint
+ * proves it rather than asserting it** (3.1 D3): two games can agree on all
+ * thirteen bytes and hold different cards, because the vector says how much
+ * mana there is and *not what is left to spend it on*.
+ *
+ * So the handoff is the live game — board, hand, library cursor — and
+ * `mf_phase_state` **does not grow**. Widening the scored vector to carry
+ * resume state would conflate two jobs: one is read by a fitness function, the
+ * other by the next phase, and they want different things. It would also move
+ * every golden file, for a reason that has nothing to do with the game. */
+
+typedef struct {
+    mf_board board;
+    mf_opening lib;
+    uint8_t turns; /* completed, so the next phase knows where it starts */
+    bool commander_cast;
+    /* Run totals, carried rather than recomputed. An instant that resolved and
+       left cannot be read back off a board, so a score summed at the end would
+       be a score of the permanents — which is a different quantity, and a
+       worse one. */
+    uint16_t deployed; /* mana value cast, printed rather than paid */
+    uint8_t spells;
+    uint8_t missed_drops;
+} mf_live;
+
+/* The phase, plus the state it leaves behind. `mf_phase_play` is exactly this
+   with the live state discarded — asserted per game rather than assumed, since
+   a refactor that quietly changed the phase would otherwise show up first as a
+   moved golden file with no explanation attached. */
+void mf_phase_play_live(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
+                        const mf_opening *start, mf_phase_state *out, mf_live *live);
+
 #endif

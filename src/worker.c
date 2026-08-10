@@ -16,6 +16,7 @@
 #include "mf/table.h"
 #include "mf/evaluate.h"
 #include "mf/gap.h"
+#include "mf/solo.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -98,6 +99,19 @@ static const mf_phase_gate MF_VALIDATE_GATE = {MF_GATE_MIN_MANA, MF_GATE_MIN_SPE
    turn is not recovered. Sequencing, held tempo and colour-fixing at once. */
 #define MF_G3_GAMES_PER_BLOCK 1000
 #define MF_G3_BLOCKS 16
+/* The score re-measurement plays twelve turns where the gate plays four, so the
+   same block count over fewer games keeps `validate` about as quick. Fixed here
+   rather than tuned to the answer — 2.3 disclosed exactly that failure in its
+   own threshold, and the sprint reports the verdict across sample sizes. */
+#define MF_G3_SCORE_GAMES_PER_BLOCK 400
+#define MF_AGG_ERROR_GAMES 2000
+/* Aggregate turns past the opening, for the horizon sweep that says *why* the
+   score gate fails. Zero is the opening alone, which is where the signal is
+   largest — and reading that as "so score the opening instead" would be picking
+   the row after seeing it, which is the thing 2.3 disclosed. It is recorded as
+   a diagnostic and the objective is 3.2's to choose. */
+static const uint8_t MF_G3_HORIZONS[] = {0, 2, 4, 8, 16};
+#define MF_G3_HORIZON_GAMES 3000
 #define MF_G3_FIXTURE_LANDS 38
 
 static void g3_forgiving(mf_deck *d) {
@@ -418,6 +432,97 @@ static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
 
     mf_jw_obj_end(g3w);
     write_record(art, g3w);
+
+    /* **G3 re-measured against the continuous objective** (sprint 3.1 T5), in
+       its own record rather than folded into the one above: 2.3's numbers are
+       published, and a published measurement that quietly changes is worse than
+       one superseded in the open — the rule 1.2.1 established for G1.
+
+       Both thresholds are unchanged. Same bar, better instrument. */
+    mf_g3_score g3s;
+    mf_g3_score_measure(&forgiving, &demanding, &naive, &careful, c->seed,
+                        MF_G3_SCORE_GAMES_PER_BLOCK, MF_G3_BLOCKS,
+                        MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, &g3s);
+    mf_jw *sw = mf_jw_new(root);
+    mf_jw_obj_begin(sw);
+    mf_jw_key(sw, "record");            mf_jw_str(sw, "g3_score");
+    mf_jw_key(sw, "supersedes");        mf_jw_str(sw, "g3 (sprint 2.3, deferred)");
+    mf_jw_key(sw, "metric");            mf_jw_str(sw, "mana value deployed over a solo run");
+    mf_jw_key(sw, "turns");             mf_jw_int(sw, MF_SOLO_TURNS);
+    mf_jw_key(sw, "games_per_block");   mf_jw_int(sw, MF_G3_SCORE_GAMES_PER_BLOCK);
+    mf_jw_key(sw, "blocks");            mf_jw_int(sw, MF_G3_BLOCKS);
+    mf_jw_key(sw, "tolerance_sigma");   mf_jw_num(sw, MF_G3_SIGMA);
+    mf_jw_key(sw, "tolerance_ratio");   mf_jw_num(sw, MF_G3_RATIO);
+    mf_jw_key(sw, "forgiving");
+    mf_jw_obj_begin(sw);
+    mf_jw_key(sw, "naive");   mf_jw_num(sw, g3s.forgiving.naive_score);
+    mf_jw_key(sw, "careful"); mf_jw_num(sw, g3s.forgiving.careful_score);
+    mf_jw_key(sw, "gap");     mf_jw_num(sw, g3s.forgiving.gap);
+    mf_jw_obj_end(sw);
+    mf_jw_key(sw, "demanding");
+    mf_jw_obj_begin(sw);
+    mf_jw_key(sw, "naive");   mf_jw_num(sw, g3s.demanding.naive_score);
+    mf_jw_key(sw, "careful"); mf_jw_num(sw, g3s.demanding.careful_score);
+    mf_jw_key(sw, "gap");     mf_jw_num(sw, g3s.demanding.gap);
+    mf_jw_obj_end(sw);
+    mf_jw_key(sw, "separation");        mf_jw_num(sw, g3s.separation);
+    mf_jw_key(sw, "noise_sd");          mf_jw_num(sw, g3s.noise_sd);
+    mf_jw_key(sw, "sigma");             mf_jw_num(sw, g3s.sigma);
+    mf_jw_key(sw, "ratio");             mf_jw_num(sw, g3s.ratio);
+    mf_jw_key(sw, "verdict");           mf_jw_str(sw, mf_g3_verdict_name(g3s.verdict));
+
+    /* The aggregation error, on the two gate fixtures, at the horizon the run
+       actually uses. It belongs beside the verdict because it bounds what the
+       verdict is worth: an objective with a deck-differential bias is one a
+       rank correlation cannot fully check (3.1 T2). */
+    mf_agg_error fe, de;
+    mf_solo_aggregation_error(&forgiving, &careful, c->seed, MF_AGG_ERROR_GAMES, MF_SOLO_TURNS,
+                              &fe);
+    mf_solo_aggregation_error(&demanding, &careful, c->seed, MF_AGG_ERROR_GAMES, MF_SOLO_TURNS,
+                              &de);
+    mf_jw_key(sw, "aggregation_error");
+    mf_jw_obj_begin(sw);
+    mf_jw_key(sw, "games");     mf_jw_int(sw, MF_AGG_ERROR_GAMES);
+    mf_jw_key(sw, "forgiving"); mf_jw_num(sw, fe.relative_error);
+    mf_jw_key(sw, "demanding"); mf_jw_num(sw, de.relative_error);
+    mf_jw_obj_end(sw);
+
+    /* **Why it failed, emitted by the tool rather than reconstructed later** —
+       the 2.3 precedent for the land-rule decomposition, applied to a sharper
+       question. The land rule is the component 2.3 showed actually
+       discriminates, and this is that component measured against the score at a
+       range of horizons.
+
+       It decays. A model with no opponent has no clock, so being a turn behind
+       costs nothing given enough turns, and every extra turn washes more of the
+       tempo signal out. That is a fact about the solo model rather than about
+       §5, and it is what the verdict above is really reporting. */
+    mf_jw_key(sw, "gap_by_horizon");
+    mf_jw_arr_begin(sw);
+    for (unsigned h = 0; h < sizeof MF_G3_HORIZONS / sizeof *MF_G3_HORIZONS; h++) {
+        uint8_t extra = MF_G3_HORIZONS[h];
+        unsigned long fn = 0, fc = 0, dn = 0, dc = 0;
+        for (unsigned hg = 0; hg < MF_G3_HORIZON_GAMES; hg++) {
+            mf_solo_state a;
+            mf_solo_run_turns(&forgiving, &seq_naive, c->seed, hg, extra, &a);
+            fn += mf_solo_score(&a);
+            mf_solo_run_turns(&forgiving, &seq_only, c->seed, hg, extra, &a);
+            fc += mf_solo_score(&a);
+            mf_solo_run_turns(&demanding, &seq_naive, c->seed, hg, extra, &a);
+            dn += mf_solo_score(&a);
+            mf_solo_run_turns(&demanding, &seq_only, c->seed, hg, extra, &a);
+            dc += mf_solo_score(&a);
+        }
+        double n = (double)MF_G3_HORIZON_GAMES;
+        mf_jw_obj_begin(sw);
+        mf_jw_key(sw, "turns");     mf_jw_int(sw, MF_PHASE_TURNS + extra);
+        mf_jw_key(sw, "forgiving"); mf_jw_num(sw, ((double)fc - (double)fn) / n);
+        mf_jw_key(sw, "demanding"); mf_jw_num(sw, ((double)dc - (double)dn) / n);
+        mf_jw_obj_end(sw);
+    }
+    mf_jw_arr_end(sw);
+    mf_jw_obj_end(sw);
+    write_record(art, sw);
 
     mf_jw *w = mf_jw_new(root);
     mf_jw_obj_begin(w);

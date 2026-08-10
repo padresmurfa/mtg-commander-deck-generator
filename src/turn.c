@@ -1,6 +1,7 @@
 #include "mf/turn.h"
 
 #include "mf/panic.h"
+#include "turn_priv.h"
 
 #include <string.h>
 
@@ -100,11 +101,15 @@ bool mf_phase_on_play(uint64_t game) {
 /* Counts saturate rather than wrap. The vector is a `uint8` per field because
    §3 scores integers and nothing here exceeds a hundred, but a silent wrap
    would be a wrong answer rather than a clipped one. */
-static uint8_t cap8(unsigned v) {
+uint8_t mf_cap8(unsigned v) {
     return v > 255u ? (uint8_t)255 : (uint8_t)v;
 }
 
-static bool has_op(const mf_metacard *k, mf_opcode op) {
+uint16_t mf_cap16(unsigned v) {
+    return v > 65535u ? (uint16_t)65535 : (uint16_t)v;
+}
+
+bool mf_has_op(const mf_metacard *k, mf_opcode op) {
     return (k->ops & (uint16_t)(1u << op)) != 0;
 }
 
@@ -118,8 +123,8 @@ static bool has_op(const mf_metacard *k, mf_opcode op) {
  *
  * That distinction is the only thing separating a Guildgate from a bounce land
  * in the metacard, and collapsing it would make every dual a two-mana source. */
-static void tap_for_mana(mf_mana *m, const mf_metacard *k) {
-    if (has_op(k, MF_OP_TAP_FOR_MANA_CHOICE)) {
+void mf_tap_for_mana(mf_mana *m, const mf_metacard *k) {
+    if (mf_has_op(k, MF_OP_TAP_FOR_MANA_CHOICE)) {
         mf_mana_add(m, k->produces, k->produces_max);
         return;
     }
@@ -135,9 +140,9 @@ static void tap_for_mana(mf_mana *m, const mf_metacard *k) {
     }
 }
 
-static bool produces_mana(const mf_metacard *k) {
+bool mf_produces_mana(const mf_metacard *k) {
     return k->produces && k->produces_max &&
-           (has_op(k, MF_OP_TAP_FOR_MANA) || has_op(k, MF_OP_TAP_FOR_MANA_CHOICE));
+           (mf_has_op(k, MF_OP_TAP_FOR_MANA) || mf_has_op(k, MF_OP_TAP_FOR_MANA_CHOICE));
 }
 
 /* What one permanent adds *right now*. A creature that arrived this turn cannot
@@ -150,10 +155,10 @@ static bool produces_mana(const mf_metacard *k) {
    the pool was collected once before casting began. */
 static void tap_if_ready(const mf_deck *d, const mf_board *b, uint8_t i, mf_mana *m) {
     const mf_metacard *k = &d->key[b->card[i]];
-    if (!produces_mana(k)) return;
+    if (!mf_produces_mana(k)) return;
     if (b->flags[i] & MF_PERM_TAPPED) return;
     if ((k->types & MF_TYPE_CREATURE) && (b->flags[i] & MF_PERM_SICK)) return;
-    tap_for_mana(m, k);
+    mf_tap_for_mana(m, k);
 }
 
 void mf_board_mana(const mf_deck *d, const mf_board *b, bool ready_only, mf_mana *m) {
@@ -163,14 +168,14 @@ void mf_board_mana(const mf_deck *d, const mf_board *b, bool ready_only, mf_mana
             continue;
         }
         const mf_metacard *k = &d->key[b->card[i]];
-        if (produces_mana(k)) tap_for_mana(m, k);
+        if (mf_produces_mana(k)) mf_tap_for_mana(m, k);
     }
 }
 
 void mf_board_enters(const mf_deck *d, mf_board *b, uint8_t card, bool forced_tapped) {
     const mf_metacard *k = &d->key[card];
     uint8_t f = MF_PERM_SICK;
-    if (forced_tapped || has_op(k, MF_OP_ENTERS_TAPPED)) f |= MF_PERM_TAPPED;
+    if (forced_tapped || mf_has_op(k, MF_OP_ENTERS_TAPPED)) f |= MF_PERM_TAPPED;
     b->card[b->count] = card;
     b->flags[b->count] = f;
     b->count++;
@@ -180,7 +185,7 @@ void mf_board_untap(mf_board *b) {
     for (uint8_t i = 0; i < b->count; i++) b->flags[i] = 0;
 }
 
-static void from_hand(mf_opening *o, uint8_t at) {
+void mf_from_hand(mf_opening *o, uint8_t at) {
     for (uint8_t i = at; i + 1 < o->hand_size; i++) o->hand[i] = o->hand[i + 1];
     o->hand_size--;
 }
@@ -190,18 +195,18 @@ static void from_hand(mf_opening *o, uint8_t at) {
    by how much, so this assumes one. Sprint 1.3 counted such a clause as
    modelled for G1, which is true of the opcode and not of the number; the
    retro carries it. */
-static uint8_t discount(const mf_deck *d, const mf_board *b) {
+uint8_t mf_discount(const mf_deck *d, const mf_board *b) {
     unsigned n = 0;
     for (uint8_t i = 0; i < b->count; i++) {
-        if (has_op(&d->key[b->card[i]], MF_OP_COST_LESS)) n++;
+        if (mf_has_op(&d->key[b->card[i]], MF_OP_COST_LESS)) n++;
     }
-    return cap8(n);
+    return mf_cap8(n);
 }
 
 /* The first land still in the library, for a fetch. A real search picks the
    best one; this picks an arbitrary one, which is a policy gap 2.3 can close
    and G3 should measure rather than a modelling limit. */
-static bool take_library_land(const mf_deck *d, mf_opening *o, uint8_t *out) {
+bool mf_take_library_land(const mf_deck *d, mf_opening *o, uint8_t *out) {
     for (uint8_t i = o->drawn; i < MF_DECK_LIBRARY - o->bottomed; i++) {
         if (d->key[o->order[i]].types & MF_TYPE_LAND) {
             *out = o->order[i];
@@ -225,14 +230,14 @@ static bool take_library_land(const mf_deck *d, mf_opening *o, uint8_t *out) {
    because it taps for mana; a card whose ramp is conditional is not. That is
    the weaker signal the 2.1 retro recorded, and it bounds how role-aware a
    role-aware policy can be. */
-static bool is_ramp(const mf_metacard *k) {
-    return produces_mana(k) || has_op(k, MF_OP_FETCH_LAND);
+bool mf_is_ramp(const mf_metacard *k) {
+    return mf_produces_mana(k) || mf_has_op(k, MF_OP_FETCH_LAND);
 }
 
-static bool better_cast(mf_cast_rule rule, const mf_metacard *k, unsigned cost, bool best_ramp,
+bool mf_better_cast(mf_cast_rule rule, const mf_metacard *k, unsigned cost, bool best_ramp,
                         unsigned best_cost) {
     if (rule == MF_CAST_RAMP_FIRST) {
-        bool ramp = is_ramp(k);
+        bool ramp = mf_is_ramp(k);
         if (ramp != best_ramp) return ramp;
         return cost < best_cost; /* among equals, curve out */
     }
@@ -255,10 +260,10 @@ static bool extra_mana_buys_something(const mf_deck *d, const mf_board *b, const
     mf_mana without = {0};
     mf_board_mana(d, b, true, &without);
     mf_mana with = without;
-    if (produces_mana(land)) tap_for_mana(&with, land);
+    if (mf_produces_mana(land)) mf_tap_for_mana(&with, land);
     if (with.total == without.total) return false;
 
-    uint8_t disc = discount(d, b);
+    uint8_t disc = mf_discount(d, b);
     for (uint8_t i = 0; i < o->hand_size; i++) {
         const mf_metacard *k = &d->key[o->hand[i]];
         /* Lands are played, never cast — the same filter the cast loop uses.
@@ -281,7 +286,7 @@ static bool choose_land(const mf_deck *d, const mf_turn_policy *p, const mf_boar
     for (uint8_t i = 0; i < o->hand_size; i++) {
         const mf_metacard *k = &d->key[o->hand[i]];
         if (!(k->types & MF_TYPE_LAND)) continue;
-        bool tapped = has_op(k, MF_OP_ENTERS_TAPPED);
+        bool tapped = mf_has_op(k, MF_OP_ENTERS_TAPPED);
         bool preferred;
         switch (p->lands) {
             case MF_LAND_TAPPED_FIRST: preferred = tapped; break;
@@ -374,22 +379,35 @@ uint64_t mf_phase_key(const mf_phase_state *s) {
 
 void mf_phase_play(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
                    const mf_opening *start, mf_phase_state *out) {
+    mf_live live;
+    mf_phase_play_live(d, p, game, start, out, &live);
+}
+
+void mf_phase_play_live(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
+                        const mf_opening *start, mf_phase_state *out, mf_live *live) {
     memset(out, 0, sizeof *out);
     out->turns = p->turns;
     out->on_play = mf_phase_on_play(game);
 
-    mf_opening o = *start;
-    out->mulligans = o.mulligans;
+    /* The live state is where the game is played, not a copy taken at the end.
+       Two copies would be two things to keep in step, and the one that drifts
+       is always the one nothing reads until a later phase. */
+    memset(live, 0, sizeof *live);
+    live->lib = *start;
+    live->turns = p->turns;
+    mf_opening *o = &live->lib;
+    mf_board *b = &live->board;
 
-    mf_board b = {0};
+    out->mulligans = o->mulligans;
+
     bool commander_left = true;
     unsigned spent = 0, wasted = 0;
 
     for (uint8_t turn = 1; turn <= p->turns; turn++) {
-        mf_board_untap(&b);
+        mf_board_untap(b);
 
-        if ((turn > 1 || !out->on_play) && o.drawn < MF_DECK_LIBRARY - o.bottomed) {
-            mf_opening_draw(&o, 1);
+        if ((turn > 1 || !out->on_play) && o->drawn < MF_DECK_LIBRARY - o->bottomed) {
+            mf_opening_draw(o, 1);
         }
 
         /* The land drop, before casting: a land played now can pay for what
@@ -397,22 +415,22 @@ void mf_phase_play(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
            is the policy's question — the tapland's cost is a turn of tempo,
            and that turn is cheapest when there was nothing to cast anyway. */
         uint8_t chosen;
-        bool played = choose_land(d, p, &b, &o, &chosen);
+        bool played = choose_land(d, p, b, o, &chosen);
         if (played) {
-            mf_board_enters(d, &b, o.hand[chosen], false);
-            from_hand(&o, chosen);
+            mf_board_enters(d, b, o->hand[chosen], false);
+            mf_from_hand(o, chosen);
         } else {
             out->missed_drops++;
         }
 
         mf_mana m = {0};
-        mf_board_mana(d, &b, true, &m);
+        mf_board_mana(d, b, true, &m);
 
         /* Greedy: keep casting the best castable thing until nothing is. Each
            pass removes a card from hand or the commander from the zone, and
            draws are bounded by the library, so it terminates. */
         for (;;) {
-            uint8_t disc = discount(d, &b);
+            uint8_t disc = mf_discount(d, b);
             int best = -1;
             unsigned best_cost = 0;
             bool best_ramp = false;
@@ -420,59 +438,62 @@ void mf_phase_play(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
                is always available and so unlike every other card can be counted
                on. One loop over both, filtered identically: a land is played
                and never cast, wherever it happens to be sitting. */
-            for (uint8_t i = 0; i <= o.hand_size; i++) {
-                bool is_commander = i == o.hand_size;
+            for (uint8_t i = 0; i <= o->hand_size; i++) {
+                bool is_commander = i == o->hand_size;
                 if (is_commander && !commander_left) continue;
-                const mf_metacard *k = &d->key[is_commander ? MF_DECK_COMMANDER : o.hand[i]];
+                const mf_metacard *k = &d->key[is_commander ? MF_DECK_COMMANDER : o->hand[i]];
                 if (k->types & MF_TYPE_LAND) continue;
                 if (!mf_mana_can_pay(&m, k, disc)) continue;
                 unsigned c = mf_mana_cost(k, disc);
-                if (best < 0 || better_cast(p->casts, k, c, best_ramp, best_cost)) {
+                if (best < 0 || mf_better_cast(p->casts, k, c, best_ramp, best_cost)) {
                     best = i;
                     best_cost = c;
-                    best_ramp = is_ramp(k);
+                    best_ramp = mf_is_ramp(k);
                 }
             }
             if (best < 0) break;
 
-            bool best_is_commander = best == (int)o.hand_size;
-            uint8_t card = best_is_commander ? MF_DECK_COMMANDER : o.hand[best];
+            bool best_is_commander = best == (int)o->hand_size;
+            uint8_t card = best_is_commander ? MF_DECK_COMMANDER : o->hand[best];
             const mf_metacard *k = &d->key[card];
             mf_mana_spend(&m, k, disc);
             spent += best_cost;
             out->spells++;
+            /* Printed cost, not the discounted one: a reducer is an efficiency
+               the deck earned rather than a smaller thing to have done (3.1 D2). */
+            live->deployed = mf_cap16(live->deployed + k->cmc);
             if (best_is_commander) {
                 commander_left = false;
                 out->commander_cast = true;
             } else {
-                from_hand(&o, (uint8_t)best);
+                mf_from_hand(o, (uint8_t)best);
             }
 
             /* Resolution. A ritual's mana arrives after its own cost is paid,
                which is the only ordering that makes it a ritual rather than a
                discount. */
-            if (has_op(k, MF_OP_ADD_MANA) || has_op(k, MF_OP_ADD_MANA_CHOICE)) {
+            if (mf_has_op(k, MF_OP_ADD_MANA) || mf_has_op(k, MF_OP_ADD_MANA_CHOICE)) {
                 if (k->produces && k->produces_max) mf_mana_add(&m, k->produces, k->produces_max);
             }
-            if (has_op(k, MF_OP_DRAW) && o.drawn < MF_DECK_LIBRARY - o.bottomed) {
+            if (mf_has_op(k, MF_OP_DRAW) && o->drawn < MF_DECK_LIBRARY - o->bottomed) {
                 /* One card. The count is not in the metacard either — see
                    `discount` above; the same gap, the same retro entry. */
-                mf_opening_draw(&o, 1);
+                mf_opening_draw(o, 1);
             }
-            if (has_op(k, MF_OP_FETCH_LAND)) {
+            if (mf_has_op(k, MF_OP_FETCH_LAND)) {
                 uint8_t land;
-                if (take_library_land(d, &o, &land)) {
+                if (mf_take_library_land(d, o, &land)) {
                     /* Tapped, because Rampant Growth, Cultivate, Farseek and
                        nearly every printed equivalent say so — and the turn
                        that costs is what this phase exists to measure. */
-                    mf_board_enters(d, &b, land, true);
-                    tap_if_ready(d, &b, (uint8_t)(b.count - 1), &m);
+                    mf_board_enters(d, b, land, true);
+                    tap_if_ready(d, b, (uint8_t)(b->count - 1), &m);
                 }
             }
             if (k->types & (MF_TYPE_CREATURE | MF_TYPE_ARTIFACT | MF_TYPE_ENCHANTMENT |
                             MF_TYPE_PLANESWALKER | MF_TYPE_BATTLE)) {
-                mf_board_enters(d, &b, card, false);
-                tap_if_ready(d, &b, (uint8_t)(b.count - 1), &m);
+                mf_board_enters(d, b, card, false);
+                tap_if_ready(d, b, (uint8_t)(b->count - 1), &m);
             }
         }
         wasted += mf_mana_left(&m);
@@ -482,15 +503,18 @@ void mf_phase_play(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
        what the deck can actually do on turn five — which is the question §3
        asks. */
     mf_mana ready = {0};
-    mf_board_mana(d, &b, false, &ready);
-    out->mana = cap8(ready.total);
+    mf_board_mana(d, b, false, &ready);
+    out->mana = mf_cap8(ready.total);
     out->colours = mf_mana_colours(&ready);
 
-    for (uint8_t i = 0; i < b.count; i++) {
-        if (d->key[b.card[i]].types & MF_TYPE_LAND) out->lands++;
+    for (uint8_t i = 0; i < b->count; i++) {
+        if (d->key[b->card[i]].types & MF_TYPE_LAND) out->lands++;
         else out->permanents++;
     }
-    out->hand = o.hand_size;
-    out->mana_spent = cap8(spent);
-    out->mana_wasted = cap8(wasted);
+    out->hand = o->hand_size;
+    out->mana_spent = mf_cap8(spent);
+    out->mana_wasted = mf_cap8(wasted);
+    live->commander_cast = out->commander_cast;
+    live->spells = out->spells;
+    live->missed_drops = out->missed_drops;
 }

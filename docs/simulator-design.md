@@ -119,6 +119,44 @@ simulation is nearly free.
 From turn 5 on, state is dominated by totals rather than order and the law of large numbers has
 kicked in. Aggregate there.
 
+*(Amended sprint 3.1, when phases 5+ were built and this boundary was measured for the first time.)*
+
+**The claim holds, and the statistic matters.** The exact model is not restricted to four turns —
+this section stops it there for cost, and the turn count is a parameter — so both models can be run
+to turn twelve and compared. Measured as *absolute* error per turn the aggregation error rises with
+the horizon and this section looks refuted; measured as **relative** error, which is what "dominated"
+means since dominance is a proportion, it falls monotonically on every deck tried. The first attempt
+used the absolute figure and was refuting a reading nobody held.
+
+| Relative aggregation error | 4 turns | 7 turns | 12 turns |
+| --- | ---: | ---: | ---: |
+| Low curve, no rocks | −17.4% | −2.9% | **+0.1%** |
+| High curve | +38.7% | +32.6% | **+22.4%** |
+| Taplands | +79.3% | +43.7% | **+12.4%** |
+| Artifact ramp | −56.2% | −29.9% | **−10.4%** |
+
+**But the error is deck-differential, and that is a caveat on everything built on top.** A uniform
+bias cancels in a ranking; this one does not. Two approximations pull opposite ways — a fungible
+budget flatters decks that cannot spend on curve, and deferring a deployed rock's mana to the next
+phase penalises artifact ramp — and a deck with neither lands within 0.1% of exact, which is the
+confirmation that these two are the whole of it. **G4 must be read knowing the objective favours
+expensive decks and penalises artifact ramp by 10–20%.**
+
+**The execution horizon is turn 12**, and it needed an argument because this section leaves it open
+("8+"). A solo model has **no opponent and therefore no clock**, so every additional turn only adds
+mana and cards; past some point every deck deploys its whole hand and the score converges on how
+much of the library was drawn, which is a property of the shuffle rather than of the deck. The
+horizon has to stop while the mana constraint still binds.
+
+**Aggregate means the cards are real and the turn they arrive on is not.** The phase draws exactly
+what the shuffle dealt — which keeps it a sample from the same distribution and keeps §7.8's common
+random numbers intact — and then treats the whole phase as one mana budget and one pool of castable
+cards. Two constraints survive: colour, asked of the mana base rather than of a turn, and a per-turn
+ceiling, since mana is not *saved* between turns. **A permanent mana source deployed in a phase pays
+into the next phase; a one-shot pays into its own** — tapping needs a turn an aggregate phase does
+not have. The same rule is why a tapland costs nothing from turn 5 on, which is exactly why this
+section keeps the taplands in the half of the game where they can be seen.
+
 ### Gate, do not score
 
 "A deck that does poorly in the opening is unlikely to win" is true as a **feasibility filter** and
@@ -198,6 +236,29 @@ verify that end-of-opening score correlates with end-of-game outcome *within the
 does not, the phase evaluator is measuring the wrong thing, and that is discoverable in an afternoon
 rather than after the GA has run.
 
+*(Amended sprint 3.1, when phases 5+ were built.)* **The opening's vector is not a sufficient initial
+condition for what follows, and it does not grow to become one.** It says how much mana there is and
+*not what is left to spend it on* — two games can agree on all thirteen bytes and hold different
+cards, which sprint 3.1 exhibits rather than asserts. So the handoff is the **live game** (board,
+hand, library cursor) and the scored vector stays exactly what it was: one object is read by a
+fitness function, the other by the next phase, and they want different things.
+
+A full solo run produces a **second** vector of 26 bytes — the opening's thirteen unchanged, plus the
+run's totals — on the same terms: integers, no padding, statically asserted, with the pad byte
+explicit rather than left to the compiler.
+
+**The score is the total mana value of every spell cast**, commander included, and it is *printed*
+cost rather than mana paid, because a cost reducer is an efficiency the deck earned. **Lands score
+zero**, and that is load-bearing rather than incidental: §13.3 requires the 60-land deck to rank
+badly, and if board presence scored it would rank *well* — it makes every land drop of every game.
+
+**It has a known defect, disclosed rather than patched.** "Mana value deployed" is close to
+`expensive-first`'s own objective — *"spend the most mana available"* — and a fitness function that
+is one competitor's objective cannot rank competitors. Fixing the metric in the same sprint whose
+gate it failed is the move pre-registration forbids, so it is E3's next sprint that chooses the
+replacement. Recorded here because the flaw was available a priori and was missed: **pre-registering
+a metric protects against fitting it to the answer, and not against picking a degenerate one.**
+
 *(Amended sprint 2.2, when the vector was built.)* It is thirteen bytes, every field an integer, with
 **no padding** — asserted statically, because the struct is folded into a run digest byte by byte and
 a hole would put whatever the stack last held into it. The fields are `turns`, `lands`, `mana`,
@@ -256,6 +317,37 @@ on the deck built to punish it: a perfect qualitative separation, and small.
 **So a scalar gap is the wrong summary.** Report the components. A deck is demanding because
 *sequencing* punishes naive play, not because a careful mulligan helps — the careful mulligan helps
 every deck about equally, which is a fact about the policy rather than about the deck.
+
+*(Amended sprint 3.1, when G3 was re-measured against a continuous objective and failed.)*
+
+**The gap decays as the horizon grows, and that is a fact about the model rather than about skill.**
+2.3 deferred G3 with the instruction to re-measure against a continuous objective; the objective was
+built, and the measurement says the instruction rested on a false premise. Measured on the land rule
+alone — the component above that actually discriminates:
+
+| Turns simulated | 4 | 6 | 8 | 12 | 20 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Forgiving deck | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| Demanding deck | **1.308** | 1.248 | 0.825 | **0.127** | **0.001** |
+
+Perfect qualitative separation at every horizon, and a **19× decay between turn 4 and turn 12**.
+Consistent across six seeds. The reason is structural:
+
+> The careful policy's whole advantage is **tempo**, and a null-opponent model has **no clock**.
+> Being a turn behind costs nothing given enough turns.
+
+It generalises past sequencing. Against a 12-turn score the *mulligan* component reverses sign
+(−0.42 forgiving, −0.92 demanding) because a mulligan costs cards and the early game it buys is
+priced at zero. So:
+
+> **Every skilled decision in this ladder trades long-run resources for short-run position, and a
+> null-opponent model with a fixed horizon prices position at zero.**
+
+**This section is not unfounded and is not redesigned.** The separation is exactly zero where there
+is nothing to sequence and positive where there is, at every horizon tried — the ladder does what it
+claims. What cannot be done is measuring it against a *solo* objective at all. **G3 belongs in E5**,
+where an opponent supplies the clock, and it is the same amendment that resolves `hold-interaction`
+below.
 
 **Two of the six policies are not expressible in the opening phase**, and the bracket tables above
 should be read with that in mind: `hold-interaction` is meaningless with no opponent to hold mana up
@@ -1362,6 +1454,29 @@ triggers as inert raised coverage while modelling nothing new — and the headli
 **0.9325** because corrections in the other direction happened to be slightly larger. **So the
 inert share is quoted beside the fraction, always**, and a rise in G1 that comes with a rise in the
 inert share is not an improvement.
+
+*(Amended sprint 3.1, when E3 widened the phases and G1 was re-measured.)* **G1 = 0.9301, inert
+90.33%**, superseding 0.9325 / 90.32% in the open rather than replacing it.
+
+**Three retros predicted this fall and all three predicted it for the wrong reason.** They expected
+more clause *kinds* to become reachable. They do not: aggregate phases with a **null opponent**
+observe more *turns*, not more kinds of event — nothing dies, attacks, or leaves the battlefield —
+and every reachability rule was audited individually and none changed. The inert share went
+marginally *up*. **G1 falls when E5 supplies an opponent, not here.**
+
+What moved it was a defect the widening exposed. `"At the beginning of your upkeep, draw a card"`
+was classified `MF_OP_DRAW`, an opcode meaning *draw once, when cast* — so a card that draws every
+turn was counted as fully modelled. That adds a **fourth step**, deliberately separate from step 3
+because the reason differs:
+
+3b. **Recurrence.** A repeating trigger is **unmatched**, not because its count is unknown — it is
+    exactly the turns the permanent has been out, which the model knows at runtime — but because
+    `ops` is a bitmask with **no repetition marker**, so there is nothing to write it down with.
+    Reachability still runs first: a repeating trigger on an unreachable event stays inert, or the
+    narrowness of the phases would be charged twice.
+
+88 clauses moved to unmatched and 6 to inert. Widening the horizon is what made it worth finding —
+the same clause fires four times in the old model, twelve in the new one, and once in either.
 
 ---
 

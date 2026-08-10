@@ -39,7 +39,35 @@ static bool has(const char *s, size_t len, const char *needle) {
 static bool trigger_is_unreachable(const char *s, size_t n) {
     return has(s, n, " dies") || has(s, n, " attacks") || has(s, n, " blocks") ||
            has(s, n, "combat damage") || has(s, n, "is put into a graveyard") ||
-           has(s, n, "leaves the battlefield");
+           has(s, n, "leaves the battlefield") ||
+           /* No combat phase is run, in the opening or in the aggregate phases
+              past it, so a trigger hung on one never fires. Added in 3.1 T6
+              beside the recurrence rule below, and it has to run *first*:
+              charging the opcode set for a combat trigger would count the
+              narrowness of the phases twice, once as inert and again as
+              unmodelled text. */
+           has(s, n, "beginning of combat");
+}
+
+/* Step 3b — recurrence, and it is a *different* reason from the one below.
+ *
+ * "At the beginning of your upkeep, draw a card" is perfectly reachable: the
+ * model runs turns, and the trigger would fire on every one of them. Nothing
+ * about its count is unknown either — it is exactly the number of turns the
+ * permanent has been out, which the model knows at runtime.
+ *
+ * What is missing is a way to *write it down*. `ops` is a bitmask of effects
+ * with no repetition marker, so `MF_OP_DRAW` means "draw when this is cast" and
+ * there is no opcode meaning "draw every turn". A clause reaching `MF_OP_DRAW`
+ * was therefore counted as modelled by an opcode that does a twelfth of what it
+ * says.
+ *
+ * That is the 1.2.1 finding in a new place — a fixed opcode standing in for a
+ * variable effect is a wrong answer rather than an approximation — and it is
+ * **widening the phases that made it worth finding**: the same clause fires
+ * four times in the old model, twelve in this one, and once in either. */
+static bool fires_every_turn(const char *s, size_t n) {
+    return has(s, n, "at the beginning of");
 }
 
 /* Step 3 — expressibility. The amount or the condition depends on game state
@@ -140,7 +168,10 @@ mf_opcode mf_opcode_classify(const char *clause, size_t len) {
     mf_opcode op = shape_of(clause, len);
     if (op == MF_OP_INERT || op == MF_OP_UNMATCHED) return op;
 
-    return depends_on_unheld_state(clause, len) ? MF_OP_UNMATCHED : op;
+    if (depends_on_unheld_state(clause, len) || fires_every_turn(clause, len)) {
+        return MF_OP_UNMATCHED;
+    }
+    return op;
 }
 
 /* Reminder text restates rules rather than adding them, so every card with a

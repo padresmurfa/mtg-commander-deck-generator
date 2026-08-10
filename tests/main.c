@@ -26,6 +26,7 @@ int main(void) {
     run_turn_tests();
     run_analytic_tests();
     run_gap_tests();
+    run_solo_tests();
     run_evaluate_tests();
     run_config_tests();
     run_artifact_tests();

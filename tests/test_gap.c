@@ -1,6 +1,7 @@
 #include "harness.h"
 
 #include "mf/gap.h"
+#include "mf/solo.h"
 
 #include <string.h>
 
@@ -360,6 +361,127 @@ MF_TEST(the_verdict_names_are_the_three_the_gate_can_return) {
     MF_EQ_STR(mf_g3_verdict_name((mf_g3_verdict)99), "fail");
 }
 
+/* ---- G3 re-measured against the continuous score (sprint 3.1 T5) --------- */
+
+MF_TEST(the_score_gate_cannot_pass_without_measuring_anything) {
+    /* The 2.1 defect, in its third incarnation: a gate that reports a verdict it
+       never observed. Zero games and a single block both have to fail. */
+    mf_deck f, dm;
+    forgiving_deck(&f);
+    demanding_deck(&dm);
+    mf_turn_policy lo = mf_policy_rung(MF_RUNG_GREEDY);
+    mf_turn_policy hi = mf_policy_rung(MF_RUNG_SEQUENCING_AWARE);
+
+    mf_g3_score z;
+    mf_g3_score_measure(&f, &dm, &lo, &hi, 1, 0, 8, 4, &z);
+    MF_EQ_INT(z.verdict, MF_G3_FAIL);
+    MF_EQ_DBL(z.sigma, 0.0);
+
+    mf_g3_score one;
+    mf_g3_score_measure(&f, &dm, &lo, &hi, 1, 40, 1, 4, &one);
+    MF_EQ_INT(one.verdict, MF_G3_FAIL);
+    MF_EQ_DBL(one.sigma, 0.0);
+}
+
+MF_TEST(a_policy_scored_against_itself_has_no_gap) {
+    /* Common random numbers, checked the only way that cannot be fooled: the
+       same policy on both sides must give exactly zero, not approximately. */
+    mf_deck dm;
+    demanding_deck(&dm);
+    mf_turn_policy p = mf_policy_rung(MF_RUNG_SEQUENCING_AWARE);
+    mf_g3_score s;
+    mf_g3_score_measure(&dm, &dm, &p, &p, 7, 40, 4, 4, &s);
+    MF_EQ_DBL(s.forgiving.gap, 0.0);
+    MF_EQ_DBL(s.demanding.gap, 0.0);
+    MF_EQ_DBL(s.separation, 0.0);
+    MF_EQ_INT(s.verdict, MF_G3_FAIL);
+}
+
+MF_TEST(the_score_gate_can_pass_when_the_signal_is_there_to_see) {
+    /* A gate that can never return a pass is as broken as one that can never
+       fail (2.3). This is a test of the *machinery*, not a gate result: the
+       horizon is short, because sprint 3.1 measured that the sequencing signal
+       decays as the horizon grows and the gate itself is run at the design's
+       horizon and nowhere else.
+
+       Choosing this horizon for the real verdict would be picking the row after
+       seeing it, which is exactly what 2.3 disclosed about its own threshold. */
+    mf_deck f, dm;
+    forgiving_deck(&f);
+    demanding_deck(&dm);
+    mf_turn_policy careful = mf_policy_rung(MF_RUNG_SEQUENCING_AWARE);
+    mf_turn_policy naive = careful;
+    naive.lands = mf_policy_rung(MF_RUNG_GREEDY).lands;
+
+    mf_g3_score s;
+    mf_g3_score_measure(&f, &dm, &naive, &careful, 20260809, 120, 8, 0, &s);
+    MF_CHECK(s.forgiving.gap == 0.0);  /* nothing to sequence */
+    MF_CHECK(s.demanding.gap > 0.0);
+    MF_CHECK(s.sigma > MF_G3_SIGMA);
+    MF_EQ_DBL(s.ratio, MF_G3_RATIO_UNBOUNDED);
+    MF_EQ_INT(s.verdict, MF_G3_PASS);
+}
+
+MF_TEST(the_sequencing_signal_decays_as_the_horizon_grows) {
+    /* **The sprint's finding, and the reason G3 fails against the solo score.**
+       The careful rule buys tempo, and a model with no opponent has no clock —
+       being a turn behind costs nothing given enough turns. So every turn added
+       past the opening washes more of the signal out.
+
+       Measured on the land rule alone, which is the component 2.3 showed
+       actually discriminates. The forgiving deck stays at exactly zero at every
+       horizon, so what decays is the signal and not the separation. */
+    mf_deck f, dm;
+    forgiving_deck(&f);
+    demanding_deck(&dm);
+    mf_turn_policy careful = mf_policy_rung(MF_RUNG_SEQUENCING_AWARE);
+    mf_turn_policy naive = careful;
+    naive.lands = mf_policy_rung(MF_RUNG_GREEDY).lands;
+
+    const uint8_t horizon[] = {0, 4, 16};
+    double gap[3];
+    for (unsigned i = 0; i < 3; i++) {
+        unsigned long ns = 0, cs = 0;
+        for (unsigned g = 0; g < 400; g++) {
+            mf_solo_state a, b;
+            mf_solo_run_turns(&dm, &naive, 20260809, g, horizon[i], &a);
+            mf_solo_run_turns(&dm, &careful, 20260809, g, horizon[i], &b);
+            ns += mf_solo_score(&a);
+            cs += mf_solo_score(&b);
+            /* And on the forgiving deck the two rules are the same rule, at
+               every horizon — there is no tapland to decide about. */
+            mf_solo_state c, e;
+            mf_solo_run_turns(&f, &naive, 20260809, g, horizon[i], &c);
+            mf_solo_run_turns(&f, &careful, 20260809, g, horizon[i], &e);
+            MF_CHECK(mf_solo_score(&c) == mf_solo_score(&e));
+        }
+        gap[i] = ((double)cs - (double)ns) / 400.0;
+    }
+    MF_CHECK(gap[0] > 0.0);
+    MF_CHECK(gap[1] < gap[0]);
+    MF_CHECK(gap[2] < gap[1]);
+    /* By the far horizon it is gone, not merely smaller. */
+    MF_CHECK(gap[2] < gap[0] / 10.0);
+}
+
+MF_TEST(the_score_gate_reports_an_opposite_sign_gap_as_no_effect) {
+    /* Careful play deploying *less* is not a small positive effect, and must not
+       read as one. It is the measured result at the design's horizon, so the
+       arithmetic that reports it gets its own test. */
+    mf_deck f, dm;
+    forgiving_deck(&f);
+    demanding_deck(&dm);
+    mf_turn_policy lo = mf_policy_rung(MF_RUNG_GREEDY);
+    mf_turn_policy hi = mf_policy_rung(MF_RUNG_SEQUENCING_AWARE);
+    mf_g3_score s;
+    mf_g3_score_measure(&f, &dm, &lo, &hi, 20260809, 60, 4,
+                        MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, &s);
+    MF_CHECK(s.forgiving.gap < 0.0);
+    MF_CHECK(s.demanding.gap < 0.0);
+    MF_EQ_DBL(s.ratio, 0.0);
+    MF_EQ_INT(s.verdict, MF_G3_FAIL);
+}
+
 void run_gap_tests(void) {
     MF_RUN(the_two_ends_of_the_ladder_are_different_objects);
     MF_RUN(the_pair_sees_the_same_shuffles);
@@ -376,4 +498,9 @@ void run_gap_tests(void) {
     MF_RUN(the_gate_can_pass_when_the_comparison_isolates_sequencing);
     MF_RUN(the_block_count_is_capped_rather_than_overrunning_the_stack);
     MF_RUN(the_verdict_names_are_the_three_the_gate_can_return);
+    MF_RUN(the_score_gate_cannot_pass_without_measuring_anything);
+    MF_RUN(a_policy_scored_against_itself_has_no_gap);
+    MF_RUN(the_score_gate_can_pass_when_the_signal_is_there_to_see);
+    MF_RUN(the_sequencing_signal_decays_as_the_horizon_grows);
+    MF_RUN(the_score_gate_reports_an_opposite_sign_gap_as_no_effect);
 }

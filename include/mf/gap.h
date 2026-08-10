@@ -130,4 +130,51 @@ void mf_g3_measure(const mf_deck *forgiving, const mf_deck *demanding, const mf_
                    const mf_turn_policy *careful, const mf_phase_gate *gate, uint64_t seed,
                    unsigned games_per_block, unsigned blocks, mf_g3 *out);
 
+/* ---- G3 re-measured against the continuous score (sprint 3.1 T5) ---------
+ *
+ * 2.3 deferred G3 to E3 for a stated reason: the primary metric was §3's
+ * feasibility gate, whose bar §3 deliberately sets *low*, so it had almost no
+ * room to move — 0.86 to 0.94 on both decks, separating them by 1.14× while the
+ * finer counters separated them at 17.72σ. The signal was real and the
+ * instrument was too coarse.
+ *
+ * `mf/solo` now produces a continuous objective, so the same comparison can be
+ * run against a metric with room in it. **Both thresholds are unchanged from
+ * 2.3** — 5σ and a 2× effect size, and the effect size is what stops
+ * significance being free at scale. Same bar, better instrument; loosening the
+ * bar at the same time as improving the instrument would make the result
+ * unreadable.
+ *
+ * **Recorded beside the 2.3 numbers and never over them.** `mf_g3_measure` is
+ * untouched and still measures the gate, so the pair can be compared. */
+
+typedef struct {
+    unsigned games;
+    double naive_score, careful_score; /* mean mana value deployed per game */
+    double gap;                        /* careful − naive */
+} mf_score_gap;
+
+typedef struct {
+    mf_score_gap forgiving, demanding;
+    double separation; /* gap(demanding) − gap(forgiving) */
+    double noise_sd;
+    double sigma;
+    double ratio; /* demanding gap / forgiving gap */
+    mf_g3_verdict verdict;
+} mf_g3_score;
+
+/* No secondary metric, and therefore **no defer branch**: defer existed in 2.3
+   to distinguish "no signal" from "an instrument too coarse to see one", and
+   that distinction was the finding. Having replaced the instrument, a flat
+   result here would be about the signal. Keeping a defer would be keeping an
+   escape hatch after the reason for it was removed. */
+/* `aggregate_turns` is the horizon past the opening. The gate is run at the
+   design's horizon and nothing else; it is a parameter because sprint 3.1 found
+   the gap *decays* with it, and a constant would have hidden that. Choosing the
+   horizon that makes the gate pass would be picking the row after seeing it. */
+void mf_g3_score_measure(const mf_deck *forgiving, const mf_deck *demanding,
+                         const mf_turn_policy *naive, const mf_turn_policy *careful, uint64_t seed,
+                         unsigned games_per_block, unsigned blocks, uint8_t aggregate_turns,
+                         mf_g3_score *out);
+
 #endif
