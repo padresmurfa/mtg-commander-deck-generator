@@ -190,6 +190,10 @@ void mf_solo_run_turns(const mf_deck *d, const mf_turn_policy *p, uint64_t seed,
     out->spells = live.spells;
     out->missed_drops = live.missed_drops;
     out->deployed = live.deployed;
+    /* §3 scores the aggregate phases and gates the opening, so what the opening
+       cast is subtracted rather than never counted: `live.deployed` is what the
+       next phase's board was built out of, and it has to keep accumulating. */
+    out->aggregate_deployed = mf_cap16((unsigned)dev.deployed + exec.deployed);
     for (uint8_t i = 0; i < live.board.count; i++) {
         if (d->key[live.board.card[i]].types & MF_TYPE_LAND) out->lands++;
         else out->permanents++;

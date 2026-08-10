@@ -127,12 +127,22 @@ typedef struct {
     uint8_t spells;      /* over the whole run, opening included */
     uint8_t missed_drops;/* likewise */
     uint8_t reserved;
-    uint16_t deployed;   /* the score (3.1 D2) */
+    uint16_t deployed;   /* over the whole run, opening included (3.1 D2) */
+    /* The same, over the **aggregate phases only** — turns 1–4 excluded.
+     *
+     * §3 is explicit that the opening "contributes zero to fitness beyond
+     * pass/fail", and gives the reason: control decks intend to do nothing
+     * early, so weighting opening strength breeds out every late-game
+     * archetype. 3.1's score summed the whole run and so quietly weighted it.
+     * The field exists rather than the total changing meaning, because 3.1's
+     * G3 measurement is recorded against `mf_solo_score` and a number that
+     * silently moves is worse than one superseded in the open (1.2.1). */
+    uint16_t aggregate_deployed;
     uint16_t mana;       /* producible entering the turn after the run */
     uint16_t wasted;
 } mf_solo_state;
 
-_Static_assert(sizeof(mf_solo_state) == 26, "the solo vector must stay integers with no holes");
+_Static_assert(sizeof(mf_solo_state) == 28, "the solo vector must stay integers with no holes");
 
 /* One solo run: the opening exactly, then development, then execution. */
 void mf_solo_run(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,

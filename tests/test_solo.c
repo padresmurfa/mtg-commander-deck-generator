@@ -505,6 +505,43 @@ MF_TEST(a_solo_run_is_the_opening_exactly_then_two_aggregate_phases) {
     MF_CHECK(s.deployed > 0);
 }
 
+MF_TEST(the_opening_deploys_into_the_run_and_scores_none_of_it) {
+    /* §3, applied literally: the opening "contributes zero to fitness beyond
+       pass/fail", because control decks intend to do nothing early and
+       weighting turns 1–4 breeds them out. 3.1's score summed the whole run,
+       so it weighted them — a drift between the code and the design of record,
+       and the design is what was right.
+
+       A run of zero aggregate turns *is* the opening, which is what makes the
+       split checkable rather than merely asserted. */
+    uint8_t counts[S_COUNT] = {[S_FOREST] = 36, [S_ELVES] = 12, [S_BEAR] = 30, [S_THREE] = 21};
+    mf_deck d;
+    deck_of(&d, counts, S_THREE);
+    mf_turn_policy p = plain();
+
+    for (uint64_t g = 0; g < 32; g++) {
+        mf_solo_state opening_only, full;
+        mf_solo_run_turns(&d, &p, 77, g, 0, &opening_only);
+        mf_solo_run(&d, &p, 77, g, &full);
+        /* A phase that never ran deployed nothing into the score. */
+        MF_EQ_INT(opening_only.aggregate_deployed, 0);
+        /* And what the score leaves out is exactly the opening's own casts. */
+        MF_EQ_INT(full.deployed - full.aggregate_deployed, opening_only.deployed);
+    }
+
+    /* **Liveness before the identity** (the G2 lesson): a deck that cast
+       nothing in its opening would satisfy every line above with zeroes. */
+    unsigned long early = 0, late = 0;
+    for (uint64_t g = 0; g < 200; g++) {
+        mf_solo_state s;
+        mf_solo_run(&d, &p, 77, g, &s);
+        early += (unsigned)(s.deployed - s.aggregate_deployed);
+        late += s.aggregate_deployed;
+    }
+    MF_CHECK(early > 0);
+    MF_CHECK(late > early);
+}
+
 MF_TEST(the_score_is_printed_mana_value_and_not_mana_paid) {
     /* A cost reducer is an efficiency the deck earned, so scoring what was paid
        would score it as having done something smaller (D2).
@@ -589,7 +626,7 @@ MF_TEST(the_solo_vector_is_integers_with_no_holes) {
     /* Folded into a run digest byte by byte, so a hole would carry whatever the
        stack last held into it — the `mf_metacard` precedent, and the reason the
        reserved byte is written down rather than left to the compiler. */
-    MF_EQ_INT(sizeof(mf_solo_state), 26);
+    MF_EQ_INT(sizeof(mf_solo_state), 28);
     mf_solo_state a, b;
     memset(&a, 0xAB, sizeof a);
     memset(&b, 0xCD, sizeof b);
@@ -827,6 +864,7 @@ void run_solo_tests(void) {
     MF_RUN(the_relative_error_falls_with_the_horizon_on_every_deck);
     MF_RUN(the_aggregation_error_is_differential_across_decks);
     MF_RUN(a_solo_run_is_the_opening_exactly_then_two_aggregate_phases);
+    MF_RUN(the_opening_deploys_into_the_run_and_scores_none_of_it);
     MF_RUN(the_score_is_printed_mana_value_and_not_mana_paid);
     MF_RUN(the_known_bad_decks_score_below_a_real_one);
     MF_RUN(the_score_is_continuous_where_the_gate_was_binary);

@@ -108,6 +108,7 @@ void run_reduce_tests(void);
 void run_turn_tests(void);
 void run_gap_tests(void);
 void run_solo_tests(void);
+void run_objective_tests(void);
 void run_evaluate_tests(void);
 void run_jstream_tests(void);
 void run_card_tests(void);
