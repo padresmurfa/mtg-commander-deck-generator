@@ -696,7 +696,55 @@ tasks:
     - >
       Pre-registration protects the threshold and does not make you think of everything: three
       blind spots were named in advance and none of them is why G4 deferred.
-  split: []      # task-split happens at sprint start
+  preregistered_rule:            # committed BEFORE the code that could measure its effect
+    statement: >
+      A card the opcode set cannot represent enters a FIXTURE as the most neutral card of the same
+      cost, type and colour identity the model can express - and never enters the search pool.
+    nonland: same cmc, same pips, same types, NO modelled effects
+    land: >
+      the same, plus a tap for one mana of any colour in its identity. A land's whole modelled
+      contribution is mana; one producing none would break what the substitution exists to preserve,
+      and 563 of 6257 distinct precon cards are lands.
+    why: >
+      Not a new compromise - the one the model already makes, applied one clause further. G1
+      measures 90.33% of clauses as INERT, so the table routinely carries cards whose text it almost
+      entirely ignores; a card excluded outright for one unrepresentable clause is treated MORE
+      harshly than a card whose clauses are all inert.
+    distorts:
+      - {what: substituted nonlands contribute no ramp/draw/tutor, direction: understates}
+      - {what: a substituted land taps unconditionally, direction: overstates}
+      - {what: an unrepresentable COMMANDER becomes a vanilla, direction: understates, share: "19% of precons"}
+    distortion_is_deck_differential: >
+      Like 3.1's aggregation error, and correlated with commander complexity - a bias G4 inherits
+      and cannot correct, so the counts are reported beside rho.
+    where_they_live: >
+      A second table file written by preprocess with the oracle text stripped, so neither the table
+      format nor the search pool changes. mf/precon's own shape: a side table joined at deck-scoring
+      granularity.
+  diagnosis:                     # measured before designing round it (the 1.2.1 lesson)
+    precon_cards_distinct: 6257
+    absent_from_card_set: 0
+    not_commander_legal: 2       # Trade Secrets, Dockside Extortionist - both banned, filter working
+    conclusion: >
+      Everything else missing from the table is missing because mf_opcode_representable said no, and
+      the card set already carries cmc, pips, types and identity for all of them. The blocker was
+      never data acquisition. The table IS the pool (mf_table_write is called with `pool`), so
+      widening it would widen what the GA may choose, which 7.9 forbids.
+  split:
+    - id: T1
+      name: diagnose why cards are missing, then pre-register the substitution rule
+    - id: T2
+      name: the stand-in table - preprocess writes it, and the pool is untouched
+    - id: T3
+      name: resolution through the stand-in, with substitution counts reported
+    - id: T4
+      name: per-deck completeness carried beside G1's clause fraction
+    - id: T5
+      name: re-run G4 with 3.3's thresholds unchanged
+    - id: T6
+      name: G4 written to the run artifact by mfsim validate
+    - id: T7
+      name: retro and amendments
 retros:
   - sprint: "3.3"
     doc: docs/plan/retros/3.3-fixture-validation.md
