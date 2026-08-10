@@ -22,6 +22,7 @@ int main(void) {
     run_skill_tests();
     run_table_tests();
     run_hypergeo_tests();
+    run_spearman_tests();
     run_deck_tests();
     run_turn_tests();
     run_analytic_tests();

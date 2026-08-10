@@ -55,10 +55,15 @@ int mf_t_report(void);
         mf_t_pass++;                                                            \
     } while (0)
 
+/* **Negated, so a NaN fails.** Written the obvious way — `fabs(a - b) > 1e-9`
+   — every comparison involving a NaN is false and `0.0/0.0` passes silently.
+   Sprint 3.3 found a zero-variance guard whose removal left the test green for
+   exactly that reason. `!(diff <= tol)` is true for a NaN, which is what a
+   test asserting a number should say about one. */
 #define MF_EQ_DBL(a, b)                                                     \
     do {                                                                      \
         double a_ = (double)(a), b_ = (double)(b);                            \
-        if (fabs(a_ - b_) > 1e-9) MF_FAILED("%s == %s (%g vs %g)", #a, #b, a_, b_); \
+        if (!(fabs(a_ - b_) <= 1e-9)) MF_FAILED("%s == %s (%g vs %g)", #a, #b, a_, b_); \
         mf_t_pass++;                                                          \
     } while (0)
 
@@ -110,6 +115,7 @@ void run_gap_tests(void);
 void run_solo_tests(void);
 void run_objective_tests(void);
 void run_strata_tests(void);
+void run_spearman_tests(void);
 void run_evaluate_tests(void);
 void run_jstream_tests(void);
 void run_card_tests(void);
