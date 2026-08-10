@@ -641,6 +641,152 @@ MF_TEST(a_deck_with_no_admissible_strategy_has_no_fitness) {
     MF_EQ_DBL(f.fitness, 0.0);
 }
 
+/* ---- §13.3's known-bad decks (T6) ----------------------------------------
+ * "None are close calls. If the simulator shrugs at the 20-land deck it is
+ * wrong, and you know before the GA ever runs."
+ *
+ * A **real** deck to rank them against, so the suite asserts an ordering rather
+ * than a set of magic numbers: 36 lands, a curve from one to five, mono-green.
+ * The bad decks are each bad for one named reason and differ from it in one
+ * respect, which is what makes a failure attributable. */
+
+static void sane_deck(mf_deck *d) {
+    memset(d, 0, sizeof *d);
+    for (unsigned i = 0; i < MF_DECK_CARDS; i++) {
+        d->table_index[i] = i;
+        if (i < 36) land(&d->key[i], MF_MANA_G, false);
+        else if (i < 60) spell(&d->key[i], 2, 1, 1);
+        else if (i < 80) spell(&d->key[i], 3, 2, 1);
+        else spell(&d->key[i], 5, 4, 1);
+    }
+}
+
+/* **Twenty lands.** Mana screw: the spells are the sane deck's and cannot be
+   cast, which is the whole of the difference. */
+static void twenty_land_deck(mf_deck *d) {
+    sane_deck(d);
+    for (unsigned i = 20; i < 36; i++) spell(&d->key[i], 3, 2, 1);
+}
+
+/* **Sixty lands.** Flood, and the case that settled the score's shape before
+   the score existed: if board presence counted, this deck would rank *well*,
+   because it makes every land drop of every game. */
+static void sixty_land_deck(mf_deck *d) {
+    sane_deck(d);
+    for (unsigned i = 36; i < 60; i++) land(&d->key[i], MF_MANA_G, false);
+}
+
+/* **A curve topping at eight with no ramp.** The mana base is the sane deck's
+   and is simply never enough inside the horizon. */
+static void top_heavy_deck(mf_deck *d) {
+    sane_deck(d);
+    for (unsigned i = 36; i < MF_DECK_CARDS; i++) spell(&d->key[i], 8, 7, 1);
+}
+
+/* **Five colours on a deliberately bad mana base.** Every land makes one fixed
+   colour and every spell demands three different ones, so quantity is fine and
+   colour is what refuses the cast — the one failure mode the other three cannot
+   exhibit. */
+static void five_colour_deck(mf_deck *d) {
+    sane_deck(d);
+    static const uint8_t c[5] = {MF_MANA_W, MF_MANA_U, MF_MANA_B, MF_MANA_R, MF_MANA_G};
+    for (unsigned i = 0; i < 36; i++) {
+        land(&d->key[i], c[i % 5], false);
+        d->key[i].ops = (uint16_t)(1u << MF_OP_TAP_FOR_MANA);
+    }
+    for (unsigned i = 36; i < MF_DECK_CARDS; i++) {
+        mf_metacard *k = &d->key[i];
+        memset(k, 0, sizeof *k);
+        k->types = MF_TYPE_CREATURE;
+        k->cmc = 3;
+        k->w = k->u = k->b = 1;
+        k->power = k->toughness = 3;
+    }
+}
+
+MF_TEST(two_of_the_four_known_bad_decks_are_caught) {
+    /* Top-heavy and five-colour, both by a mile and both stopped by the gate as
+       well as by the ranking. These are the two whose failure is about *mana* —
+       never enough of it, or never the right colours — and mana is what a solo
+       model can see. */
+    mf_deck good, heavy, colours;
+    sane_deck(&good);
+    top_heavy_deck(&heavy);
+    five_colour_deck(&colours);
+
+    mf_objective_row_fit ok, h, c;
+    mf_objective_fit(ARENA, &good, MF_RUNG_ALL, 1313, 512, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &ok);
+    mf_objective_fit(ARENA, &heavy, MF_RUNG_ALL, 1313, 512, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &h);
+    mf_objective_fit(ARENA, &colours, MF_RUNG_ALL, 1313, 512, 0, MF_SOLO_TURNS - MF_PHASE_TURNS,
+                     &c);
+    MF_CHECK(ok.feasible);
+    /* §13.3's own standard is "none are close calls". These are not close. */
+    MF_CHECK(h.fitness < ok.fitness * 0.5);
+    MF_CHECK(c.fitness < ok.fitness * 0.5);
+    MF_CHECK(!h.feasible);
+    MF_CHECK(!c.feasible);
+}
+
+MF_TEST(flood_and_screw_are_not_caught_and_the_reason_is_the_clock) {
+    /* **§13.3's requirement is not met, and the failure is pinned rather than
+       tuned away.** "If the simulator shrugs at the 20-land deck it is wrong,
+       and you know before the GA ever runs." It shrugs.
+
+       Sixty lands scores 0.94 of the real deck and passes the feasibility gate
+       *more often than the real deck does* — it makes every land drop of every
+       game. Twenty lands scores 0.81 and clears the gate in two games out of
+       three.
+
+       Both are **tempo** failures. Flooding costs you the turns you spent
+       drawing lands and screw costs you the turns you spent not casting, and a
+       null-opponent model with a fixed horizon has no clock to charge them
+       against: given twelve turns and no opponent, a flooded deck simply casts
+       its few spells later. That is 3.1's finding arriving a third time, after
+       G3 and after the mulligan term of T1's decomposition.
+
+       **Disclosed rather than patched**, on 3.1's precedent — replacing a
+       pre-registered metric inside the sprint that measured it failing is the
+       one move pre-registration forbids. The numbers are asserted so that a
+       later change which fixes this *fails here* and forces the record to be
+       updated rather than quietly improving. */
+    mf_deck good, screw, flood;
+    sane_deck(&good);
+    twenty_land_deck(&screw);
+    sixty_land_deck(&flood);
+
+    mf_objective_row_fit ok, s, f;
+    mf_objective_fit(ARENA, &good, MF_RUNG_ALL, 1313, 512, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &ok);
+    mf_objective_fit(ARENA, &screw, MF_RUNG_ALL, 1313, 512, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &s);
+    mf_objective_fit(ARENA, &flood, MF_RUNG_ALL, 1313, 512, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &f);
+
+    /* Both rank *below* the real deck, so the objective is not blind... */
+    MF_CHECK(s.fitness < ok.fitness);
+    MF_CHECK(f.fitness < ok.fitness);
+    /* ...and nowhere near far enough below to be the "not a close call" §13.3
+       requires. Sixty lands is within a tenth. */
+    MF_CHECK(s.fitness > ok.fitness * 0.7);
+    MF_CHECK(f.fitness > ok.fitness * 0.9);
+    /* And the sharpest statement of it: the flooded deck clears §3's
+       feasibility gate more often than the deck it should lose to. */
+    MF_CHECK(f.pass_rate[f.best] > ok.pass_rate[ok.best]);
+    MF_CHECK(f.feasible && s.feasible);
+}
+
+MF_TEST(a_failed_game_does_not_score_zero) {
+    /* **The wiring §3 forbids, asserted against.** Multiplying the score by the
+       gate would make the turn-four board a fitness term through the back door,
+       and hardest on exactly the archetypes the gate exists to protect. So a
+       deck the gate stops must still carry the score its later turns earned,
+       and the two numbers must stay two numbers. */
+    mf_deck heavy;
+    top_heavy_deck(&heavy);
+    mf_objective_row_fit h;
+    mf_objective_fit(ARENA, &heavy, MF_RUNG_ALL, 1313, 512, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &h);
+    MF_CHECK(!h.feasible);
+    MF_EQ_DBL(h.pass_rate[h.best], 0.0);
+    MF_CHECK(h.fitness > 0.0); /* and it scored what it deployed anyway */
+}
+
 void run_objective_tests(void) {
     ARENA = mf_arena_create("objective-test", 8u << 20);
     MF_RUN(the_objective_is_the_aggregate_phases_and_never_the_opening);
@@ -662,6 +808,9 @@ void run_objective_tests(void) {
     MF_RUN(fitness_is_the_max_over_the_band_and_never_the_average);
     MF_RUN(widening_the_band_can_never_lower_a_decks_fitness);
     MF_RUN(a_deck_with_no_admissible_strategy_has_no_fitness);
+    MF_RUN(two_of_the_four_known_bad_decks_are_caught);
+    MF_RUN(flood_and_screw_are_not_caught_and_the_reason_is_the_clock);
+    MF_RUN(a_failed_game_does_not_score_zero);
     MF_RUN(a_check_with_no_admissible_rung_measured_nothing);
     MF_RUN(a_narrowed_band_of_rungs_is_scored_only_within_it);
 }

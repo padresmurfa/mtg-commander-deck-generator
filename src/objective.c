@@ -23,6 +23,8 @@ void mf_objective_measure(mf_arena *a, const mf_deck *d, const mf_turn_policy *p
         mf_solo_state s;
         mf_solo_run_turns(d, p, seed, first_game + g, aggregate_turns, &s);
         score[g] = mf_objective_score(&s);
+        const mf_phase_gate gate = {MF_GATE_MIN_MANA, MF_GATE_MIN_SPELLS};
+        out->passes += mf_phase_passes(&gate, &s.opening) ? 1u : 0u;
         out->total += score[g];
         if (score[g] > high) high = score[g];
     }
@@ -53,6 +55,7 @@ void mf_objective_measure(mf_arena *a, const mf_deck *d, const mf_turn_policy *p
 
     /* Converted from the integer totals once, here (§17.1). */
     out->mean = (double)out->total / (double)games;
+    out->pass_rate = (double)out->passes / (double)games;
     out->cvar = (double)out->tail_total / (double)out->tail;
     out->composite = out->mean + MF_OBJ_LAMBDA * out->cvar;
 }
@@ -68,6 +71,7 @@ void mf_objective_fit(mf_arena *a, const mf_deck *d, unsigned admissible, uint64
         mf_objective_run run;
         mf_objective_measure(a, d, &p, seed, games, first_game, aggregate_turns, &run);
         out->composite[r] = run.composite;
+        out->pass_rate[r] = run.pass_rate;
         /* Max, not average (§4). Ties to the lower rung, as `argmax` does, so a
            collapse is visible as a collapse onto `greedy`. */
         if (out->best == MF_RUNG_COUNT || run.composite > out->fitness) {
@@ -76,7 +80,9 @@ void mf_objective_fit(mf_arena *a, const mf_deck *d, unsigned admissible, uint64
         }
     }
     /* An empty band is "no strategy was admitted" and not fitness zero, which
-       is a score a real deck could earn. `best` is the sentinel that says so. */
+       is a score a real deck could earn. `best` is the sentinel that says so —
+       and an unplayed deck is not feasible, rather than feasible by default. */
+    out->feasible = out->best != MF_RUNG_COUNT && out->pass_rate[out->best] >= MF_SOLO_GATE_RATE;
 }
 
 void mf_objective_verdict(const mf_objective_row *rows, unsigned n, mf_objective_check *out) {

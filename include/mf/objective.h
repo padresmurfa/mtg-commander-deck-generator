@@ -238,6 +238,11 @@ typedef struct {
        wide enough to miss one. */
     double sd;
     double se;
+    /* §3's feasibility gate, counted beside the score and never folded into it
+       (sprint 3.2 T5). Measured against the default bar; §5's per-bracket
+       thresholds are a parameter §7 introduces, not this stage's business. */
+    unsigned passes;
+    double pass_rate;
 } mf_objective_run;
 
 /* `first_game` offsets the block of game indices, so disjoint blocks of the same
@@ -270,9 +275,34 @@ void mf_objective_measure(mf_arena *a, const mf_deck *d, const mf_turn_policy *p
 
 typedef struct {
     double composite[MF_RUNG_COUNT]; /* zero for a rung outside the band */
-    mf_rung best;                    /* MF_RUNG_COUNT if the band was empty */
-    double fitness;                  /* composite[best] */
+    double pass_rate[MF_RUNG_COUNT];
+    mf_rung best;   /* MF_RUNG_COUNT if the band was empty */
+    double fitness; /* composite[best] */
+    /* §9's ladder stage: does this deck go upward? `pass_rate[best]` against
+       `MF_SOLO_GATE_RATE`. */
+    bool feasible;
 } mf_objective_row_fit;
+
+/* ---- the solo stage of the fidelity ladder (§9, sprint 3.2 T5) -----------
+ *
+ * **A failed game does not score zero, and getting that wrong would undo §3.**
+ * The tempting wiring is to multiply: a game that misses the feasibility bar
+ * contributes nothing to the mean. That is precisely what §3 forbids — "control
+ * decks intend to do nothing early, stax decks look terrible on turn 4 by
+ * design" — because it makes the turn-four board a fitness term through the
+ * back door, and hardest on the archetypes the gate exists to protect.
+ *
+ * So the gate is **per deck, not per game**: the pass *rate* is counted beside
+ * the score, and the ladder promotes on feasibility and ranks on fitness. Two
+ * numbers doing two jobs, which is what §3 and §9 respectively ask for.
+ *
+ * **The bar is set from a measurement, not guessed.** Sprint 2.3 measured real
+ * decks at 0.86 and 0.94 under naive and careful play, on a per-game bar §3
+ * deliberately sets low. Half is far below anything a functioning deck produces,
+ * so the stage catches the pathological — a deck that cannot reach turn 5
+ * functional in half its games — and leaves the ranking to do the ranking. A
+ * bar tight enough to bind on real decks would be a second fitness term. */
+#define MF_SOLO_GATE_RATE 0.5
 
 void mf_objective_fit(mf_arena *a, const mf_deck *d, unsigned admissible, uint64_t seed,
                       unsigned games, uint64_t first_game, uint8_t aggregate_turns,
