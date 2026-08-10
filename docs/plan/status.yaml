@@ -644,7 +644,38 @@ tasks:
     - >
       A loose bar is worse than no bar (3.2 T4): a 0.4-mana bias passed an agreement test whose bar
       was wide enough to hold one. Prefer a test that names the exact quantity.
-  split: []      # task-split happens at sprint start
+  g4_preregistered:              # fixed BEFORE the data was in the tree; see the sprint doc
+    statistic: spearman_rho
+    corpus: "precons with n >= 100 tracked games"
+    games_per_deck: 2048
+    band: all_rungs
+    horizon: MF_SOLO_TURNS
+    pass: "rho >= 0.35 AND rho * sqrt(N-1) >= 2"
+    fail: "rho <= 0.0"
+    defer: "0 < rho < 0.35"
+    why_a_defer_branch: >
+      Three blind spots are already known: flood and screw are not caught (3.2), the aggregation
+      error is deck-differential at 10-20% (3.1), and the data is 4-player-normalised against a
+      2-player simulator (13.2). A weak positive cannot distinguish "the objective is wrong" from
+      "the model cannot see what this data measures", and those have opposite consequences.
+    why_0_35: >
+      Spearman's null standard error is about 1/sqrt(N-1); at the ~30-40 decks the n>=100 filter is
+      expected to leave that is roughly 0.17, so 0.35 is about two standard errors - a bar the data
+      can clear or miss rather than one it cannot resolve. Section 13.2 says to tighten it as the
+      model matures; this is its first setting and the loosest it should ever be.
+  split:
+    - id: T1
+      name: pre-register G4 - threshold, sample size and the three-way branch, before the data
+    - id: T2
+      name: mf/spearman - rank correlation with midranks for ties
+    - id: T3
+      name: precon decklists resolved to mf_decks, with the unresolvable reported not dropped
+    - id: T4
+      name: the win-rate table - 67 rows with source, fetch date and per-deck n
+    - id: T5
+      name: run G4 and record the verdict, blind spots reported beside rho
+    - id: T6
+      name: retro and amendments
 retros:
   - sprint: "3.2"
     doc: docs/plan/retros/3.2-objective-sampling.md
