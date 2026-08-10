@@ -116,6 +116,7 @@ void run_solo_tests(void);
 void run_objective_tests(void);
 void run_strata_tests(void);
 void run_spearman_tests(void);
+void run_fixture_tests(void);
 void run_evaluate_tests(void);
 void run_jstream_tests(void);
 void run_card_tests(void);

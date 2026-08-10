@@ -42,6 +42,12 @@ MF_TEST(ranks_are_one_based_and_tied_values_share_the_group_mean) {
     for (unsigned i = 0; i < 5; i++) sum += r[i];
     MF_EQ_DBL(sum, 15.0);
     MF_EQ_DBL(r[0], 3.0); /* three threes at ranks 2,3,4 */
+
+    /* Nothing to rank writes nothing, rather than reading a sorted array of
+       none. Reachable directly even though `mf_spearman` returns before it. */
+    r[0] = 42.0;
+    mf_rank(ARENA, x, 0, r);
+    MF_EQ_DBL(r[0], 42.0);
 }
 
 /* ---- the correlation ----------------------------------------------------- */

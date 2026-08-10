@@ -1,0 +1,382 @@
+#include "harness.h"
+
+#include "mf/classes.h"
+#include "mf/fixture.h"
+#include "mf/spearman.h"
+
+#include <stdio.h>
+#include <string.h>
+
+static mf_arena *ARENA;
+
+#define WR_PATH "tests/fixtures/precon-win-rates.tsv"
+
+/* ---- the corpus is checked, not trusted --------------------------------- */
+
+MF_TEST(the_transcription_carries_its_own_checksums) {
+    /* **The two numbers a hand transcription can be checked against**, and the
+       reason to state them rather than trust the file: no API and no bulk
+       export means somebody typed it, and a dropped or invented row is the
+       failure mode. 67 rows summing to 11,855 games is the total the source
+       states for itself, so a transcription that lost a row would miss one or
+       both. Asserted here so a future refresh cannot quietly change the corpus. */
+    mf_winrates *w = NULL;
+    MF_EQ_INT(mf_winrates_load(ARENA, WR_PATH, &w), MF_OK);
+    MF_EQ_INT(mf_winrates_count(w), 67);
+    MF_EQ_INT(mf_winrates_total_games(w), 11855);
+
+    /* And the spread §13.2 promises is really there: "roughly 40% down to 12%",
+       which is what makes there be an ordinal signal to test against at all. */
+    double lo = 100.0, hi = 0.0;
+    unsigned big = 0;
+    for (size_t i = 0; i < mf_winrates_count(w); i++) {
+        const mf_winrate *r = mf_winrates_at(w, i);
+        if (r->win_rate < lo) lo = r->win_rate;
+        if (r->win_rate > hi) hi = r->win_rate;
+        if (r->games >= MF_G4_MIN_GAMES) big++;
+        MF_CHECK(r->name && *r->name);
+        MF_CHECK(r->mtgjson_name && *r->mtgjson_name);
+    }
+    MF_CHECK(lo < 15.0 && hi > 38.0);
+    /* §13.2's n >= 100 filter leaves a corpus large enough to correlate. */
+    MF_CHECK(big >= 40);
+}
+
+MF_TEST(a_row_that_is_not_a_row_is_an_error_and_not_a_fatal) {
+    /* A transcription that is wrong is the user's to fix — `mf_err`, handled,
+       on the same rule `mf/precon` follows. */
+    mf_winrates *w = NULL;
+    MF_EQ_INT(mf_winrates_load(ARENA, "tests/fixtures/no-such-file.tsv", &w), MF_ERR_IO);
+
+    const char *bad[] = {
+        "Deck\n",                         /* one field: nothing to read past */
+        "Deck\tSet\t25.0\n",              /* short: no games, no mtgjson name */
+        "Deck\tSet\t25.0\t120\t\n",       /* a nameless join key joins nothing */
+        "Deck\tSet\t25.0\t0\tDeck\n",     /* no games is not a measurement */
+        "Deck\tSet\t0\t120\tDeck\n",      /* nor is a rate of zero */
+        "# only a comment\n",             /* nothing at all */
+        "\tSet\t25.0\t120\tDeck\n",       /* nameless */
+    };
+    for (unsigned i = 0; i < sizeof bad / sizeof *bad; i++) {
+        char path[64];
+        snprintf(path, sizeof path, "build/test-wr-%u.tsv", i);
+        FILE *f = fopen(path, "w");
+        fputs(bad[i], f);
+        fclose(f);
+        MF_EQ_INT(mf_winrates_load(ARENA, path, &w), MF_ERR_PARSE);
+        remove(path);
+    }
+}
+
+/* ---- a precon as a deck -------------------------------------------------- */
+
+/* A two-card table and a hand-built precon file, so the resolution can be
+   checked without the real 30,000-card table — which is not in the tree, being
+   an acquired artefact rather than a fixture. */
+/* The decks a resolution can meet, written by a loop rather than a format
+   string per deck: three failure shapes — a hole in the library, a hole at the
+   *commander* (19% of the real 190), and a list that is not a hundred cards —
+   and six whole decks whose land ratios differ so the corpus has a spread of
+   fitness to correlate rather than one point.
+
+   Six and not three: a perfect ordering over three decks scores z = 1.41 and
+   cannot clear `MF_G4_Z`, which is the significance requirement doing its job
+   and is asserted below as its own case. */
+
+enum { WHOLE_DECKS = 6 };
+
+static void deck_line(FILE *f, const char *name, unsigned kind) {
+    fprintf(f, "{\"code\":\"TST\",\"name\":\"%s\",\"released\":\"2020-01-01\","
+               "\"commanders\":1,\"cards\":[", name);
+    unsigned cards = kind == 3 ? MF_DECK_CARDS - 1 : MF_DECK_CARDS;
+    for (unsigned i = 0; i < cards; i++) {
+        const char *ghost = (kind == 1 && i >= 90) || (kind == 2 && i == 0) ? "ghost" : "id";
+        unsigned id;
+        if (kind >= 4) {
+            /* Whole decks 0..5: one land every (kind - 2) cards, so the mana
+               base and therefore the fitness differ deck by deck. */
+            unsigned every = kind - 2;
+            id = (i % every) ? (1 + (i % 3)) : 0;
+        } else {
+            id = i % 4;
+        }
+        fprintf(f, "%s\"%s-%u\"", i ? "," : "", ghost, id);
+    }
+    fprintf(f, "]}\n");
+}
+
+static void write_precons(const char *path) {
+    FILE *f = fopen(path, "w");
+    deck_line(f, "Whole", 0);
+    deck_line(f, "Holed", 1);
+    deck_line(f, "Headless", 2);
+    deck_line(f, "Short", 3);
+    for (unsigned i = 0; i < WHOLE_DECKS; i++) {
+        char name[16];
+        snprintf(name, sizeof name, "D%u", i);
+        deck_line(f, name, 4 + i);
+    }
+    fclose(f);
+}
+
+static const mf_table *tiny_table(void) {
+    static mf_table *t;
+    if (t) return t;
+    mf_card c[4] = {0};
+    const char *text[4] = {"{T}: Add {G}.", "", "", ""};
+    for (unsigned i = 0; i < 4; i++) {
+        snprintf(c[i].oracle_id, sizeof c[i].oracle_id, "id-%u", i);
+        c[i].name = i ? "Bear" : "Forest";
+        c[i].oracle_text = text[i];
+        c[i].types = i ? MF_TYPE_CREATURE : (MF_TYPE_LAND | MF_SUPER_BASIC);
+        c[i].cmc = i ? (uint8_t)i : 0;
+        c[i].pips = i ? (mf_pips){.generic = (uint8_t)(i - 1), .g = 1} : (mf_pips){0};
+        c[i].power = c[i].toughness = (uint8_t)i;
+        c[i].identity = MF_COLOUR_G;
+        c[i].commander_legal = true;
+    }
+    mf_classset *cs = mf_classes_build(ARENA, c, 4);
+    mf_skill floors[4] = {MF_SKILL_ANY, MF_SKILL_ANY, MF_SKILL_ANY, MF_SKILL_ANY};
+    const char *path = "build/test-fixture-table.bin";
+    mf_table_write(ARENA, path, MF_GAME_PAPER, c, 4, cs, floors, NULL);
+    mf_table_read(ARENA, path, &t);
+    remove(path);
+    return t;
+}
+
+MF_TEST(a_precon_becomes_a_deck_with_the_commander_last) {
+    const char *path = "build/test-fixture-precons.jsonl";
+    write_precons(path);
+    mf_precons *p = NULL;
+    MF_EQ_INT(mf_precons_load(ARENA, path, &p), MF_OK);
+    remove(path);
+
+    mf_deck d;
+    mf_precon_fit fit;
+    MF_CHECK(mf_precon_deck(tiny_table(), p, 0, &d, &fit));
+    MF_EQ_INT(fit.matched, MF_DECK_CARDS);
+    MF_EQ_INT(fit.unmatched, 0);
+    MF_CHECK(fit.complete);
+    /* `mf/precon` lists commanders first and `mf_deck` wants one last — the
+       reorder is the whole of what this function does beyond the lookup. */
+    MF_EQ_INT(d.table_index[MF_DECK_COMMANDER], 0);
+}
+
+MF_TEST(an_incomplete_deck_is_refused_and_never_patched) {
+    /* §7.9 excludes unrepresentable cards from the candidate *pool*, which is a
+       decision about search. A *fixture* is different: §13.2 uses precons
+       because a precon is "one exact, published, unambiguous list", and a deck
+       with a card substituted is no longer that one.
+
+       The first version of this repeated the last resolved card to keep the
+       count at a hundred, and it looked harmless. Measured against the real
+       card table it left every buildable corpus deck carrying about eleven
+       invented cards — 11% of a deck, concentrated in whatever card happened to
+       be last, which distorts the curve this model actually simulates. So the
+       deck is refused, and `fit` still says how far off it was. */
+    const char *path = "build/test-fixture-precons.jsonl";
+    write_precons(path);
+    mf_precons *p = NULL;
+    MF_EQ_INT(mf_precons_load(ARENA, path, &p), MF_OK);
+    remove(path);
+
+    mf_deck d;
+    mf_precon_fit fit;
+    MF_CHECK(!mf_precon_deck(tiny_table(), p, 1, &d, &fit));
+    MF_EQ_INT(fit.unmatched, 10);
+    MF_EQ_INT(fit.matched, MF_DECK_CARDS - 10);
+    MF_CHECK(!fit.complete);
+}
+
+MF_TEST(a_corpus_that_resolved_nothing_defers_and_never_fails) {
+    /* **The distinction 2.3's three-way branch bought, guarding a new gate.**
+       `FAIL` is a claim about the objective — "it orders real decks no better
+       than chance". A corpus that produced no decks supports no claim about the
+       objective at all, so it must land in DEFER, and the guard goes before the
+       thresholds rather than after them.
+
+       Driven with the real win-rate corpus against a precon set none of it
+       names, which is exactly the shape the sprint met for real. */
+    const char *path = "build/test-fixture-precons.jsonl";
+    write_precons(path);
+    mf_precons *p = NULL;
+    MF_EQ_INT(mf_precons_load(ARENA, path, &p), MF_OK);
+    remove(path);
+    mf_winrates *w = NULL;
+    MF_EQ_INT(mf_winrates_load(ARENA, WR_PATH, &w), MF_OK);
+
+    mf_g4 g;
+    mf_g4_measure(ARENA, tiny_table(), p, w, 1, NULL, &g);
+    MF_CHECK(g.corpus > 0); /* the filter admitted decks... */
+    MF_EQ_INT(g.scored, 0); /* ...and none of them resolved */
+    MF_EQ_INT(g.unjoined, g.corpus);
+    MF_EQ_DBL(g.rho, 0.0);
+    MF_EQ_INT(g.verdict, MF_G4_DEFER);
+    MF_EQ_STR(mf_g4_verdict_name(g.verdict), "defer");
+    /* And the gap is zero, because these decks are not in the precon set at
+       all — a deck nobody has is not a deck short of eleven cards, and
+       conflating the two would report a shortfall nothing measured. */
+    MF_EQ_DBL(g.mean_gap, 0.0);
+}
+
+MF_TEST(a_corpus_that_does_resolve_is_correlated_and_graded) {
+    /* The scoring path, driven end to end on a corpus small enough to hold in
+       the head. Four decks named, only "Whole" resolvable — the other three are
+       the three ways a resolution fails — so the corpus scores one deck, which
+       is a correlation of one point: no spread, ρ zero, and DEFER rather than a
+       verdict about the objective. */
+    const char *pp = "build/test-fixture-precons.jsonl";
+    write_precons(pp);
+    mf_precons *p = NULL;
+    MF_EQ_INT(mf_precons_load(ARENA, pp, &p), MF_OK);
+    remove(pp);
+
+    const char *wp = "build/test-fixture-wr.tsv";
+    FILE *f = fopen(wp, "w");
+    fputs("# tiny corpus\n"
+          "Whole\tTST\t30.0\t200\tWhole\n"
+          "Holed\tTST\t25.0\t200\tHoled\n"
+          "Headless\tTST\t20.0\t200\tHeadless\n"
+          "Short\tTST\t15.0\t200\tShort\n"
+          "Absent\tTST\t10.0\t200\tNo Such Deck\n"
+          "Ignored\tTST\t40.0\t50\tWhole\n", f); /* below the games filter */
+    fclose(f);
+    mf_winrates *w = NULL;
+    MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
+    remove(wp);
+    MF_EQ_INT(mf_winrates_count(w), 6);
+
+    double fit[8];
+    mf_g4 g;
+    mf_g4_measure(ARENA, tiny_table(), p, w, 4242, fit, &g);
+    MF_EQ_INT(g.corpus, 5);   /* the sixth is under MF_G4_MIN_GAMES */
+    MF_EQ_INT(g.scored, 1);   /* only "Whole" resolves */
+    MF_EQ_INT(g.unjoined, 4); /* holed, headless, short, and absent */
+    MF_CHECK(fit[0] > 0.0);
+    MF_EQ_DBL(g.sim_spread, 0.0);  /* one point has no spread... */
+    MF_EQ_DBL(g.data_spread, 0.0);
+    MF_EQ_DBL(g.rho, 0.0);         /* ...and nothing to correlate */
+    /* One scored deck is an ordering of one thing. ρ is zero, and zero would
+       fall straight into FAIL and be read as "ranks real decks backwards" — so
+       the corpus guard runs before the thresholds. */
+    MF_EQ_INT(g.verdict, MF_G4_DEFER);
+    MF_CHECK(g.scored < MF_G4_MIN_CORPUS);
+    /* The three decks that failed to build were short by a real amount, and
+       the one that was simply absent contributes nothing to that mean. */
+    MF_CHECK(g.mean_gap > 0.0);
+}
+
+/* A corpus of `n` of the numbered whole decks, with the win rates supplied. */
+static void numbered_corpus(const char *path, unsigned n, const double *rate) {
+    FILE *f = fopen(path, "w");
+    fprintf(f, "# numbered corpus\n");
+    for (unsigned i = 0; i < n; i++)
+        fprintf(f, "D%u\tTST\t%.4f\t200\tD%u\n", i, rate[i], i);
+    fclose(f);
+}
+
+MF_TEST(the_gate_passes_when_the_orderings_agree_and_fails_when_they_invert) {
+    const char *pp = "build/test-fixture-precons.jsonl";
+    write_precons(pp);
+    mf_precons *p = NULL;
+    MF_EQ_INT(mf_precons_load(ARENA, pp, &p), MF_OK);
+    remove(pp);
+
+    /* First, what the simulator says — so the win rates can be built to agree
+       or disagree with it rather than guessed at. */
+    const char *wp = "build/test-fixture-wr-n.tsv";
+    double flat[WHOLE_DECKS];
+    for (unsigned i = 0; i < WHOLE_DECKS; i++) flat[i] = 20.0 + i;
+    numbered_corpus(wp, WHOLE_DECKS, flat);
+    mf_winrates *w = NULL;
+    MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
+    double fit[WHOLE_DECKS + 2];
+    mf_g4 probe;
+    mf_g4_measure(ARENA, tiny_table(), p, w, 77, fit, &probe);
+    MF_EQ_INT(probe.scored, WHOLE_DECKS);
+    MF_CHECK(probe.sim_spread > 0.0);
+    MF_CHECK(probe.data_spread > 0.0);
+
+    /* Win rates in the simulator's own order: ρ = 1, z = sqrt(5) = 2.24, which
+       clears both bars. `fitness` is NULL here — the path a caller that wants
+       only the verdict takes. */
+    numbered_corpus(wp, WHOLE_DECKS, fit);
+    MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
+    mf_g4 good;
+    mf_g4_measure(ARENA, tiny_table(), p, w, 77, NULL, &good);
+    MF_EQ_INT(good.scored, WHOLE_DECKS);
+    MF_EQ_DBL(good.rho, 1.0);
+    MF_CHECK(good.z >= MF_G4_Z);
+    MF_EQ_INT(good.verdict, MF_G4_PASS);
+
+    /* Inverted: ρ = −1, and the FAIL branch doing its job. */
+    double invert[WHOLE_DECKS];
+    for (unsigned i = 0; i < WHOLE_DECKS; i++) invert[i] = 100.0 - fit[i];
+    numbered_corpus(wp, WHOLE_DECKS, invert);
+    MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
+    mf_g4 bad;
+    mf_g4_measure(ARENA, tiny_table(), p, w, 77, NULL, &bad);
+    MF_EQ_DBL(bad.rho, -1.0);
+    MF_EQ_INT(bad.verdict, MF_G4_FAIL);
+    remove(wp);
+}
+
+MF_TEST(a_perfect_ordering_over_a_small_corpus_still_defers) {
+    /* **2.3's correction, doing something.** ρ is the effect size and cannot be
+       inflated by sample size; z is significance and can. Requiring both means
+       a *perfect* ordering over three decks — ρ = 1, the largest effect there
+       is — scores z = 1.41 and does not pass. That is the right answer: three
+       decks in the right order is what a coin does one time in six. */
+    const char *pp = "build/test-fixture-precons.jsonl";
+    write_precons(pp);
+    mf_precons *p = NULL;
+    MF_EQ_INT(mf_precons_load(ARENA, pp, &p), MF_OK);
+    remove(pp);
+
+    const char *wp = "build/test-fixture-wr3.tsv";
+    double flat[3] = {30.0, 20.0, 10.0};
+    numbered_corpus(wp, 3, flat);
+    mf_winrates *w = NULL;
+    MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
+    double fit[4];
+    mf_g4 probe;
+    mf_g4_measure(ARENA, tiny_table(), p, w, 77, fit, &probe);
+    numbered_corpus(wp, 3, fit);
+    MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
+    mf_g4 g;
+    mf_g4_measure(ARENA, tiny_table(), p, w, 77, NULL, &g);
+    remove(wp);
+
+    MF_EQ_INT(g.scored, 3);
+    MF_EQ_DBL(g.rho, 1.0);          /* the largest effect there is... */
+    MF_CHECK(g.z < MF_G4_Z);        /* ...and still not significant */
+    MF_EQ_INT(g.verdict, MF_G4_DEFER);
+}
+
+MF_TEST(the_thresholds_are_the_ones_committed_before_the_data) {
+    /* Spelled as literals, not restated from the header — a test that reads the
+       constant it is checking pins nothing. These are the numbers from the
+       sprint doc, committed before the win-rate table existed in the tree. */
+    MF_EQ_DBL(MF_G4_RHO, 0.35);
+    MF_EQ_DBL(MF_G4_Z, 2.0);
+    MF_EQ_INT(MF_G4_GAMES, 2048);
+    MF_EQ_INT(MF_G4_MIN_GAMES, 100);
+    MF_EQ_INT(MF_G4_MIN_CORPUS, 2);
+    MF_EQ_STR(mf_g4_verdict_name(MF_G4_PASS), "pass");
+    MF_EQ_STR(mf_g4_verdict_name(MF_G4_DEFER), "defer");
+    MF_EQ_STR(mf_g4_verdict_name(MF_G4_FAIL), "fail");
+}
+
+void run_fixture_tests(void) {
+    ARENA = mf_arena_create("fixture-test", 8u << 20);
+    MF_RUN(the_transcription_carries_its_own_checksums);
+    MF_RUN(a_row_that_is_not_a_row_is_an_error_and_not_a_fatal);
+    MF_RUN(a_precon_becomes_a_deck_with_the_commander_last);
+    MF_RUN(an_incomplete_deck_is_refused_and_never_patched);
+    MF_RUN(a_corpus_that_resolved_nothing_defers_and_never_fails);
+    MF_RUN(a_corpus_that_does_resolve_is_correlated_and_graded);
+    MF_RUN(the_gate_passes_when_the_orderings_agree_and_fails_when_they_invert);
+    MF_RUN(a_perfect_ordering_over_a_small_corpus_still_defers);
+    MF_RUN(the_thresholds_are_the_ones_committed_before_the_data);
+    mf_arena_destroy(ARENA);
+}

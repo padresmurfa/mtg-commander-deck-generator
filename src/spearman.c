@@ -9,16 +9,19 @@ void mf_rank(mf_arena *a, const double *x, size_t n, double *out) {
     size_t *order = mf_arena_array(a, n, sizeof *order);
     for (size_t i = 0; i < n; i++) order[i] = i;
 
-    /* Insertion sort, and the choice is about determinism rather than size.
-       **Ties break by index**, so the permutation is a function of the input
-       alone — and while a midrank makes the answer indifferent to tie order,
-       an order nobody pinned is one that can change under a different library
-       and take a golden file with it. Sixty-seven precons is not a place where
-       O(n²) is the interesting number. */
+    /* Insertion sort, and the choice is about determinism rather than size: it
+       is **stable**, so equal values keep their input order and the permutation
+       is a function of the input alone. A midrank makes the answer indifferent
+       to tie order anyway, but an order nobody pinned is one that can change
+       under a different library and take a golden file with it. Sixty-seven
+       precons is not a place where O(n²) is the interesting number.
+       No explicit index tie-break: `>` rather than `>=` is what makes it
+       stable, and adding one would be a condition nothing can reach, since
+       everything already placed has a lower index than `v`. */
     for (size_t i = 1; i < n; i++) {
         size_t v = order[i];
         size_t j = i;
-        while (j && (x[order[j - 1]] > x[v] || (x[order[j - 1]] == x[v] && order[j - 1] > v))) {
+        while (j && x[order[j - 1]] > x[v]) {
             order[j] = order[j - 1];
             j--;
         }
