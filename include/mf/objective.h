@@ -224,7 +224,7 @@ uint16_t mf_objective_score(const mf_solo_state *s);
 
 typedef struct {
     unsigned games;
-    uint64_t total; /* summed in index order, never averaged early */
+    uint64_t total, square; /* summed in index order, never averaged early */
     unsigned tail;  /* games in the worst decile; `floor(games/10)`, at least 1 */
     uint64_t tail_total;
     /* Converted from the integer totals once, here, and never accumulated as
@@ -232,6 +232,12 @@ typedef struct {
     double mean;
     double cvar;
     double composite; /* mean + MF_OBJ_LAMBDA * cvar */
+    /* The estimator's own sampling error, so a comparison against another
+       estimator can be a test rather than an eyeball. Added when a stratified
+       estimator with a 0.4 bias in it passed an agreement check whose bar was
+       wide enough to miss one. */
+    double sd;
+    double se;
 } mf_objective_run;
 
 /* `first_game` offsets the block of game indices, so disjoint blocks of the same

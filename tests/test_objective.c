@@ -519,6 +519,33 @@ MF_TEST(the_composite_is_the_mean_plus_lambda_times_the_tail) {
     MF_EQ_DBL(none.composite, 0.0);
 }
 
+MF_TEST(a_sample_below_ten_games_still_has_a_tail) {
+    /* `floor(n/10)` is zero below ten games, and a CVaR over no games is not a
+       CVaR. One game is the smallest tail that is one. */
+    mf_deck d;
+    midrange_deck(&d);
+    mf_turn_policy p = mf_policy_rung(MF_RUNG_CURVE_OUT);
+    mf_objective_run r;
+    mf_objective_measure(ARENA, &d, &p, 4242, 6, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &r);
+    MF_EQ_INT(r.tail, 1);
+    MF_EQ_DBL(r.cvar, (double)r.tail_total);
+    MF_CHECK(r.cvar <= r.mean);
+}
+
+MF_TEST(an_argmax_too_small_to_resolve_is_reported_unstable) {
+    /* The other half of the stability rule, exercised through the real
+       measurement rather than through hand-built rows: eight games cannot
+       separate four rungs, so the check must say "no winner" rather than name
+       whichever one the noise favoured. */
+    mf_deck decks[OBJ_DECKS];
+    deck_set(decks);
+    mf_objective_row rows[OBJ_DECKS];
+    mf_objective_check v;
+    mf_objective_check_decks(ARENA, decks, OBJ_DECKS, MF_RUNG_ALL, 5, 8,
+                             MF_SOLO_TURNS - MF_PHASE_TURNS, rows, &v);
+    MF_CHECK(v.stable < OBJ_DECKS);
+}
+
 MF_TEST(the_tail_agrees_with_a_sort_written_the_other_way) {
     /* The implementation counts rather than compares, because a comparison sort
        needs a tie-break rule to be reproducible and a counting sort has no ties
@@ -628,6 +655,8 @@ void run_objective_tests(void) {
     MF_RUN(and_it_is_not_because_a_phase_is_a_subset_sum);
     MF_RUN(the_tail_is_the_worst_tenth_and_never_more);
     MF_RUN(the_composite_is_the_mean_plus_lambda_times_the_tail);
+    MF_RUN(a_sample_below_ten_games_still_has_a_tail);
+    MF_RUN(an_argmax_too_small_to_resolve_is_reported_unstable);
     MF_RUN(the_tail_agrees_with_a_sort_written_the_other_way);
     MF_RUN(an_evaluation_repeated_does_not_grow_the_arena);
     MF_RUN(fitness_is_the_max_over_the_band_and_never_the_average);

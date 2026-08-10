@@ -77,6 +77,31 @@ void mf_opening_shuffle(mf_opening *o, uint64_t seed, uint64_t stream);
 #define MF_MULLIGAN_STREAMS (MF_MULLIGAN_MAX + 1)
 uint64_t mf_opening_stream(uint64_t game, uint8_t attempt);
 
+/* ---- the same shuffle, conditioned on the opening's land count (§7.3) -----
+ *
+ * §7.3's rule is "anything computable in closed form is never sampled", and the
+ * opening-hand land count has one. Stratifying it needs a shuffle drawn from the
+ * *conditional* distribution — a uniform permutation of the library given that
+ * the first seven hold exactly `stratum` lands — and `stratum < 0` asks for the
+ * unconditional one, so the two share a single code path rather than drifting.
+ *
+ * **The construction is exact, and the obvious cheap version is not.** In a
+ * uniform permutation the first `k` lands are a uniform subset of the lands and
+ * the first `7−k` nonlands a uniform subset of the nonlands, independently. So
+ * take those seven and put them in front. What that does *not* give is a uniform
+ * hand order: the pattern of lands and nonlands among the seven follows their
+ * positions in the full shuffle, and a land-heavy deck puts a land first more
+ * often than a half of the time. The seven are therefore shuffled again, on a
+ * derived stream, which costs seven swaps and makes the distribution the right
+ * one rather than nearly right.
+ *
+ * **Fatal for a stratum the deck cannot supply.** A five-land deck has
+ * probability exactly zero of a six-land opener, so a caller asking for one has
+ * computed an allocation from the wrong deck — an invariant broken rather than
+ * a game state to represent. */
+void mf_opening_shuffle_in(mf_opening *o, const mf_deck *d, int8_t stratum, uint64_t seed,
+                           uint64_t stream);
+
 /* Draws `n` from the top. Fatal if the library cannot supply them: a deck that
    ran out is a broken deck rather than a hand to keep playing with. */
 void mf_opening_draw(mf_opening *o, uint8_t n);
@@ -115,5 +140,13 @@ bool mf_policy_keeps(const mf_policy *p, const mf_opening *o, const mf_deck *d);
  * player makes deliberately. */
 void mf_opening_mulligan(mf_opening *o, const mf_deck *d, const mf_policy *p, uint64_t seed,
                          uint64_t game);
+
+/* The same, with the **first** seven conditioned on a land count (§7.3). Only
+   the first: the stratification variable is the opening hand's land count, and a
+   mulligan draws a fresh unconditional seven — which is what keeps the extreme
+   strata meaning "you mulligan" rather than being deleted. `stratum < 0` is
+   `mf_opening_mulligan` exactly. */
+void mf_opening_mulligan_in(mf_opening *o, const mf_deck *d, const mf_policy *p, uint64_t seed,
+                            uint64_t game, int8_t stratum);
 
 #endif

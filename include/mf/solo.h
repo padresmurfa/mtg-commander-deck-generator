@@ -159,6 +159,13 @@ void mf_solo_run(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint6
 void mf_solo_run_turns(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,
                        uint8_t aggregate_turns, mf_solo_state *out);
 
+/* The same, with the opening hand conditioned on a land count (§7.3's
+   stratification). `stratum < 0` is `mf_solo_run_turns` exactly, which is
+   asserted per game rather than assumed — a second path through a game is a
+   second place for it to diverge. */
+void mf_solo_run_in(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,
+                    int8_t stratum, uint8_t aggregate_turns, mf_solo_state *out);
+
 /* ---- the score (sprint 3.1 D2) -------------------------------------------
  *
  *     **The total mana value of every spell cast, commander included.**

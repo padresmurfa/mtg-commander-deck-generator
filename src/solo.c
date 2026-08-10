@@ -169,10 +169,15 @@ void mf_solo_run(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint6
 
 void mf_solo_run_turns(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,
                        uint8_t aggregate_turns, mf_solo_state *out) {
+    mf_solo_run_in(d, p, seed, game, -1, aggregate_turns, out);
+}
+
+void mf_solo_run_in(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,
+                    int8_t stratum, uint8_t aggregate_turns, mf_solo_state *out) {
     memset(out, 0, sizeof *out);
 
     mf_opening o;
-    mf_phase_open(d, p, seed, game, &o);
+    mf_phase_open_in(d, p, seed, game, stratum, &o);
     mf_live live;
     mf_phase_play_live(d, p, game, &o, &out->opening, &live);
 

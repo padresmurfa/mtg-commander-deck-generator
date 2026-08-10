@@ -243,6 +243,9 @@ void mf_phase_run(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint
  * would say so. */
 void mf_phase_open(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,
                    mf_opening *out);
+/* The same, with the opening hand conditioned on a land count (§7.3). */
+void mf_phase_open_in(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,
+                      int8_t stratum, mf_opening *out);
 void mf_phase_play(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
                    const mf_opening *start, mf_phase_state *out);
 

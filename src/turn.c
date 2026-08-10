@@ -353,7 +353,12 @@ mf_turn_policy mf_policy_rung(mf_rung r) {
 
 void mf_phase_open(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,
                    mf_opening *out) {
-    mf_opening_mulligan(out, d, &p->mulligan, seed, game);
+    mf_phase_open_in(d, p, seed, game, -1, out);
+}
+
+void mf_phase_open_in(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,
+                      int8_t stratum, mf_opening *out) {
+    mf_opening_mulligan_in(out, d, &p->mulligan, seed, game, stratum);
 }
 
 void mf_phase_run(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,
