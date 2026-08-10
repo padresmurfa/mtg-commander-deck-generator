@@ -17,7 +17,7 @@ a reason — never "done".
 | **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9301**, conditional, inert 90.33%. Re-measured in 3.1, superseding 0.9325 and 0.9357 ([retro](retros/3.1-aggregate-phases.md)) |
 | **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | 5σ per cell, `SE = sqrt(p(1-p)/N)`, fixed in advance | **PASS — worst 2.43σ** ([retro](retros/2.1-shuffle-draw-mulligan.md)) |
 | **G3** Policy gap discriminates | 2.3 → **5.0** | Does naive-vs-careful separate known-forgiving from known-demanding decks? | 5x a noise floor measured first, **and** a 2x effect size | **DEFER — 2.24σ, ratio 1.14** (2.3). **Re-measured 3.1 against a continuous score: FAIL, −2.28σ** ([retro](retros/3.1-aggregate-phases.md)). Re-runs in **5.0 against a mirror** |
-| **G4** Precon rank correlation | 3.3 | Does the objective rank real decks in the right order? | Spearman above threshold, precons with n≥100 | *pending* |
+| **G4** Precon rank correlation | 3.3 → **3.3.1** | Does the objective rank real decks in the right order? | ρ ≥ 0.35 **and** z ≥ 2, at 2,048 games/deck, precons with n≥100 — fixed before the data | **DEFER — corpus 48, scored 0.** Not one precon resolves; mean gap 11.8 cards ([retro](retros/3.3-fixture-validation.md)) |
 | **G5** GA beats greedy | 4.3 | Is the landscape optimisable by population methods? | Margin exceeding the GA's own noise | *pending* |
 
 ---
@@ -171,6 +171,31 @@ here before the measurement rather than in its retro afterwards.
 **And the sample size is fixed in advance alongside the threshold**, which is 2.3's correction
 applied rather than restated: a threshold in standard errors leaves the sample size blank, and
 significance is free at scale.
+
+**Measured in sprint 3.3: DEFERRED, and none of those three blind spots is why.** The corpus came
+out *empty*. Not one of the 190 precons resolves completely against the card table — best case one
+missing card, mean 9.3, worst 22, and 19% have an unrepresentable commander. Corpus 48, scored 0.
+
+The pre-registration anticipated three ways the number could be **ambiguous** and missed the way it
+could **fail to exist**, which is a limit on pre-registration worth recording: it protects the
+threshold and it does not make you think of everything.
+
+**Deferred and not failed**, and the distinction is what 2.3's three-way branch bought. `FAIL` says
+the objective orders real decks no better than chance; an empty corpus supports no claim about the
+objective. The guard runs before the thresholds and its boundary is **two**, not one — a single deck
+is an ordering of one thing, ρ comes back zero, and zero would fall into `FAIL` and be read as
+"ranks decks backwards". That is 2.1's defect in a new place.
+
+**Recorded as a diagnostic and not as the gate:** an earlier resolver filled each unresolvable card
+by repeating another, so every deck came out at a hundred and the gate ran, giving ρ = −0.0137 over
+35 decks that were 11% invented. §13.2 uses precons because a precon is one exact published list;
+that one was not. Refusing to patch is what made the real state visible.
+
+**Before it can re-run**, one of two things, pre-registered rather than chosen after seeing that ρ:
+a stated substitution semantics — a same-cost vanilla preserves the curve and loses only what the
+model cannot see — or a wider opcode set, which is G1's own failure branch and now has a far
+sharper argument than 0.9301 ever gave. **Sprint 3.3.1 is inserted for it, and E4 does not start
+first**: building the search against an unvalidated objective is what G4 exists to prevent.
 
 **G5 — GA beats greedy.** Greedy is the control experiment. *On failure:* either the landscape is
 too noisy for population methods or the crossover preserves nothing. Ship greedy, drop the GA —

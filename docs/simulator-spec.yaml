@@ -1297,6 +1297,57 @@ validation:
     do_not: fit_absolute_win_rates
     filters:
       min_games_per_precon: 100
+    # --- transcribed and measured in sprint 3.3 -------------------------
+    transcription:
+      path: tests/fixtures/precon-win-rates.tsv
+      fetched: "2026-08-10"
+      rows: 67
+      games: 11855                 # the counts grew from ~11,700
+      per_deck_n_range: "28 to 424"    # was ~40 to ~310
+      checksums_asserted: [row_count, total_games]
+      why_checksums: >
+        No API and no bulk export means somebody typed it. 67 rows summing to 11,855 is the total
+        the page states for itself, so a transcription that dropped or invented a row would miss
+        one or both. Asserted in the suite rather than trusted.
+      aliases: 5
+      alias_note: >
+        Four Final Fantasy decks carry an MTGJSON sub-title suffix; their Collector's Edition
+        variants were checked and hold IDENTICAL 100-card lists, so the base list is used. The
+        fifth is Playgroup's "Mind Flayarrgh" against MTGJSON's "Mind Flayarrrs", the printed name.
+    resolution:
+      complete_decks: 0            # of 190
+      best_gap: 1
+      mean_gap: 9.3
+      worst_gap: 22
+      unrepresentable_commander: 36    # 19% of 190
+      rule: refuse_incomplete
+      why_refuse: >
+        Section 13.2 uses precons because a precon is "one exact, published, unambiguous list". The
+        first resolver repeated a card to fill each hole so the count stayed at 100; measured, that
+        left every buildable corpus deck 11% invented and produced rho = -0.0137 over 35 decks - a
+        DIAGNOSTIC, not the gate. Refusing is what made the real state visible.
+    g4_result:
+      sprint: "3.3"
+      corpus: 48
+      scored: 0
+      unjoined: 48
+      mean_gap: 11.8
+      rho: 0.0
+      z: 0.0
+      verdict: defer
+      why_defer_not_fail: >
+        FAIL is a claim about the objective - "it orders real decks no better than chance". An
+        empty corpus supports no claim about the objective at all. The guard runs BEFORE the
+        thresholds and its boundary is two, not one: a single deck is an ordering of one thing,
+        rho comes back zero, and zero would fall into FAIL and be read as "ranks decks backwards".
+      preregistration_limit: >
+        Three blind spots were named in advance - flood/screw uncaught, the deck-differential
+        aggregation error, 4-player data against a 2-player model - and NONE of them is why it
+        deferred. Pre-registration protects the threshold; it does not make you think of everything.
+      before_it_can_rerun: >
+        Either a pre-registered substitution semantics - an unrepresentable card still has a mana
+        cost and a type, and a same-cost vanilla preserves the curve while losing only what the
+        model cannot see - or a wider opcode set, which is G1's own failure branch. Sprint 3.3.1.
     caveats:
       - "Data is 4-player-normalised; this simulator is 2-player. Ordinal transfer plausible, cardinal not."
       - "Per-precon n ranges ~40-310. At n=41 a 36% win rate carries roughly +/-15pp — rank barely determined."
@@ -1344,6 +1395,20 @@ validation:
       Unrepresentable cards are excluded, so coverage is a hard ceiling on how meaningful the
       output is. At 30% the "optimal" deck is an artefact of what happened to be modellable.
       A couple of hours of work that can invalidate months.
+    hazards:
+      - id: rises_when_less_is_simulated
+        found: sprint 1.2.1
+        note: >
+          Moving a clause out of scope and modelling it count the same way, so a model that
+          simulates nothing scores 1.0. The inert share is quoted beside the fraction, always.
+      - id: does_not_bound_per_deck_completeness
+        found: sprint 3.3
+        note: >
+          It is a fraction over CLAUSES. Per-DECK completeness at 0.9301 is 0 of 190 precons,
+          because a hundred cards against a per-card miss rate of a few percent leaves essentially
+          no chance all hundred resolve. G4 could not run on it. A coverage figure is now quoted
+          with three things: the fraction, the inert share, and what it implies for a 100-card list.
+    per_deck_completeness: "0/190 at G1 = 0.9301 (sprint 3.3)"
 
   determinism_matrix:
     ref: "17.4"

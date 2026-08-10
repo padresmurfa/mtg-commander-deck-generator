@@ -1540,6 +1540,34 @@ the threshold as the model matures.
 No API or bulk export is offered, so the table needs transcribing — 67 rows, once. Re-check
 periodically; the counts grow.
 
+*(Transcribed in sprint 3.3.)* Done, tracked, and **checked rather than trusted**: 67 rows summing
+to 11,855 games, which is the total the source states for itself, both asserted in the suite so a
+refresh cannot quietly change the corpus. The counts had indeed grown — 11,855 against the ~11,700
+above, and per-deck sample sizes now run 28 to 424 rather than ~40 to ~310. Five of the 67 names
+differ from MTGJSON's and the aliases are recorded rather than derived.
+
+*(Measured in sprint 3.3, and G4 could not run.)*
+
+> **Not one of the 190 precons resolves completely against the card table.**
+
+Best case is **one** missing card; the mean is 9.3 and the worst is 22. **Nineteen percent have an
+unrepresentable commander**, which alone drops 13 of the 48 decks clearing the `n ≥ 100` filter. So
+the corpus G4 needs is empty, and the gate is **deferred** — not failed, because "the objective
+orders real decks no better than chance" is a claim about the objective and an empty corpus supports
+no claim about it at all.
+
+**A precon is used here because it is "one exact, published, unambiguous list", and that is exactly
+what a patched fixture stops being.** The first resolver filled each hole by repeating a card so the
+count stayed at a hundred; it ran, and produced ρ = −0.0137 over 35 decks whose contents were 11%
+invented. That number is a diagnostic and not the gate. The resolver now refuses, and refusing is
+what made the real state visible.
+
+Before G4 can run, one of two things has to happen, and choosing after seeing that ρ is the move
+pre-registration forbids — so it is written down as a decision to be made in advance: either a
+**stated substitution semantics** (an unrepresentable card still has a mana cost and a type, and a
+same-cost vanilla preserves the curve while losing only what the model cannot see anyway), or a
+**wider opcode set**, which is §13.5's own failure branch.
+
 ### 13.3 Synthetic known-bad decks
 
 Precons cover the plausible band. Also assert the pathological cases, which no data source will
@@ -1591,6 +1619,15 @@ model agrees with. Necessary, not sufficient; run it, but do not mistake it for 
 Measure what fraction of a real commander's candidate pool the opcode set can actually represent.
 Cards that cannot be modelled are excluded (§7.9), so coverage is a hard ceiling on how meaningful
 the output is.
+
+*(Second hazard, found in sprint 3.3.)* **Clause coverage does not predict whether any real deck can
+be built**, and the two numbers were being read as though one implied the other. G1 reads 0.9301 over
+clauses; per-*deck* completeness at that coverage is **0 of 190 precons**. The arithmetic is not
+subtle once stated — a hundred cards to a deck against a per-card miss rate of a few percent leaves
+essentially no chance that all hundred resolve — but nothing in this section said to ask. So a
+coverage figure is quoted with **three** things now: the fraction, the inert share, and what it
+implies for a hundred-card list. The first hazard, that G1 *rises* when less is simulated, is
+unchanged and still applies.
 
 At 60%+ the approach is sound. At ~30% the optimiser is choosing from a minority of the legal pool
 and its "optimal" deck is an artefact of what happened to be representable — at which point the

@@ -13,8 +13,8 @@
 
 meta:
   status: in_progress
-  current_sprint: "3.3"
-  task_split_valid_for: "3.3"     # task-splitting any other sprint is speculative
+  current_sprint: "3.3.1"
+  task_split_valid_for: "3.3.1"     # task-splitting any other sprint is speculative
   baseline: greenfield
   language: c
   deliverable: cli
@@ -124,12 +124,22 @@ gates:
       against a mirror; if it still decays 19x from turn 4 to turn 12, the tempo explanation is
       wrong. Thresholds unchanged: 5 sigma and 2x.
   - id: G4
-    sprint: "3.3"
+    sprint: "3.3.1"               # measured in 3.3 and deferred; see sprint_history
+    sprint_history: ["3.3"]
     name: precon_rank_correlation
     question: Does the objective rank real decks in the right order?
     method: spearman on precons with n >= 100
+    threshold: "rho >= 0.35 AND rho * sqrt(N-1) >= 2, at 2048 games per deck"
+    threshold_fixed: >
+      Committed in 0edff34, BEFORE the win-rate table landed in the tree in 91f1988 - the only form
+      of "fixed in advance" a repository can show rather than assert.
     spec_ref: "13.2"
     on_failure: the objective is wrong; redesign section 3
+    result: >
+      DEFER (3.3). Corpus 48, SCORED 0. Not one of the 190 precons resolves completely against the
+      card table - best gap 1, mean 9.3, worst 22, and 19% have an unrepresentable commander.
+      Deferred and not failed because FAIL is a claim about the objective and an empty corpus
+      supports none. None of the three blind spots named in advance is why.
   - id: G5
     sprint: "4.3"
     name: ga_beats_greedy
@@ -467,12 +477,57 @@ epics:
           - solo gate wired as pass/fail
       - id: "3.3"
         name: Fixture validation
-        status: not_started
+        status: done
         gate: G4
+        retro: docs/plan/retros/3.3-fixture-validation.md
+        tasks_doc: docs/plan/sprints/3.3-fixture-validation.md
+        result:
+          checks: 45216
+          line_coverage: 100.00
+          branch_coverage: 95.60
+          modules_added: [spearman, fixture]
+          corpus: "67 rows, 11855 games, fetched 2026-08-10, 2 checksums asserted"
+          g4_verdict: defer
+          g4_finding: >
+            Not one of the 190 precons can be built. G1 measures CLAUSE coverage and reads 0.9301;
+            per-DECK completeness at that coverage is 0 of 190, because a hundred cards against a
+            per-card miss rate of a few percent leaves essentially no chance all hundred resolve.
+            The two numbers were being read as though one implied the other. That is a second
+            hazard in G1's metric, beside the known one that it rises when less is simulated.
+          defect_found: >
+            The first resolver filled each hole by repeating a card so every deck came out at a
+            hundred, and the gate ran happily on decks that were 11% invented, producing
+            rho = -0.0137 over 35 of them. Recorded as a diagnostic, never as the gate. Refusing to
+            patch is what made the real state visible.
+          harness_fix: >
+            MF_EQ_DBL compared fabs(a-b) > 1e-9, which is FALSE for a NaN, so a test asserting a
+            number passed on 0.0/0.0. Negated for the whole suite; nothing else moved, so nothing
+            else was passing on one.
         exit_criteria:
           - precon tables transcribed
           - Spearman rank correlation above threshold on n>=100 precons
           - synthetic known-bad decks ranked correctly
+      - id: "3.3.1"
+        name: Fixture resolution
+        status: not_started
+        gate: G4
+        inserted_after: "3.3"
+        why_inserted: >
+          On the 0.2.1, 1.2.1 and 5.0 precedent - an insertion with its reason recorded. G4 did not
+          fail; it could not be measured, because not one precon resolves against the card table. A
+          gate that has not answered is not a gate that has been passed, and E4 does not start
+          first: building the search against an unvalidated objective is exactly what G4 exists to
+          prevent.
+        exit_criteria:
+          - >
+            A substitution semantics, PRE-REGISTERED before it is measured - an unrepresentable card
+            still has a mana cost and a type, and a same-cost vanilla preserves the curve while
+            losing only what the model already cannot see. Choosing it after seeing a correlation is
+            the move pre-registration forbids.
+          - or a wider opcode set, which is G1's own failure branch
+          - per-deck completeness reported beside G1's clause fraction
+          - G4 re-run with the 3.3 thresholds UNCHANGED, and its verdict recorded
+          - G4 written to the run artifact by mfsim validate, as G1's and G2's are
 
   - id: E4
     name: Search
@@ -613,70 +668,62 @@ epics:
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
 tasks:
-  sprint: "3.3"
-  doc: docs/plan/sprints/3.3-fixture-validation.md
+  sprint: "3.3.1"
+  doc: docs/plan/sprints/3.3.1-fixture-resolution.md
   goal: >
-    Validate the objective against real decks with measured outcomes: transcribe the 67 precons
-    that have win rates, rank them with the solo objective, and run G4.
+    Make G4 measurable. Not one of the 190 precons resolves completely against the card table, so
+    the corpus the gate needs is empty; this sprint decides - in advance - what a deck containing an
+    unrepresentable card IS, and re-runs the gate with 3.3's thresholds unchanged.
   why_now: >
-    3.2 chose the objective and got one pass and one failure out of its own degeneracy check. Both
-    results are about this project's model rather than about the world, and nothing inside E3 can
-    tell the difference. G4 is the first measurement that meets outcomes the objective did not
-    generate.
+    G4 did not fail, it could not be measured. A gate that has not answered is not one that has been
+    passed, and E4 builds the search against the objective G4 exists to validate.
   carried_in:
     - >
-      Fix the Spearman threshold AND the sample size before measuring. 2.1 established the first;
-      2.3 established the second, because significance is free at scale.
+      PRE-REGISTER the substitution semantics before measuring anything. rho = -0.0137 has already
+      been seen on patched decks; choosing the patch rule now, in the light of it, is the move
+      pre-registration forbids. Write the rule and its argument down, commit it, then measure.
     - >
-      Write G4's failure branches down before the number exists. 3.1's G3 failure engaged a written
-      branch and correctly did not take it; that only worked because the branch was written first.
+      Thresholds do NOT move. 3.3 fixed rho >= 0.35, z >= 2, 2048 games per deck, n >= 100. Only the
+      instrument changes, which is 3.1's rule about improving an instrument and a bar at once.
   input_from_previous_retro:
     - >
-      Two of section 13.3's four known-bad decks are NOT caught - 20 lands at 0.81x a real deck and
-      60 lands at 0.94x, both feasible. Precons are built to a sensible land count so the specific
-      blind spot may not bite, but a rank correlation computed with a known blind spot must be
-      reported WITH it and not after it.
+      G1's clause coverage does not bound per-deck completeness, and the two were being read as
+      though one implied the other. Report both from now on.
     - >
-      The clock is now three findings deep (3.1 G3, 3.2 T1's mulligan term, 3.2 T6's flood/screw).
-      A null-opponent model with a fixed horizon prices position at zero, and G4 inherits it.
+      A fixture that patches itself hides the state of the world. The hole-filling resolver was
+      three lines, looked defensive, and turned an empty corpus into 35 plausible decks and a
+      number. Prefer refusing.
     - >
-      The aggregation error is DECK-DIFFERENTIAL at 10-20% (3.1) and G4 cannot see it.
-    - >
-      A loose bar is worse than no bar (3.2 T4): a 0.4-mana bias passed an agreement test whose bar
-      was wide enough to hold one. Prefer a test that names the exact quantity.
-  g4_preregistered:              # fixed BEFORE the data was in the tree; see the sprint doc
-    statistic: spearman_rho
-    corpus: "precons with n >= 100 tracked games"
-    games_per_deck: 2048
-    band: all_rungs
-    horizon: MF_SOLO_TURNS
-    pass: "rho >= 0.35 AND rho * sqrt(N-1) >= 2"
-    fail: "rho <= 0.0"
-    defer: "0 < rho < 0.35"
-    why_a_defer_branch: >
-      Three blind spots are already known: flood and screw are not caught (3.2), the aggregation
-      error is deck-differential at 10-20% (3.1), and the data is 4-player-normalised against a
-      2-player simulator (13.2). A weak positive cannot distinguish "the objective is wrong" from
-      "the model cannot see what this data measures", and those have opposite consequences.
-    why_0_35: >
-      Spearman's null standard error is about 1/sqrt(N-1); at the ~30-40 decks the n>=100 filter is
-      expected to leave that is roughly 0.17, so 0.35 is about two standard errors - a bar the data
-      can clear or miss rather than one it cannot resolve. Section 13.2 says to tighten it as the
-      model matures; this is its first setting and the loosest it should ever be.
-  split:
-    - id: T1
-      name: pre-register G4 - threshold, sample size and the three-way branch, before the data
-    - id: T2
-      name: mf/spearman - rank correlation with midranks for ties
-    - id: T3
-      name: precon decklists resolved to mf_decks, with the unresolvable reported not dropped
-    - id: T4
-      name: the win-rate table - 67 rows with source, fetch date and per-deck n
-    - id: T5
-      name: run G4 and record the verdict, blind spots reported beside rho
-    - id: T6
-      name: retro and amendments
+      Pre-registration protects the threshold and does not make you think of everything: three
+      blind spots were named in advance and none of them is why G4 deferred.
+  split: []      # task-split happens at sprint start
 retros:
+  - sprint: "3.3"
+    doc: docs/plan/retros/3.3-fixture-validation.md
+    gates: [G4]
+    design_amendments: 8
+    headline: >
+      G4 COULD NOT BE MEASURED, because not one of the 190 precons can be built. The sprint did
+      everything the gate needs - the 67-row corpus transcribed, tracked and checksummed against the
+      11,855-game total the source states for itself; a rank correlation with midranks for ties,
+      checked against hand-computed cases; precon lists resolving through the card table; and the
+      thresholds committed BEFORE the data existed in the tree, which is the only form of "fixed in
+      advance" a repository can show rather than assert. Then the corpus came out empty: best case
+      one missing card, mean 9.3, worst 22, and 19% of precons have an unrepresentable COMMANDER.
+      Corpus 48, scored 0, VERDICT DEFER - not fail, because FAIL is a claim about the objective and
+      an empty corpus supports none. The finding is about G1's metric rather than G4's: G1 measures
+      CLAUSE coverage and reads 0.9301, and per-DECK completeness at that coverage is 0 of 190,
+      because a hundred cards against a per-card miss rate of a few percent leaves essentially no
+      chance all hundred resolve. The two numbers were being read as though one implied the other.
+      That is a second hazard in G1, beside the known one that it rises when less is simulated. The
+      defect that hid it was ours and is the more instructive half: the first resolver filled each
+      hole by repeating a card, so every deck came out at a hundred and the gate ran happily on
+      decks that were 11% invented, producing rho = -0.0137 over 35 of them - recorded as a
+      diagnostic and never as the gate. Refusing to patch is what made the real state visible. Also
+      found: MF_EQ_DBL compared fabs(a-b) > 1e-9, which is FALSE for a NaN, so a test asserting a
+      number passed on 0.0/0.0; negated for the whole suite. Pre-registration named three ways the
+      number could be ambiguous and missed the way it could fail to exist.
+    carry_over: [g4_itself, substitution_semantics, g4_in_validate, precon_prices]
   - sprint: "3.2"
     doc: docs/plan/retros/3.2-objective-sampling.md
     gates: []
