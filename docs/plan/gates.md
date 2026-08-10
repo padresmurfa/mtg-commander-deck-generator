@@ -16,7 +16,7 @@ a reason — never "done".
 | ---- | ------ | -------- | --------- | ------- |
 | **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9301**, conditional, inert 90.33%. Re-measured in 3.1, superseding 0.9325 and 0.9357 ([retro](retros/3.1-aggregate-phases.md)) |
 | **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | 5σ per cell, `SE = sqrt(p(1-p)/N)`, fixed in advance | **PASS — worst 2.43σ** ([retro](retros/2.1-shuffle-draw-mulligan.md)) |
-| **G3** Policy gap discriminates | 2.3 | Does naive-vs-careful separate known-forgiving from known-demanding decks? | 5x a noise floor measured first, **and** a 2x effect size | **DEFER — 2.24σ, ratio 1.14** (2.3). **Re-measured 3.1 against a continuous score: FAIL, −2.28σ** — and the reason moves it to E5 ([retro](retros/3.1-aggregate-phases.md)) |
+| **G3** Policy gap discriminates | 2.3 → **5.0** | Does naive-vs-careful separate known-forgiving from known-demanding decks? | 5x a noise floor measured first, **and** a 2x effect size | **DEFER — 2.24σ, ratio 1.14** (2.3). **Re-measured 3.1 against a continuous score: FAIL, −2.28σ** ([retro](retros/3.1-aggregate-phases.md)). Re-runs in **5.0 against a mirror** |
 | **G4** Precon rank correlation | 3.3 | Does the objective rank real decks in the right order? | Spearman above threshold, precons with n≥100 | *pending* |
 | **G5** GA beats greedy | 4.3 | Is the landscape optimisable by population methods? | Margin exceeding the GA's own noise | *pending* |
 
@@ -44,7 +44,8 @@ nothing scores 1.0. The inert share is therefore quoted beside the fraction, alw
 more clause *kinds* to become reachable. Aggregate phases with a **null opponent** observe more
 *turns*, not more kinds of event: nothing dies, attacks or leaves the battlefield. Every reachability
 rule was audited individually and none changed, and the inert share went marginally *up*. **G1 falls
-on reachability when E5 supplies an opponent, not here.**
+on reachability when E5 supplies an opponent, not here** — which is now a named sprint rather than an
+epic: **5.0**, the first rung where anything dies, attacks or leaves the battlefield.
 
 What moved it was a defect the widening exposed: `"At the beginning of your upkeep, draw a card"` was
 classified `MF_OP_DRAW`, an opcode meaning *draw once, when cast*. Classification gains a fourth
@@ -129,6 +130,24 @@ Also disclosed: the score it was measured against is close to `expensive-first`'
 rank competitors. It contributed +0.107 of the −0.518 separation, so it did not decide the verdict.
 **Pre-registering a metric protects against fitting it to the answer and not against picking a
 degenerate one** — a lesson for G4 as much as this.
+
+**Where it re-runs: sprint 5.0, against a mirror.** The 3.1 amendment sent G3 to E5 without naming
+an opponent, and §6's opponent is a *gauntlet* — archetype decks needing E4's generator — which
+quietly put a gate about §5 behind the entire search epic. That contradicts this file's own opening
+rule, that a gate is placed **as early as the dependency graph allows**. A mirror needs the
+interaction layer and nothing else.
+
+It is also the better instrument, not merely the earlier one. A mirror is degenerate as a *deck*
+comparison — every deck beats a copy of itself exactly half the time — for precisely the reason it is
+clean as a *policy* comparison: holding the deck fixed on both sides removes every confound except
+the one under test. 2.3's difference of differences was an attempt to buy the same control with no
+opponent at all.
+
+**Pre-registered now, before the sprint that measures it** (2.3's rule): §5's gap decays 19× from
+turn 4 to turn 12 because being a turn behind costs nothing, so **against a mirror it must stop
+decaying**. If it still decays, the tempo explanation is wrong and something else produced that
+table. Components reported separately — the mulligan reversed sign against a solo score, and this is
+where it reverses back or does not. Thresholds unchanged again: 5σ and 2×.
 
 **G4 — precon rank correlation.** The objective is validated against 67 precons with ~11,700
 tracked games. Rank correlation, not absolute win-rate fitting — the data is 4-player-normalised

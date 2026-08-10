@@ -821,6 +821,17 @@ fidelity_ladder:
     - id: full_solo
       cost_per_eval: 100us
       role: elite refinement
+    - id: mirror
+      cost_per_eval: 1ms
+      added_after: sprint 3.1
+      role: policy gap, engine symmetry, self-clock
+      passes_nothing_upward: true
+      not_a_filter: >
+        The one rung that is not a filter, and the table misleads without saying so. Every other
+        stage narrows a field; this one scores every deck identically (validation.mirror), so it
+        passes nothing upward. It sits before versus_gauntlet because it costs the same and comes
+        FIRST in the dependency graph - a gauntlet needs generated opponents, a mirror needs only
+        the interaction layer.
     - id: versus_gauntlet
       cost_per_eval: 1ms
       role: bracket-relative fitness
@@ -1510,6 +1521,28 @@ validation:
         not_fixed_here: >
           Replacing a metric in the same sprint whose gate it failed is the move pre-registration
           forbids. It goes to sprint 3.2 under fresh pre-registration.
+    next_measurement:
+      added_after: sprint 3.1
+      sprint: "5.0"
+      instrument: mirror              # NOT the gauntlet; see validation.mirror
+      why_not_the_gauntlet: >
+        The 3.1 amendment moved G3 to E5 without saying which opponent, and the gauntlet needs
+        E4's generator - so a gate about section 5 ended up behind the entire search epic. A mirror
+        needs the interaction layer and nothing else, and it is the better instrument besides:
+        holding the deck fixed on both sides removes every confound except the policy under test.
+        2.3's difference of differences was an attempt at the same control with no opponent at all.
+      prediction:                     # pre-registered before the sprint, on 2.3's rule
+        claim: Against a mirror the gap must STOP DECAYING with the horizon.
+        falsifies: >
+          If the gap still decays 19x from turn 4 to turn 12 against an opponent, the tempo
+          explanation above is wrong and something else produced gap_by_horizon.
+        report: components separately - the mulligan reversed sign against a solo score, and this
+          is where it reverses back or does not.
+      does_not_settle: >
+        A mirror's clock is SELF-SCALED - a slow deck races a slow deck - which is exactly right for
+        a policy comparison where both sides are the same deck by construction, and is not a
+        metagame. Whether the ladder still separates against opponents of UNRELATED speed is 5.1's
+        question. Reading a narrow instrument as a wide result is the 2.3 mistake.
 
   class_reduction:
     ref: "7.1, 7.6"
@@ -1542,6 +1575,85 @@ validation:
     ref: "13.4"
     assertion: end-of-opening score correlates with end-of-game outcome within the simulator
     caveat: Necessary, not sufficient. Does not prove correctness — only internal agreement.
+
+  mirror:
+    ref: "13.6"
+    added_after: sprint 3.1
+    known_answer: 0.5
+    known_answer_why: >
+      A deck beats a copy of itself exactly half the time BY SYMMETRY - the two sides are the same
+      distribution. It is the only matchup in the two-player model whose answer is known in advance,
+      which makes it this model's analytic ground truth. The opening phase has hypergeometrics
+      (13.1); the two-player model has this and nothing else.
+
+    not_a_fitness_axis:
+      why: >
+        A statistic that takes the same value on every deck ranks nothing, and no sample size
+        changes that. This is a STRONGER degeneracy than the one 3.1 disclosed: mana value deployed
+        was merely close to one policy's objective and still carried information.
+      also_not_the_racing_variant: >
+        Racing two INDEPENDENT runs of the same deck to a threshold looks like a consistency
+        measure and cannot be a new one. For A, B drawn independently from one deck's score
+        distribution, every statistic of the pair is a functional of the marginal:
+        P(A > B) = (1 - P(A = B))/2 by exchangeability, and E|A - B| is Gini's mean difference.
+        Self-play without interaction is variance with extra steps, and CVaR_10 already holds that
+        seat. The cheapness and the emptiness are the same fact - the copies never touch.
+
+    symmetry_check:
+      form: paired                    # bit-exact, not statistical
+      assertion: >
+        Play game g with RNG stream a on the play and b on the draw; play it again with b on the
+        play and a on the draw. The second game must be the first with the two players RELABELLED -
+        same events, same length, winner permuted.
+      games_required: 2               # vs ~1e5 for a win-rate test
+      catches:
+        - a tiebreak that prefers player index 0
+        - a priority order favouring the active player beyond what the rules give
+        - a policy reading its own board by a different path than the opponent's
+        - a seed derivation that is not symmetric in the seat
+      why_not_statistical: >
+        "Mirror win rate is 50% +/- noise" needs a hundred thousand games and sees only asymmetries
+        that survive averaging. The paired form is an involution test and needs two.
+      seat_streams_must_be_independent:
+        assert: true
+        hazard: >
+          Section 7.8's common random numbers pair a game index ACROSS CANDIDATES and must not pair
+          the two seats WITHIN a game. If they do, both players draw the same deck in the same order,
+          every turn ties, and the player on the play wins nearly always - a win rate far from 0.5
+          that reads as broken symmetry and is really a broken seed derivation. Opposite fixes.
+      liveness_precondition:          # the G2 lesson (13.1): a gate must not pass vacuously
+        required: true
+        assertions:
+          - different winners across seeds
+          - game-length distribution has spread
+        why: >
+          A symmetry check passes trivially on an engine where nothing happens, exactly as a sigma
+          test passes trivially on zero samples. Assert liveness first, symmetry second.
+
+    observables:                      # measured here, never scored
+      play_draw_skew:
+        ref: "4"
+        why_here: >
+          Section 4 identified this as a real per-deck quantity - the extra card is worth far more
+          to a slow expensive deck - and correctly neutralised it with 50/50 seat parity, because a
+          quantity that biases a RANKING has no business in the objective. In a mirror the seat is
+          the only asymmetry left, so this is where it can be read.
+      self_clock:
+        ref: "3"
+        why_here: >
+          Section 3 fixes the execution horizon at turn 12 and admits the argument is a stipulation.
+          The turn on which one copy beats the other is the horizon the deck itself implies, which
+          turns a constant into a measured distribution to calibrate 12 against.
+
+    coevolution_warning:
+      ref: "6"
+      what: >
+        The mirror is co-evolution's degenerate limit. A population of one scores every deck 0.5:
+        zero gradient, search does nothing, and the fitness numbers look healthy throughout. A GA
+        population is a NEAR-mirror since its members are each other's recent mutations, so a
+        co-evolved gauntlet drifts toward that limit rather than away from it.
+      symptom: a stable fitness, not a falling one
+      anchor: synthetic_known_bad     # 13.3 decks are a fixed stake the population cannot move
 
 # ---------------------------------------------------------------------------
 # Power management (macOS specific).

@@ -101,16 +101,28 @@ gates:
     on_failure: the simulation core is wrong; fix before anything builds on it
     result: "pass - worst cell 2.43 sigma against a 5 sigma tolerance fixed in advance (2.1)"
   - id: G3
-    sprint: "2.3"
+    sprint: "5.0"                   # measured in 2.3 and 3.1; re-runs here. See sprint_history.
+    sprint_history: ["2.3", "3.1"]
     name: policy_gap_discriminates
     question: Does naive-vs-careful separate known-forgiving from known-demanding decks?
-    spec_ref: "5"
+    spec_ref: "5, 13.6"
     on_failure: the skill ladder is unfounded; redesign section 5
     result: >
       defer (2.3, gate pass rate) then FAIL (3.1, continuous score, -2.28 sigma). The failure branch
       was engaged and NOT taken: section 5 separates the decks perfectly at every horizon, and what
       fails is measuring it against a SOLO objective at all. Moved to E5, where an opponent supplies
       the clock a tempo signal needs.
+    instrument: mirror
+    instrument_why: >
+      The 3.1 amendment moved G3 to E5 without naming an opponent, and section 6's opponent is a
+      GAUNTLET needing E4's generator - which put a gate about section 5 behind the whole search
+      epic, against the rule that gates go as early as the dependency graph allows. A mirror needs
+      the interaction layer and nothing else, and is the better instrument besides: it is degenerate
+      as a DECK comparison for exactly the reason it is clean as a POLICY one.
+    prediction: >
+      Pre-registered before the sprint, on 2.3's rule. The gap must STOP DECAYING with the horizon
+      against a mirror; if it still decays 19x from turn 4 to turn 12, the tempo explanation is
+      wrong. Thresholds unchanged: 5 sigma and 2x.
   - id: G4
     sprint: "3.3"
     name: precon_rank_correlation
@@ -463,6 +475,37 @@ epics:
     name: Two-player
     status: not_started
     sprints:
+      - id: "5.0"
+        name: Mirror match
+        status: not_started
+        gate: G3
+        inserted_before: "5.1"
+        inserted_after_sprint: "3.1"
+        why_inserted: >
+          On the 0.2.1 and 1.2.1 precedent - an insertion with its reason recorded, not a rewrite of
+          a fixed epic. 3.1's amendment moved G3 to E5 because "an opponent supplies the clock" and
+          did not say WHICH opponent; E5 as split had nowhere to put it, since 5.1's gauntlet needs
+          E4's generator. That put a gate about section 5 behind the entire search epic, against the
+          rule that gates go as early as the dependency graph allows. Numbered 5.0 rather than
+          renumbering 5.1 and 5.2, which are referenced elsewhere.
+        depends_on: interaction layer only    # NOT E4; no generator, taxonomy or bracket banding
+        note: >
+          The mirror is the two-player model's analytic ground truth (13.6): a deck beats a copy of
+          itself exactly half the time, by symmetry. It is NOT a fitness axis - a statistic constant
+          on every deck ranks nothing - and the sprint exists for what follows from the two sides
+          being identical, not from comparing them.
+        exit_criteria:
+          - interaction layer - combat, life totals, removal resolution - sufficient for a game to end
+          - bit-exact seat-swap symmetry - swapping the seats' RNG streams relabels the game log
+          - liveness asserted before symmetry, so the check cannot pass vacuously (the G2 lesson)
+          - G3 re-run against a mirror, both thresholds unchanged, verdict recorded
+          - play/draw skew and self-clock recorded as observables, scored by nothing
+          - G1 re-measured; 3.1 established it falls on reachability when an opponent arrives
+        does_not_settle: >
+          A mirror's clock is self-scaled - a slow deck races a slow deck - so it is a policy
+          instrument and not a metagame. Whether section 5's ladder separates against opponents of
+          UNRELATED speed is 5.1's question. Reading a narrow instrument as a wide result is 2.3's
+          mistake and the retro must not repeat it.
       - id: "5.1"
         name: Gauntlet & matchups
         status: not_started

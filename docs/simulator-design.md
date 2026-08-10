@@ -148,6 +148,13 @@ mana and cards; past some point every deck deploys its whole hand and the score 
 much of the library was drawn, which is a property of the shuffle rather than of the deck. The
 horizon has to stop while the mana constraint still binds.
 
+**Turn 12 is a stipulation, and it stays one only while the model is solo.** The argument above says
+why the horizon must be finite and gives no way to derive it, because a number derived from nothing
+but the deck is what a solo model cannot produce. A **mirror** can: the turn on which one copy beats
+the other is the horizon the deck itself implies, which turns a fixed constant into a measured
+distribution and gives this section something to calibrate 12 against (§13.6). Not a reason to defer
+the constant — a reason to expect it back.
+
 **Aggregate means the cards are real and the turn they arrive on is not.** The phase draws exactly
 what the shuffle dealt — which keeps it a sample from the same distribution and keeps §7.8's common
 random numbers intact — and then treats the whole phase as one mana budget and one pool of castable
@@ -185,6 +192,12 @@ Optimise `mean + λ·CVaR₁₀`, with λ tuning ceiling vs consistency.
 
 Do **not** make it adversarial over opponent hands. That turns each evaluation into a game-tree
 search and forfeits the entire tractability win.
+
+*(Added after 3.1.)* **And do not reach for self-play to measure consistency instead.** Racing two
+independent runs of the same deck is the obvious cheap way to ask how reliable it is, and it is
+provably not a new statistic: two independent draws from one distribution carry that distribution and
+nothing more, so the race is a dispersion measure of the score CVaR₁₀ is already taken over. The
+argument is in §13.6, written down because the idea is appealing enough to arrive twice.
 
 ---
 
@@ -282,6 +295,14 @@ what G4 validates and could not see. Parity assignment is exactly 50/50 over an 
 it is proportional stratification rather than randomisation, and it keeps §7.8's common random
 numbers intact: game `g` is on the play for every candidate compared at that index.
 
+*(Added after 3.1.)* **The size of that swing is itself a deck property, and averaging over it is what
+throws it away.** The paragraph above identifies a real per-deck quantity — how much the extra card is
+worth to *this* deck — and then correctly neutralises it, because a quantity that biases a ranking has
+no business in the objective. It is still worth knowing, and a **mirror** is the only place it can be
+read cleanly: with the same deck on both sides the seat is the *only* asymmetry left, so the play/draw
+skew is what the mirror measures once the symmetry check has subtracted everything else (§13.6). An
+observable, not a fitness term.
+
 ---
 
 ## 5. Skill
@@ -353,7 +374,41 @@ below.
 should be read with that in mind: `hold-interaction` is meaningless with no opponent to hold mana up
 for, and `combo-assemble` needs combo detection nothing builds. `role-aware` is partial — ramp is
 observable in the opcode set, removal and interaction are not. All three resolve when E5 supplies an
-opponent.
+opponent — and `hold-interaction` resolves at the *first* rung of it, since a mirror is an opponent
+to hold mana up for whether or not it is a representative one.
+
+### The gap is measured in a mirror, not against a gauntlet
+
+*(Added after 3.1. The amendment above sent G3 to E5 without saying which opponent, and §6's answer —
+archetype decks, banded by bracket — needs E4's generator, so a gate about this section ended up
+behind the entire search epic.)*
+
+**The opponent G3 needs is the same deck.** A mirror is degenerate as a *deck* comparison for exactly
+the reason it is clean as a *policy* comparison (§13.6):
+
+> Holding the deck fixed on both sides removes every confound except the one under test.
+
+Deck `D` piloted naively against deck `D` piloted carefully is this section's experiment with a clock
+in it, and with the deck controlled perfectly rather than approximately — 2.3's difference of
+differences was an attempt to get the same control with no opponent at all. It needs the interaction
+layer and **nothing else from E5**: no deck generation, no archetype taxonomy, no bracket banding.
+
+**And it makes a prediction sharp enough to fail.** The table above decays 19× between turn 4 and
+turn 12 because being a turn behind costs nothing. In a mirror, being a turn behind is being behind:
+
+> **Against a mirror the gap must stop decaying with the horizon.** If it still decays, the tempo
+> explanation is wrong and something else produced that table.
+
+Recorded here, before the sprint that measures it, on 2.3's rule that a threshold fixed after the
+numbers are visible is not a threshold. The components stay separated — the mulligan reversed sign
+against a solo score and this is where that reverses back, or does not.
+
+**What a mirror cannot settle, and the gauntlet still owes.** An opponent that is a copy of the deck
+is an opponent whose speed is the deck's own, so the clock a mirror supplies is *self-scaled*: a slow
+deck races a slow deck. That is exactly right for a policy comparison, where both sides are the same
+deck by construction, and it is not a metagame. Whether §5's ladder still separates against opponents
+of *unrelated* speed is 5.1's question, not this one — claiming otherwise would repeat 2.3's mistake
+of reading a narrow instrument as a wide result.
 
 ### Optimise under the target policy
 
@@ -427,6 +482,14 @@ fitness does not, the run is overfitting to its opponents and that is now visibl
 
 Co-evolving the gauntlet is more robust but gives a moving fitness target and much harder debugging.
 Start fixed; co-evolve only if overfitting proves otherwise unfixable.
+
+*(Added after 3.1.)* **The mirror is co-evolution's degenerate limit, and it is why that caution is
+right.** A population of one scores every deck at exactly 0.5 (§13.6) — zero gradient, and the search
+does nothing while its fitness numbers look perfectly healthy. A GA population is a *near*-mirror: its
+members are each other's recent mutations, so a co-evolved gauntlet drifts toward that limit rather
+than away from it, and the visible symptom is not a falling fitness but a stable one. §13.3's
+known-bad decks are the anchor that catches it — a fixed stake in the ground the population cannot
+move — which is a second job for them beyond the one §13.3 gives.
 
 ---
 
@@ -831,12 +894,20 @@ list, not a field.
 | Opening gate | ~1 µs | Feasibility pass/fail |
 | Aggregate solo | ~10 µs | Bulk GA fitness |
 | Full solo | ~100 µs | Elite refinement |
+| Mirror | ~1 ms | **Not fitness** — policy gap, engine symmetry, self-clock |
 | Versus gauntlet | ~1 ms | Bracket-relative fitness |
 | Forge | ~10 s | Validation of final top-K only |
 
 Each stage passes only the top X% upward. Forge sees ~10k games, not 2.5M — which defuses the
 compute problem and the reward-hacking problem simultaneously, since the GA never touches Forge and
 therefore cannot learn to exploit it.
+
+*(Mirror added after 3.1.)* **It is the one rung that is not a filter**, and the table would mislead
+without saying so: every other stage narrows a field, and this one passes nothing upward because it
+scores every deck identically (§13.6). It sits here because it costs what the versus rung costs and
+comes *before* it in the dependency graph — a gauntlet needs generated opponents and a mirror needs
+only the interaction layer, so it is the earliest point at which anything can be asked about tempo,
+about §5's gap, or about whether the two-player engine is symmetric at all.
 
 Estimated cost with §7 applied: ~25 ms per deck evaluation, population 100 × 200 generations ≈
 **single-digit minutes on one core**, plausibly tens of seconds once the top three reductions land.
@@ -1477,6 +1548,64 @@ because the reason differs:
 
 88 clauses moved to unmatched and 6 to inert. Widening the horizon is what made it worth finding —
 the same clause fires four times in the old model, twelve in the new one, and once in either.
+
+### 13.6 The mirror as analytic ground truth
+
+*(Added after sprint 3.1, when G3 moved to E5 and what instrument would settle it was open.)*
+
+§13.1 exploits the one lucky fact about the opening phase: parts of it have exact closed forms, so
+the simulator can be checked against a *known correct* answer rather than a plausible one. **The
+two-player model has no hypergeometric.** A win rate against a gauntlet is a modelling guess all the
+way down and there is nothing to divide it by.
+
+There is exactly one matchup whose answer is known in advance:
+
+> **A deck beats a copy of itself exactly half the time.** Not approximately, and not as a modelling
+> assumption — by symmetry, since the two sides are the same distribution.
+
+That makes the mirror this model's §13.1. What it is *not* has to come first, because the appealing
+reading is the wrong one.
+
+**It is not a fitness axis, and it is the strongest form of the degeneracy sprint 3.1 disclosed.**
+§4's score turned out to be close to one policy's own objective — bad, and still informative. A
+mirror win rate is *constant on every deck that exists*. A ranking statistic taking the same value
+on all inputs ranks nothing, and no sample size changes that.
+
+**Nor does the non-interactive version rescue it.** Racing two independent runs of the same deck to
+a threshold looks like a consistency measure and cannot be a new one: for `A, B` drawn independently
+from a deck's score distribution, *every* statistic of the pair is a functional of the marginal.
+`P(A > B) = (1 − P(A = B))/2` by exchangeability, and the margin `E|A − B|` is Gini's mean
+difference — dispersion, of a distribution already in hand. **Self-play without interaction is
+variance with extra steps**, and §3's CVaR₁₀ already holds that seat. The cheapness and the emptiness
+are the same fact: the two copies never touch, so the pair carries the marginal and nothing else.
+
+What the mirror is *for* is everything that follows from the two sides being identical.
+
+**The test is bit-exact rather than statistical.** The statistical form — "the mirror win rate is
+50% ± noise" — needs a hundred thousand games and sees only asymmetries that survive averaging. The
+paired form needs two:
+
+> Play game `g` with RNG stream `a` seated on the play and `b` on the draw. Play it again with `b`
+> on the play and `a` on the draw. **The second game must be the first with the two players
+> relabelled** — same events, same length, winner permuted.
+
+Anything consulting a seat rather than a game state breaks it: a tiebreak preferring player index 0,
+a priority order favouring the active player beyond what the rules give, a policy reading its own
+board by one path and the opponent's by another, a seed derivation not symmetric in the seat. Those
+are what a win-rate test averages away. It is the discipline §17 already applies to seeds, pointed
+at players instead.
+
+**`a` and `b` must be independent streams, and that is a claim to test rather than assume.** §7.8's
+common random numbers pair a game index *across candidates*; it must not pair the two seats *within*
+a game. If it does, both players draw the same deck in the same order, every turn is a tie, and the
+player on the play wins nearly always — a mirror win rate far from 0.5 that looks like a broken
+symmetry and is really a broken seed derivation. The distinction matters because the two mistakes
+have opposite fixes.
+
+**With the precondition G2 had to learn the hard way.** A symmetry check passes trivially on an
+engine where nothing happens, exactly as a σ test passes trivially on zero samples (§13.1). So
+liveness is asserted first — different winners across seeds, and a game-length distribution with
+spread in it — and symmetry second. Ask this of every gate.
 
 ---
 
