@@ -12,6 +12,17 @@ g2.worst_sigma 1.6670271123721763
 g2.pass true
 t6.worst_sigma 1.737586111601
 t6.pass true
+g3.separation 0.010687500000000072
+g3.noise_sd 0.0047660092058240955
+g3.sigma 2.242442164597558
+g3.ratio 1.1403940886699517
+g3.secondary_sigma 17.71912287419866
+g3.verdict defer
+g3.land_rule.forgiving_gap 0
+g3.land_rule.demanding_gap 0.01231250000000006
+g3.land_rule.sigma 3.9502841255150183
+g3.mulligan.forgiving_gap 0.076125
+g3.mulligan.demanding_gap 0.07450000000000001
 cards.cards 6
 cards.printings 8
 cards.other_games 2

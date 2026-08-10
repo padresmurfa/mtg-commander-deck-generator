@@ -16,7 +16,7 @@ a reason — never "done".
 | ---- | ------ | -------- | --------- | ------- |
 | **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9325**, conditional. Re-measured in 1.2.1, superseding 0.9357 ([retro](retros/1.2.1-clause-reachability.md)) |
 | **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | 5σ per cell, `SE = sqrt(p(1-p)/N)`, fixed in advance | **PASS — worst 2.43σ** ([retro](retros/2.1-shuffle-draw-mulligan.md)) |
-| **G3** Policy gap discriminates | 2.3 | Does naive-vs-careful separate known-forgiving from known-demanding decks? | A fixed multiple of a noise floor measured first | *pending* |
+| **G3** Policy gap discriminates | 2.3 | Does naive-vs-careful separate known-forgiving from known-demanding decks? | 5x a noise floor measured first, **and** a 2x effect size | **DEFER — 2.24σ, ratio 1.14**; secondary 17.72σ ([retro](retros/2.3-policies-policy-gap.md)) |
 | **G4** Precon rank correlation | 3.3 | Does the objective rank real decks in the right order? | Spearman above threshold, precons with n≥100 | *pending* |
 | **G5** GA beats greedy | 4.3 | Is the landscape optimisable by population methods? | Margin exceeding the GA's own noise | *pending* |
 
@@ -71,6 +71,24 @@ gets fixed in advance is the *multiple*.
 
 *On failure:* §5 of the design is unfounded and needs redesigning before the bracket system is built
 into the optimiser.
+
+**Measured in sprint 2.3: DEFERRED, and the reason matters more than the verdict.** The primary
+metric — the §3 pass rate — moved 0.86 → 0.94 under careful play on *both* decks, separating them by
+only 1.14×. The finer counters separated them at 17.72σ. So the signal is real and large and the
+**instrument** is what cannot see it: §3 deliberately sets the opening bar low, and a rate near 1.0
+has no room to move. The three-way branch (pass / defer / fail) was written down before the
+measurement precisely so this could not be recorded as "the skill signal does not exist".
+
+Decomposed, the gap is ~88% mulligan — which is the same on both decks and discriminates nothing —
+and a small sequencing component that separates them perfectly (0.0000 against +0.0123). Measured on
+the land rule alone the gate passes at 6.59σ. That is a diagnostic, not the gate.
+
+**A correction that applies to G4 and G5.** The threshold as first written — "5x a measured noise
+floor" — is a significance test, and a noise floor shrinks as 1/sqrt(N), so significance is free at
+scale. The same comparison read 1.26σ at 500 games a block and 5.32σ at 8,000: same effect, different
+verdict, and the sample size was never fixed the way the multiple was. Gates now also require an
+**effect size**, which no sample size can inflate. Re-measured under both criteria the verdict is
+unchanged at every sample size and all eight seeds tried.
 
 **G4 — precon rank correlation.** The objective is validated against 67 precons with ~11,700
 tracked games. Rank correlation, not absolute win-rate fitting — the data is 4-player-normalised

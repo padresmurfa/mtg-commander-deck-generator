@@ -122,20 +122,58 @@ void mf_board_mana(const mf_deck *d, const mf_board *b, bool ready_only, mf_mana
  * mulligan, for the same two reasons: §5's rungs differ in numbers rather than
  * in kind, and the per-game path keeps no indirect calls. */
 
+/* Which land to play when the hand holds both a tapland and an untapped one.
+ *
+ * A tapland costs a turn of tempo, and that turn is cheapest on a turn there was
+ * nothing to cast anyway. The three rules are the naive reading, the greedy long
+ * view, and the one that actually looks. **The gap between the first and the
+ * last is what G3 measures**, so the weak ones are the instrument rather than
+ * shortcomings of it — do not improve them in place. */
+typedef enum {
+    MF_LAND_UNTAPPED_FIRST = 0, /* naive: take the mana now, pay the tempo later */
+    MF_LAND_TAPPED_FIRST,       /* greedy: pay the tempo early, when it is cheapest on average */
+    MF_LAND_CAREFUL             /* look: pay it on a turn the extra mana buys nothing */
+} mf_land_rule;
+
+/* Which castable spell to cast first. "Greedy" has two readings and they
+   disagree — spend the most mana, or cast the most spells — so both are rows
+   rather than one of them being the meaning of the word. */
+typedef enum {
+    MF_CAST_CHEAPEST_FIRST = 0, /* curve out: more spells, less mana spent */
+    MF_CAST_EXPENSIVE_FIRST,    /* spend the most mana available */
+    MF_CAST_RAMP_FIRST          /* role-aware, as far as the model can see a role */
+} mf_cast_rule;
+
 typedef struct {
+    const char *name;
     mf_policy mulligan;
-    /* A tapped land costs a turn of tempo, and that turn is cheapest when there
-       was nothing to cast anyway. Playing them first is the greedy long view;
-       playing them last is the naive one. **Neither is the careful rule**,
-       which is to play the tapped land only when the untapped one would go
-       unused this turn — that is 2.3's, and the gap between them is what G3
-       measures. */
-    bool tapped_lands_first;
-    /* Greedy has two readings and they disagree: spend the most mana, or cast
-       the most spells. Both are heuristics, so both are parameters. */
-    bool expensive_first;
+    mf_land_rule lands;
+    mf_cast_rule casts;
     uint8_t turns;
 } mf_turn_policy;
+
+/* ---- the ladder (design §5) ---------------------------------------------
+ * Rows, not functions. Adding a rung is adding a row, and the per-game path
+ * keeps no indirect calls.
+ *
+ * **Two of §5's six policies are not expressible in this phase and say so
+ * rather than being quietly omitted:** `hold-interaction` is meaningless with no
+ * opponent to hold mana up *for*, and `combo-assemble` needs combo detection
+ * nothing builds yet. `role-aware` is partial — ramp is observable in the opcode
+ * set, removal and interaction are not. */
+
+typedef enum {
+    MF_RUNG_GREEDY = 0,
+    MF_RUNG_CURVE_OUT,
+    MF_RUNG_ROLE_AWARE,
+    MF_RUNG_SEQUENCING_AWARE,
+    MF_RUNG_COUNT
+} mf_rung;
+
+/* `turns` is filled from MF_PHASE_TURNS; everything else is the rung. */
+mf_turn_policy mf_policy_rung(mf_rung r);
+
+#define MF_PHASE_TURNS 4
 
 /* ---- the end-of-phase state vector ---------------------------------------
  * What §3 scores. **Integers only** — a float here would be summed across games

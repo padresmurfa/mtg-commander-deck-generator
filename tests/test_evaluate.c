@@ -102,8 +102,8 @@ static const mf_deck *deck(void) {
 /* A keep rule with real numbers in it, so mulligans happen and the resumed axis
    has a half-finished game worth restoring. */
 static const mf_turn_policy POLICY = {
-    .mulligan = {"careful", 2, 5, 1, 3, 3}, .tapped_lands_first = true,
-    .expensive_first = true, .turns = 4};
+    .name = "matrix", .mulligan = {"careful", 2, 5, 1, 3, 3},
+    .lands = MF_LAND_TAPPED_FIRST, .casts = MF_CAST_EXPENSIVE_FIRST, .turns = 4};
 static const mf_phase_gate GATE = {MF_GATE_MIN_MANA, MF_GATE_MIN_SPELLS};
 
 #define MF_RUN_A(fn)       \
@@ -191,7 +191,7 @@ MF_TEST(a_different_policy_is_a_different_answer) {
        policy is the object §4 says the strategies *are*. */
     mf_config c = eval_cfg(5);
     mf_turn_policy naive = POLICY;
-    naive.tapped_lands_first = false;
+    naive.lands = MF_LAND_UNTAPPED_FIRST;
 
     mf_arena_mark m = mf_arena_push(A);
     mf_digests g1, g2;

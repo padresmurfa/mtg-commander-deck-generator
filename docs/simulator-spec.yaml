@@ -1264,6 +1264,67 @@ validation:
       path: the turn loop's draw step and the land-drop rule, which G2 never touched.
     vacuous_pass_guard: samples > 0, asked of this check before it shipped rather than after.
 
+  policy_gap:
+    ref: "5"
+    added: sprint 2.3
+    gate: G3
+    question: Does naive-vs-careful separate known-forgiving from known-demanding decks?
+    form: >
+      A difference of DIFFERENCES, not a difference: separation = gap(demanding) - gap(forgiving).
+      "The gap is non-zero" would be satisfied by a gap that is a property of the policies rather
+      than of the deck, and would say nothing about skill.
+    thresholds:
+      sigma: 5.0            # significance, against a noise floor measured first
+      ratio: 2.0            # effect size; no sample size can inflate a ratio
+      both_required: true
+    threshold_correction:
+      what: >
+        The rule as first written was significance alone, and a noise floor shrinks as 1/sqrt(N) -
+        so any non-zero separation clears any multiple given enough games. The multiple was fixed in
+        advance and the sample size never was, which left a free parameter on the verdict.
+      measured: >
+        The same comparison read 1.26 sigma at 500 games per block and 5.32 at 8000. Same effect,
+        different verdict.
+      applies_to: [G4, G5]
+      note: >
+        Adding the effect size makes the gate strictly harder and the verdict is unchanged at every
+        sample size and all eight seeds tried, so it is a correction rather than a search for an
+        answer.
+    primary_metric: gate_pass_rate
+    primary_metric_hazard: >
+      Design section 3 wants the opening bar LOW so that weighting opening strength does not breed
+      out every control deck. A rate near 1.0 has almost no room to move, so the right gate for
+      fitness is a poor instrument for measuring a policy gap. Named before measuring.
+    verdicts:
+      - {primary: separates, call: pass}
+      - {primary: flat, secondary: separates, call: defer,
+         means: the signal exists and the instrument is too coarse; re-measure in E3}
+      - {primary: flat, secondary: flat, call: fail, means: section 5 is unfounded}
+    measured:
+      date: 2026-08-10
+      separation: 0.0107
+      noise_sd: 0.0048
+      sigma: 2.24
+      ratio: 1.14
+      secondary_sigma: 17.72
+      verdict: defer
+    decomposition:
+      why: >
+        Design section 4 asserts keep/mulligan judgment is "a large part of the measured skill gap".
+        Nothing had tested that assertion.
+      mulligan_only: {forgiving: 0.0761, demanding: 0.0745}
+      land_rule_only: {forgiving: 0.0000, demanding: 0.0123}
+      finding: >
+        Section 4 is right - the mulligan is ~88% of the gap - and that is a problem for section 5.
+        It is the SAME SIZE on both decks, so it discriminates nothing and nearly cancels in the
+        difference of differences. The sequencing component is exactly zero where there is nothing
+        to sequence and positive where there is: a perfect qualitative separation, and small.
+        A scalar gap is therefore the wrong summary; report the components.
+    policies_not_expressible:
+      hold-interaction: no opponent to hold mana up for
+      combo-assemble: needs combo detection nothing builds yet
+      role-aware: partial - ramp is observable, removal and interaction are not
+
   class_reduction:
     ref: "7.1, 7.6"
     added: sprint 1.3

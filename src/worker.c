@@ -15,6 +15,7 @@
 #include "mf/skill.h"
 #include "mf/table.h"
 #include "mf/evaluate.h"
+#include "mf/gap.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -76,11 +77,94 @@ static void validate_deck(mf_deck *d) {
 
 /* A keep rule with real numbers in it, so mulligans happen. */
 static const mf_turn_policy MF_VALIDATE_POLICY = {
+    .name = "validate",
     .mulligan = {"careful", 2, 5, 1, 3, 3},
-    .tapped_lands_first = true,
-    .expensive_first = true,
+    .lands = MF_LAND_TAPPED_FIRST,
+    .casts = MF_CAST_EXPENSIVE_FIRST,
     .turns = 4};
 static const mf_phase_gate MF_VALIDATE_GATE = {MF_GATE_MIN_MANA, MF_GATE_MIN_SPELLS};
+
+/* Gate G3 (sprint 2.3). The fixtures are built here rather than read from
+   anywhere, because the classification is the claim: a deck called forgiving
+   because the measurement said so would be circular.
+
+   **Forgiving:** mono-green, every land an untapped basic, every spell a
+   one-mana body. Nothing to sequence and no turn on which spending differently
+   changes what can be cast — §5's definition of a deck that plays the same
+   however it is piloted.
+
+   **Demanding:** three colours with pips that demand them, against a mana base
+   where more than half the lands enter tapped, and a higher curve so a wasted
+   turn is not recovered. Sequencing, held tempo and colour-fixing at once. */
+#define MF_G3_GAMES_PER_BLOCK 1000
+#define MF_G3_BLOCKS 16
+#define MF_G3_FIXTURE_LANDS 38
+
+static void g3_forgiving(mf_deck *d) {
+    memset(d, 0, sizeof *d);
+    for (unsigned i = 0; i < MF_DECK_CARDS; i++) {
+        mf_metacard *k = &d->key[i];
+        if (i < MF_G3_FIXTURE_LANDS) {
+            k->types = MF_TYPE_LAND;
+            k->produces = MF_MANA_G;
+            k->produces_max = 1;
+            k->ops = (uint16_t)(1u << MF_OP_TAP_FOR_MANA);
+        } else {
+            k->types = MF_TYPE_CREATURE;
+            k->cmc = 1;
+            k->g = 1;
+            k->power = k->toughness = 1;
+        }
+    }
+}
+
+static void g3_demanding(mf_deck *d) {
+    memset(d, 0, sizeof *d);
+    for (unsigned i = 0; i < MF_DECK_CARDS; i++) {
+        mf_metacard *k = &d->key[i];
+        if (i < 16) {
+            k->types = MF_TYPE_LAND;
+            k->produces = MF_MANA_W | MF_MANA_U;
+            k->produces_max = 1;
+            k->ops = (uint16_t)(1u << MF_OP_TAP_FOR_MANA_CHOICE);
+        } else if (i < MF_G3_FIXTURE_LANDS) {
+            k->types = MF_TYPE_LAND;
+            k->produces = MF_MANA_W | MF_MANA_U | MF_MANA_B;
+            k->produces_max = 1;
+            k->ops = (uint16_t)((1u << MF_OP_TAP_FOR_MANA_CHOICE) | (1u << MF_OP_ENTERS_TAPPED));
+        } else if (i < 60) {
+            k->types = MF_TYPE_CREATURE;
+            k->cmc = 2;
+            k->w = k->u = 1;
+            k->power = k->toughness = 2;
+        } else if (i < 80) {
+            k->types = MF_TYPE_CREATURE;
+            k->cmc = 3;
+            k->generic = 1;
+            k->u = k->b = 1;
+            k->power = k->toughness = 3;
+        } else {
+            k->types = MF_TYPE_CREATURE;
+            k->cmc = 4;
+            k->generic = 2;
+            k->w = k->b = 1;
+            k->power = k->toughness = 4;
+        }
+    }
+}
+
+static void write_gap(mf_jw *w, const char *label, const mf_gap *g) {
+    mf_jw_key(w, label);
+    mf_jw_obj_begin(w);
+    mf_jw_key(w, "naive_rate");      mf_jw_num(w, g->naive_rate);
+    mf_jw_key(w, "careful_rate");    mf_jw_num(w, g->careful_rate);
+    mf_jw_key(w, "gap");             mf_jw_num(w, g->gap);
+    mf_jw_key(w, "naive_wasted");    mf_jw_num(w, g->naive_wasted);
+    mf_jw_key(w, "careful_wasted");  mf_jw_num(w, g->careful_wasted);
+    mf_jw_key(w, "naive_spells");    mf_jw_num(w, g->naive_spells);
+    mf_jw_key(w, "careful_spells");  mf_jw_num(w, g->careful_spells);
+    mf_jw_obj_end(w);
+}
 
 /* T6 (sprint 2.2). The second analytic anchor: the land-drop curve against the
    closed form, on a deck that neither draws nor ramps — which is the identity's
@@ -227,7 +311,8 @@ static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
     double t6_worst = 0.0;
     /* No mulligan and nothing castable, so the phase is the draw step and the
        land drop and nothing else — which is what the closed form describes. */
-    mf_turn_policy drops = {.mulligan = {"keep-all", 0, MF_OPENING_HAND, 0, 0, 0},
+    mf_turn_policy drops = {.name = "keep-all",
+                            .mulligan = {"keep-all", 0, MF_OPENING_HAND, 0, 0, 0},
                             .turns = MF_ANALYTIC_TURNS};
     for (size_t i = 0; i < sizeof MF_T6_LANDS / sizeof MF_T6_LANDS[0]; i++) {
         mf_deck d;
@@ -263,6 +348,76 @@ static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
     mf_jw_key(tw, "pass");        mf_jw_bool(tw, t6_pass);
     mf_jw_obj_end(tw);
     write_record(art, tw);
+
+    /* Gate G3. Both criteria are reported whatever the verdict, because "within
+       tolerance" says nothing about how close it came — and here the two
+       disagree, which is the whole finding. */
+    mf_deck forgiving, demanding;
+    g3_forgiving(&forgiving);
+    g3_demanding(&demanding);
+    mf_turn_policy naive = mf_policy_rung(MF_RUNG_GREEDY);
+    mf_turn_policy careful = mf_policy_rung(MF_RUNG_SEQUENCING_AWARE);
+    mf_g3 g3;
+    mf_g3_measure(&forgiving, &demanding, &naive, &careful, &MF_VALIDATE_GATE, c->seed,
+                  MF_G3_GAMES_PER_BLOCK, MF_G3_BLOCKS, &g3);
+
+    mf_jw *g3w = mf_jw_new(root);
+    mf_jw_obj_begin(g3w);
+    mf_jw_key(g3w, "record");            mf_jw_str(g3w, "g3");
+    mf_jw_key(g3w, "games_per_block");   mf_jw_int(g3w, MF_G3_GAMES_PER_BLOCK);
+    mf_jw_key(g3w, "blocks");            mf_jw_int(g3w, MF_G3_BLOCKS);
+    mf_jw_key(g3w, "tolerance_sigma");   mf_jw_num(g3w, MF_G3_SIGMA);
+    mf_jw_key(g3w, "tolerance_ratio");   mf_jw_num(g3w, MF_G3_RATIO);
+    mf_jw_key(g3w, "naive_policy");      mf_jw_str(g3w, naive.name);
+    mf_jw_key(g3w, "careful_policy");    mf_jw_str(g3w, careful.name);
+    write_gap(g3w, "forgiving", &g3.forgiving);
+    write_gap(g3w, "demanding", &g3.demanding);
+    mf_jw_key(g3w, "separation");        mf_jw_num(g3w, g3.separation);
+    mf_jw_key(g3w, "noise_sd");          mf_jw_num(g3w, g3.noise_sd);
+    mf_jw_key(g3w, "sigma");             mf_jw_num(g3w, g3.sigma);
+    mf_jw_key(g3w, "ratio");             mf_jw_num(g3w, g3.ratio);
+    mf_jw_key(g3w, "secondary_sigma");   mf_jw_num(g3w, g3.secondary_sigma);
+    mf_jw_key(g3w, "secondary_ratio");   mf_jw_num(g3w, g3.secondary_ratio);
+    mf_jw_key(g3w, "verdict");           mf_jw_str(g3w, mf_g3_verdict_name(g3.verdict));
+
+    /* The diagnostic that says *why* it defers, emitted by the tool rather than
+       reconstructed later: the same comparison with the two policies differing
+       only in the land rule. This is **not** the gate — the gate compares the
+       two ends of §5's ladder, which differ in the mulligan as well — and it is
+       recorded beside the verdict rather than in place of it. */
+    mf_turn_policy seq_only = careful, seq_naive = careful;
+    seq_naive.lands = naive.lands;
+    mf_g3 seq;
+    mf_g3_measure(&forgiving, &demanding, &seq_naive, &seq_only, &MF_VALIDATE_GATE, c->seed,
+                  MF_G3_GAMES_PER_BLOCK, MF_G3_BLOCKS, &seq);
+    mf_jw_key(g3w, "land_rule_only");
+    mf_jw_obj_begin(g3w);
+    mf_jw_key(g3w, "forgiving_gap"); mf_jw_num(g3w, seq.forgiving.gap);
+    mf_jw_key(g3w, "demanding_gap"); mf_jw_num(g3w, seq.demanding.gap);
+    mf_jw_key(g3w, "separation");    mf_jw_num(g3w, seq.separation);
+    mf_jw_key(g3w, "sigma");         mf_jw_num(g3w, seq.sigma);
+    mf_jw_key(g3w, "ratio");         mf_jw_num(g3w, seq.ratio);
+    mf_jw_key(g3w, "verdict");       mf_jw_str(g3w, mf_g3_verdict_name(seq.verdict));
+    mf_jw_obj_end(g3w);
+
+    /* And the mulligan component, which §4 asserts is "a large part of the
+       measured skill gap" — an assertion about the design that nothing had
+       tested until now. */
+    mf_turn_policy mull_only = naive;
+    mull_only.mulligan = careful.mulligan;
+    mf_gap mf, md;
+    mf_gap_measure(&forgiving, &naive, &mull_only, &MF_VALIDATE_GATE, c->seed,
+                   MF_G3_GAMES_PER_BLOCK * MF_G3_BLOCKS, 0, &mf);
+    mf_gap_measure(&demanding, &naive, &mull_only, &MF_VALIDATE_GATE, c->seed,
+                   MF_G3_GAMES_PER_BLOCK * MF_G3_BLOCKS, 0, &md);
+    mf_jw_key(g3w, "mulligan_only");
+    mf_jw_obj_begin(g3w);
+    mf_jw_key(g3w, "forgiving_gap"); mf_jw_num(g3w, mf.gap);
+    mf_jw_key(g3w, "demanding_gap"); mf_jw_num(g3w, md.gap);
+    mf_jw_obj_end(g3w);
+
+    mf_jw_obj_end(g3w);
+    write_record(art, g3w);
 
     mf_jw *w = mf_jw_new(root);
     mf_jw_obj_begin(w);

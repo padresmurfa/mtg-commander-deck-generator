@@ -140,11 +140,10 @@ static bool produces_mana(const mf_metacard *k) {
            (has_op(k, MF_OP_TAP_FOR_MANA) || has_op(k, MF_OP_TAP_FOR_MANA_CHOICE));
 }
 
-/* Everything on the battlefield that could be tapped for mana right now. A
-   creature that arrived this turn cannot — summoning sickness is a rule about
-   creatures specifically, and reading it off "arrived this turn" alone would
-   silence a Sol Ring on the turn it lands. */
-/* What one permanent adds *right now*. Shared by the whole-board scan and by
+/* What one permanent adds *right now*. A creature that arrived this turn cannot
+ * tap — summoning sickness is a rule about creatures specifically, and reading
+ * it off "arrived this turn" alone would silence a Sol Ring on the turn it lands.
+ * Shared by the whole-board scan and by
    the moment a permanent enters, which is the only thing that lets a Sol Ring
    cast on turn one pay for the two-drop behind it — the single most important
    accelerating line in the format, and one this loop originally missed because
@@ -220,6 +219,131 @@ static bool take_library_land(const mf_deck *d, mf_opening *o, uint8_t *out) {
     return false;
 }
 
+/* Ramp, as far as this model can see a role. Sprint 1.3 shipped oracle-text
+   markers rather than the community otags the legacy tree used, so this sees
+   *wording*: a card that taps for mana or fetches a land. A Signet is caught
+   because it taps for mana; a card whose ramp is conditional is not. That is
+   the weaker signal the 2.1 retro recorded, and it bounds how role-aware a
+   role-aware policy can be. */
+static bool is_ramp(const mf_metacard *k) {
+    return produces_mana(k) || has_op(k, MF_OP_FETCH_LAND);
+}
+
+static bool better_cast(mf_cast_rule rule, const mf_metacard *k, unsigned cost, bool best_ramp,
+                        unsigned best_cost) {
+    if (rule == MF_CAST_RAMP_FIRST) {
+        bool ramp = is_ramp(k);
+        if (ramp != best_ramp) return ramp;
+        return cost < best_cost; /* among equals, curve out */
+    }
+    return rule == MF_CAST_EXPENSIVE_FIRST ? cost > best_cost : cost < best_cost;
+}
+
+/* Would one more untapped mana buy anything this turn?
+ *
+ * The whole of the careful rule. A tapland is free on a turn where the untapped
+ * land it displaces would have gone unused, and costs a full turn of tempo on a
+ * turn where it would not — so the rule is to look rather than to guess, which
+ * is what separates this rung from the two below it.
+ *
+ * It asks about *one more castable card*, not about the best total line. A
+ * spell that unlocks another spell is invisible to it, and that is deliberate:
+ * the residue is a further policy gap for a later rung rather than a defect
+ * here. */
+static bool extra_mana_buys_something(const mf_deck *d, const mf_board *b, const mf_opening *o,
+                                      const mf_metacard *land) {
+    mf_mana without = {0};
+    mf_board_mana(d, b, true, &without);
+    mf_mana with = without;
+    if (produces_mana(land)) tap_for_mana(&with, land);
+    if (with.total == without.total) return false;
+
+    uint8_t disc = discount(d, b);
+    for (uint8_t i = 0; i < o->hand_size; i++) {
+        const mf_metacard *k = &d->key[o->hand[i]];
+        /* Lands are played, never cast — the same filter the cast loop uses.
+           Removing it changes nothing, and mutation testing says so: a land
+           costs zero, so it is payable out of an empty pool and can never be
+           *newly* payable. Kept because it states the rule where a reader looks
+           for it, rather than leaving it to be re-derived from arithmetic. */
+        if (k->types & MF_TYPE_LAND) continue;
+        if (mf_mana_can_pay(&with, k, disc) && !mf_mana_can_pay(&without, k, disc)) return true;
+    }
+    return false;
+}
+
+/* Which land to play, per the policy's rule. Ties go to hand order, which is the
+   shuffle's order and therefore already a function of the seed. */
+static bool choose_land(const mf_deck *d, const mf_turn_policy *p, const mf_board *b,
+                        const mf_opening *o, uint8_t *out) {
+    bool played = false, chosen_preferred = false;
+    uint8_t chosen = 0;
+    for (uint8_t i = 0; i < o->hand_size; i++) {
+        const mf_metacard *k = &d->key[o->hand[i]];
+        if (!(k->types & MF_TYPE_LAND)) continue;
+        bool tapped = has_op(k, MF_OP_ENTERS_TAPPED);
+        bool preferred;
+        switch (p->lands) {
+            case MF_LAND_TAPPED_FIRST: preferred = tapped; break;
+            case MF_LAND_CAREFUL:
+                /* Prefer the tapland exactly when the untapped one would be
+                   wasted; otherwise prefer the untapped one. */
+                preferred = tapped == !extra_mana_buys_something(d, b, o, k);
+                break;
+            case MF_LAND_UNTAPPED_FIRST:
+            default: preferred = !tapped; break;
+        }
+        if (!played) {
+            chosen = i;
+            chosen_preferred = preferred;
+            played = true;
+        } else if (preferred && !chosen_preferred) {
+            chosen = i;
+            chosen_preferred = true;
+        }
+    }
+    *out = chosen;
+    return played;
+}
+
+/* ---- the ladder ---------------------------------------------------------- */
+
+mf_turn_policy mf_policy_rung(mf_rung r) {
+    switch (r) {
+        case MF_RUNG_CURVE_OUT:
+            return (mf_turn_policy){"curve-out",
+                                    {"curve-out", 2, 5, 2, 3, 2},
+                                    MF_LAND_TAPPED_FIRST,
+                                    MF_CAST_CHEAPEST_FIRST,
+                                    MF_PHASE_TURNS};
+        case MF_RUNG_ROLE_AWARE:
+            return (mf_turn_policy){"role-aware",
+                                    {"role-aware", 2, 5, 2, 3, 3},
+                                    MF_LAND_TAPPED_FIRST,
+                                    MF_CAST_RAMP_FIRST,
+                                    MF_PHASE_TURNS};
+        case MF_RUNG_SEQUENCING_AWARE:
+            return (mf_turn_policy){"sequencing-aware",
+                                    {"sequencing-aware", 2, 5, 2, 3, 3},
+                                    MF_LAND_CAREFUL,
+                                    MF_CAST_RAMP_FIRST,
+                                    MF_PHASE_TURNS};
+        case MF_RUNG_GREEDY:
+        case MF_RUNG_COUNT:
+        default:
+            /* **Deliberately bad, and it must stay that way.** It takes the
+               mana in front of it, casts the most expensive thing it can, and
+               keeps almost any hand. §5 measures skill as the gap between this
+               and the best rung, so improving this destroys the signal rather
+               than the deck — the weak baseline is the instrument. */
+            return (mf_turn_policy){"greedy",
+                                    {"greedy", 1, 6, 0, 0, 1},
+                                    MF_LAND_UNTAPPED_FIRST,
+                                    MF_CAST_EXPENSIVE_FIRST,
+                                    MF_PHASE_TURNS};
+    }
+}
+
 /* ---- the turn loop ------------------------------------------------------- */
 
 void mf_phase_open(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, uint64_t game,
@@ -272,23 +396,8 @@ void mf_phase_play(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
            follows, and holding it back could only ever cost mana. Which land
            is the policy's question — the tapland's cost is a turn of tempo,
            and that turn is cheapest when there was nothing to cast anyway. */
-        bool played = false, chosen_preferred = false;
-        uint8_t chosen = 0;
-        for (uint8_t i = 0; i < o.hand_size; i++) {
-            const mf_metacard *k = &d->key[o.hand[i]];
-            if (!(k->types & MF_TYPE_LAND)) continue;
-            bool preferred = has_op(k, MF_OP_ENTERS_TAPPED) == p->tapped_lands_first;
-            if (!played) {
-                chosen = i;
-                chosen_preferred = preferred;
-                played = true;
-            } else if (preferred && !chosen_preferred) {
-                /* Ties go to hand order, which is the shuffle's and therefore
-                   already a function of the seed. */
-                chosen = i;
-                chosen_preferred = true;
-            }
-        }
+        uint8_t chosen;
+        bool played = choose_land(d, p, &b, &o, &chosen);
         if (played) {
             mf_board_enters(d, &b, o.hand[chosen], false);
             from_hand(&o, chosen);
@@ -306,6 +415,7 @@ void mf_phase_play(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
             uint8_t disc = discount(d, &b);
             int best = -1;
             unsigned best_cost = 0;
+            bool best_ramp = false;
             /* The candidates are the hand **and the commander**, which §4 says
                is always available and so unlike every other card can be counted
                on. One loop over both, filtered identically: a land is played
@@ -317,9 +427,10 @@ void mf_phase_play(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
                 if (k->types & MF_TYPE_LAND) continue;
                 if (!mf_mana_can_pay(&m, k, disc)) continue;
                 unsigned c = mf_mana_cost(k, disc);
-                if (best < 0 || (p->expensive_first ? c > best_cost : c < best_cost)) {
+                if (best < 0 || better_cast(p->casts, k, c, best_ramp, best_cost)) {
                     best = i;
                     best_cost = c;
+                    best_ramp = is_ramp(k);
                 }
             }
             if (best < 0) break;

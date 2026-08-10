@@ -358,7 +358,7 @@ static mf_turn_policy plain(void) {
     mf_turn_policy p = {0};
     p.mulligan = (mf_policy){"keep-all", 0, MF_OPENING_HAND, 0, 0, 0};
     p.turns = 4;
-    p.expensive_first = true;
+    p.casts = MF_CAST_EXPENSIVE_FIRST;
     return p;
 }
 
@@ -603,9 +603,9 @@ MF_TEST(greedy_has_two_readings_and_they_disagree) {
     mf_deck d;
     deck_of(&d, d1, C_HUGE);
     mf_turn_policy big = plain();
-    big.expensive_first = true;
+    big.casts = MF_CAST_EXPENSIVE_FIRST;
     mf_turn_policy small = plain();
-    small.expensive_first = false;
+    small.casts = MF_CAST_CHEAPEST_FIRST;
 
     unsigned spells_big = 0, spells_small = 0;
     for (uint64_t g = 0; g < 200; g++) {
@@ -640,7 +640,7 @@ MF_TEST(a_rock_cast_this_turn_pays_for_the_spell_behind_it) {
        not separate the two implementations — the second turn supplies the mana
        either way, which is exactly how this defect stayed hidden. */
     p.turns = 1;
-    p.expensive_first = false;
+    p.casts = MF_CAST_CHEAPEST_FIRST;
     unsigned past_one_mana = 0, three_drop_on_one = 0;
     for (uint64_t g = 0; g < 256; g++) {
         mf_phase_state s;
@@ -794,9 +794,9 @@ MF_TEST(playing_a_tapped_land_early_is_visible_in_the_result) {
     deck_of(&d, d1, C_HUGE);
 
     mf_turn_policy early = plain();
-    early.tapped_lands_first = true;
+    early.lands = MF_LAND_TAPPED_FIRST;
     mf_turn_policy late = plain();
-    late.tapped_lands_first = false;
+    late.lands = MF_LAND_UNTAPPED_FIRST;
 
     unsigned spells_early = 0, spells_late = 0;
     for (uint64_t g = 0; g < 400; g++) {
@@ -807,6 +807,222 @@ MF_TEST(playing_a_tapped_land_early_is_visible_in_the_result) {
         spells_late += b.spells;
     }
     MF_CHECK(spells_early > spells_late);
+}
+
+/* ---- the ladder, and the careful rung (sprint 2.3) ----------------------- */
+
+/* Measured once and pinned — see the comment at the assertion. */
+#define MF_DISCOUNT_LOOKAHEAD_SPELLS 751
+#define MF_DISCOUNT_LOOKAHEAD_WASTED 206
+
+MF_TEST(the_careful_rule_plays_the_tapland_only_when_the_mana_is_free) {
+    /* A deck of untapped lands, taplands and three-drops. The naive rule takes
+       the mana in front of it and pays the tempo on the turn it hurts; the
+       greedy rule always front-loads the taplands whether or not that turn had
+       a play; the careful rule looks at whether the extra untapped mana would
+       actually buy a spell this turn.
+       Measured across games rather than asserted on one, because a single
+       shuffle says nothing about a rule. */
+    uint8_t d1[C_COUNT] = {[C_FOREST] = 19, [C_GUILDGATE] = 19, [C_THREE] = 61};
+    mf_deck d;
+    deck_of(&d, d1, C_HUGE);
+
+    mf_turn_policy naive = plain(), greedy = plain(), careful = plain();
+    naive.lands = MF_LAND_UNTAPPED_FIRST;
+    greedy.lands = MF_LAND_TAPPED_FIRST;
+    careful.lands = MF_LAND_CAREFUL;
+
+    unsigned sp_naive = 0, sp_greedy = 0, sp_careful = 0;
+    unsigned wasted_greedy = 0, wasted_careful = 0;
+    for (uint64_t g = 0; g < 400; g++) {
+        mf_phase_state a, b, c;
+        mf_phase_run(&d, &naive, 2026, g, &a);
+        mf_phase_run(&d, &greedy, 2026, g, &b);
+        mf_phase_run(&d, &careful, 2026, g, &c);
+        sp_naive += a.spells;
+        sp_greedy += b.spells;
+        sp_careful += c.spells;
+        wasted_greedy += b.mana_wasted;
+        wasted_careful += c.mana_wasted;
+    }
+    /* Careful beats the always-front-load rule, which beats the naive one. */
+    MF_CHECK(sp_careful > sp_greedy);
+    MF_CHECK(sp_greedy > sp_naive);
+    /* And it shows in mana_wasted, which is the field §3's sequencing argument
+       put there — not only in the spell count. */
+    MF_CHECK(wasted_careful != wasted_greedy);
+}
+
+MF_TEST(careful_asks_what_the_mana_buys_that_it_could_not_buy_already) {
+    /* The exact rule, and the one a lazier version gets wrong: not "is anything
+       castable with the extra mana" but "is anything castable **that was not
+       already**". They differ constantly and the difference is the whole rule.
+
+       A deck whose every spell costs one makes the distinction total. From the
+       moment there is a single land, one more mana never unlocks anything — so
+       the careful rule takes the tapland from turn two on, while a rule asking
+       only "is something castable" would take the untapped land forever and be
+       the naive rule wearing a lookahead. */
+    uint8_t d1[C_COUNT] = {[C_FOREST] = 19, [C_GUILDGATE] = 19, [C_ELVES] = 61};
+    mf_deck d;
+    deck_of(&d, d1, C_HUGE);
+    mf_turn_policy naive = plain(), careful = plain();
+    naive.lands = MF_LAND_UNTAPPED_FIRST;
+    careful.lands = MF_LAND_CAREFUL;
+
+    unsigned differed = 0;
+    for (uint64_t g = 0; g < 200; g++) {
+        mf_phase_state a, b;
+        mf_phase_run(&d, &naive, 61, g, &a);
+        mf_phase_run(&d, &careful, 61, g, &b);
+        if (memcmp(&a, &b, sizeof a) != 0) differed++;
+    }
+    MF_CHECK(differed > 0);
+}
+
+MF_TEST(the_lookahead_counts_the_discount_it_will_actually_pay) {
+    /* A cost reducer changes what "already castable" means, so a lookahead that
+       computed castability at full price would answer a question about a game
+       nobody is playing. Pinned as a total over a fixed seed range: no single
+       game separates the two readings, and mutation testing showed nothing else
+       here does either. */
+    uint8_t d1[C_COUNT] = {[C_FOREST] = 15, [C_GUILDGATE] = 14, [C_REDUCER] = 35,
+                           [C_THREE] = 35};
+    mf_deck d;
+    deck_of(&d, d1, C_HUGE);
+    mf_turn_policy careful = plain();
+    careful.lands = MF_LAND_CAREFUL;
+    unsigned wasted = 0, spells = 0;
+    for (uint64_t g = 0; g < 200; g++) {
+        mf_phase_state s;
+        mf_phase_run(&d, &careful, 71, g, &s);
+        wasted += s.mana_wasted;
+        spells += s.spells;
+    }
+    MF_EQ_INT(spells, MF_DISCOUNT_LOOKAHEAD_SPELLS);
+    MF_EQ_INT(wasted, MF_DISCOUNT_LOOKAHEAD_WASTED);
+}
+
+MF_TEST(role_aware_curves_out_among_the_ramp_it_prefers) {
+    /* Every spell in this deck is ramp, so the role test never breaks a tie and
+       nothing is left but the cost order. The specification is that ramp-first
+       curves out among equals, so on this deck it must be **exactly**
+       cheapest-first, game for game — and must not be expensive-first, or the
+       equality would be saying nothing.
+
+       Asserted against the specification rather than against an outcome,
+       because the outcome does not pin it: ordering the ramp by cost descending
+       casts *more* spells here, not fewer. A mana creature is summoning sick
+       and a fetched land is not, so taking the expensive ramp first is genuinely
+       the better line on this deck — which is a lead for a later rung and a
+       reminder that "more spells" is not the same claim as "this rule". */
+    uint8_t d1[C_COUNT] = {[C_FOREST] = 40, [C_ELVES] = 30, [C_GROWTH] = 29};
+    mf_deck d;
+    deck_of(&d, d1, C_HUGE);
+    mf_turn_policy role = plain(), cheap = plain(), big = plain();
+    role.casts = MF_CAST_RAMP_FIRST;
+    cheap.casts = MF_CAST_CHEAPEST_FIRST;
+    big.casts = MF_CAST_EXPENSIVE_FIRST;
+    unsigned differed_from_big = 0;
+    for (uint64_t g = 0; g < 256; g++) {
+        mf_phase_state a, b, c;
+        mf_phase_run(&d, &role, 46, g, &a);
+        mf_phase_run(&d, &cheap, 46, g, &b);
+        mf_phase_run(&d, &big, 46, g, &c);
+        MF_CHECK(memcmp(&a, &b, sizeof a) == 0);
+        if (memcmp(&a, &c, sizeof a) != 0) differed_from_big++;
+    }
+    MF_CHECK(differed_from_big > 0);
+}
+
+MF_TEST(a_land_fetch_counts_as_ramp_even_though_it_makes_no_mana) {
+    /* Rampant Growth taps for nothing. It is ramp because it puts a land onto
+       the battlefield, and a role test that only looked at mana production would
+       miss the entire "search your library" half of the category.
+       The Growth and the bear cost the same, so cost cannot separate them and
+       only the role can. */
+    uint8_t d1[C_COUNT] = {[C_FOREST] = 40, [C_GROWTH] = 30, [C_BEAR] = 29};
+    mf_deck d;
+    deck_of(&d, d1, C_HUGE);
+    mf_turn_policy role = plain(), cheap = plain();
+    role.casts = MF_CAST_RAMP_FIRST;
+    cheap.casts = MF_CAST_CHEAPEST_FIRST;
+    unsigned lands_role = 0, lands_cheap = 0;
+    for (uint64_t g = 0; g < 256; g++) {
+        mf_phase_state a, b;
+        mf_phase_run(&d, &role, 47, g, &a);
+        mf_phase_run(&d, &cheap, 47, g, &b);
+        lands_role += a.lands;
+        lands_cheap += b.lands;
+    }
+    MF_CHECK(lands_role > lands_cheap);
+}
+
+MF_TEST(the_careful_rule_is_the_naive_one_when_there_is_no_choice) {
+    /* No taplands: nothing to sequence, so every rule must agree exactly. A
+       careful rule that differed here would be doing something other than what
+       it claims. */
+    uint8_t d1[C_COUNT] = {[C_FOREST] = 38, [C_BEAR] = 30, [C_THREE] = 31};
+    mf_deck d;
+    deck_of(&d, d1, C_HUGE);
+    mf_turn_policy naive = plain(), careful = plain();
+    naive.lands = MF_LAND_UNTAPPED_FIRST;
+    careful.lands = MF_LAND_CAREFUL;
+    for (uint64_t g = 0; g < 64; g++) {
+        mf_phase_state a, b;
+        mf_phase_run(&d, &naive, 8, g, &a);
+        mf_phase_run(&d, &careful, 8, g, &b);
+        MF_CHECK(memcmp(&a, &b, sizeof a) == 0);
+    }
+}
+
+MF_TEST(role_aware_casts_the_ramp_before_the_body) {
+    /* An elf and a bear both castable off two lands: role-aware takes the elf,
+       because it makes mana and the bear does not. Cheapest-first takes the elf
+       too — but for the wrong reason, so the two are separated by a case where
+       the ramp is the *more* expensive card. */
+    uint8_t d1[C_COUNT] = {[C_FOREST] = 40, [C_ELVES] = 20, [C_BEAR] = 39};
+    mf_deck d;
+    deck_of(&d, d1, C_HUGE);
+    mf_turn_policy role = plain(), big = plain();
+    role.casts = MF_CAST_RAMP_FIRST;
+    big.casts = MF_CAST_EXPENSIVE_FIRST;
+    unsigned mana_role = 0, mana_big = 0;
+    for (uint64_t g = 0; g < 256; g++) {
+        mf_phase_state a, b;
+        mf_phase_run(&d, &role, 44, g, &a);
+        mf_phase_run(&d, &big, 44, g, &b);
+        mana_role += a.mana;
+        mana_big += b.mana;
+    }
+    /* Ramp first means more mana at the end of the phase, which is the point. */
+    MF_CHECK(mana_role > mana_big);
+}
+
+MF_TEST(the_ladder_is_rows_and_the_ends_disagree) {
+    /* §5's rungs, as data. What matters for G3 is that the two ends are
+       genuinely different objects — a ladder whose rungs differed only in name
+       would report a policy gap of zero and look like a failed gate. */
+    MF_EQ_STR(mf_policy_rung(MF_RUNG_GREEDY).name, "greedy");
+    MF_EQ_STR(mf_policy_rung(MF_RUNG_CURVE_OUT).name, "curve-out");
+    MF_EQ_STR(mf_policy_rung(MF_RUNG_ROLE_AWARE).name, "role-aware");
+    MF_EQ_STR(mf_policy_rung(MF_RUNG_SEQUENCING_AWARE).name, "sequencing-aware");
+    /* Out of range is the naive rung rather than a crash: the ladder is data a
+       caller indexes, and the safe default is the one that claims least. */
+    MF_EQ_STR(mf_policy_rung(MF_RUNG_COUNT).name, "greedy");
+
+    mf_turn_policy lo = mf_policy_rung(MF_RUNG_GREEDY);
+    mf_turn_policy hi = mf_policy_rung(MF_RUNG_SEQUENCING_AWARE);
+    MF_EQ_INT(lo.lands, MF_LAND_UNTAPPED_FIRST);
+    MF_EQ_INT(hi.lands, MF_LAND_CAREFUL);
+    MF_EQ_INT(lo.casts, MF_CAST_EXPENSIVE_FIRST);
+    MF_EQ_INT(hi.casts, MF_CAST_RAMP_FIRST);
+    /* The mulligan differs too, because §4 says keep/mull judgment is one of
+       the largest skill differentiators and factoring it out would erase the
+       signal. Whether that is TRUE is what 2.3 decomposes and measures. */
+    MF_CHECK(lo.mulligan.min_lands != hi.mulligan.min_lands ||
+             lo.mulligan.min_playables != hi.mulligan.min_playables);
+    for (int r = 0; r < MF_RUNG_COUNT; r++) MF_EQ_INT(mf_policy_rung((mf_rung)r).turns, 4);
 }
 
 MF_TEST(the_phase_is_a_pure_function_of_deck_seed_and_game) {
@@ -970,7 +1186,7 @@ MF_TEST(a_cost_reducer_makes_the_next_spell_cheaper) {
     deck_of(&d, d1, C_HUGE);
     mf_turn_policy p = plain();
     p.turns = 3;
-    p.expensive_first = false;
+    p.casts = MF_CAST_CHEAPEST_FIRST;
     unsigned discounted = 0;
     for (uint64_t g = 0; g < 400; g++) {
         mf_phase_state s;
@@ -990,7 +1206,7 @@ MF_TEST(a_ritual_may_name_a_choice_of_colour) {
     mf_deck d;
     deck_of(&d, d1, C_HUGE);
     mf_turn_policy p = plain();
-    p.expensive_first = false;
+    p.casts = MF_CAST_CHEAPEST_FIRST;
     unsigned black_cast = 0;
     for (uint64_t g = 0; g < 256; g++) {
         mf_phase_state s;
@@ -1069,6 +1285,14 @@ void run_turn_tests(void) {
     MF_RUN(a_cantrip_puts_a_card_in_hand_and_a_fetch_puts_a_land_in_play);
     MF_RUN(a_missed_land_drop_is_counted_and_never_caught_up);
     MF_RUN(playing_a_tapped_land_early_is_visible_in_the_result);
+    MF_RUN(the_careful_rule_plays_the_tapland_only_when_the_mana_is_free);
+    MF_RUN(careful_asks_what_the_mana_buys_that_it_could_not_buy_already);
+    MF_RUN(the_lookahead_counts_the_discount_it_will_actually_pay);
+    MF_RUN(role_aware_curves_out_among_the_ramp_it_prefers);
+    MF_RUN(a_land_fetch_counts_as_ramp_even_though_it_makes_no_mana);
+    MF_RUN(the_careful_rule_is_the_naive_one_when_there_is_no_choice);
+    MF_RUN(role_aware_casts_the_ramp_before_the_body);
+    MF_RUN(the_ladder_is_rows_and_the_ends_disagree);
     MF_RUN(the_phase_is_a_pure_function_of_deck_seed_and_game);
     MF_RUN(a_source_that_names_no_amount_produces_nothing);
     MF_RUN(a_mask_outside_the_colour_space_is_fatal);

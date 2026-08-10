@@ -193,7 +193,10 @@ Evaluation yields **(deck × strategy) → performance**. Consequences:
 ### Phase-end state evaluation
 
 Needs an explicit state vector — mana available, cards in hand, board presence, engine pieces
-online — and a per-strategy scalarisation of it.
+online — and a per-strategy scalarisation of it. That scalarisation is a guess, but a checkable one:
+verify that end-of-opening score correlates with end-of-game outcome *within the simulator*. If it
+does not, the phase evaluator is measuring the wrong thing, and that is discoverable in an afternoon
+rather than after the GA has run.
 
 *(Amended sprint 2.2, when the vector was built.)* It is thirteen bytes, every field an integer, with
 **no padding** — asserted statically, because the struct is folded into a run digest byte by byte and
@@ -216,10 +219,7 @@ would bias the objective *differentially* rather than uniformly: the extra card 
 slow, expensive deck than a cheap one, so a fixed choice changes the *ranking* — which is precisely
 what G4 validates and could not see. Parity assignment is exactly 50/50 over an even sample count, so
 it is proportional stratification rather than randomisation, and it keeps §7.8's common random
-numbers intact: game `g` is on the play for every candidate compared at that index. That scalarisation is a guess, but a checkable one:
-verify that end-of-opening score correlates with end-of-game outcome *within the simulator*. If it
-does not, the phase evaluator is measuring the wrong thing, and that is discoverable in an afternoon
-rather than after the GA has run.
+numbers intact: game `g` is on the play for every candidate compared at that index.
 
 ---
 
@@ -238,6 +238,30 @@ deck under a deliberately naive policy and under the best available policy. The 
 No new modelling, reuses the policy ladder, and — unusually for this design — falsifiable. The full
 curve across the ladder is more informative than the scalar: decks that plateau early are fine for
 anyone above beginner; decks that keep rewarding skill indefinitely are not.
+
+*(Amended sprint 2.3, when G3 was run.)* **The gap is a sum of two components that behave completely
+differently, and summing them is what made the gate defer.** Decomposed on a deck built to be
+forgiving and one built to be demanding:
+
+| Component | Forgiving | Demanding |
+| --- | ---: | ---: |
+| Mulligan only | **+0.0761** | **+0.0745** |
+| Land rule only | **+0.0000** | **+0.0123** |
+
+§4 is right that the mulligan is a large part of the gap — it is about 88% of it. But it is *the same
+size on both decks*, so it discriminates nothing, and in a difference of differences it nearly
+cancels. The sequencing component is exactly zero on the deck with nothing to sequence and positive
+on the deck built to punish it: a perfect qualitative separation, and small.
+
+**So a scalar gap is the wrong summary.** Report the components. A deck is demanding because
+*sequencing* punishes naive play, not because a careful mulligan helps — the careful mulligan helps
+every deck about equally, which is a fact about the policy rather than about the deck.
+
+**Two of the six policies are not expressible in the opening phase**, and the bracket tables above
+should be read with that in mind: `hold-interaction` is meaningless with no opponent to hold mana up
+for, and `combo-assemble` needs combo detection nothing builds. `role-aware` is partial — ramp is
+observable in the opcode set, removal and interaction are not. All three resolve when E5 supplies an
+opponent.
 
 ### Optimise under the target policy
 

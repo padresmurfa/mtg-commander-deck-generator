@@ -13,8 +13,8 @@
 
 meta:
   status: in_progress
-  current_sprint: "2.3"
-  task_split_valid_for: "2.3"     # task-splitting any other sprint is speculative
+  current_sprint: "3.1"
+  task_split_valid_for: "3.1"     # task-splitting any other sprint is speculative
   baseline: greenfield
   language: c
   deliverable: cli
@@ -292,7 +292,7 @@ epics:
 
   - id: E2
     name: Opening phase
-    status: active
+    status: done
     sprints:
       - id: "2.1"
         name: Shuffle, draw, mulligan
@@ -332,8 +332,30 @@ epics:
           - end-of-phase state vector produced
       - id: "2.3"
         name: Policies & policy gap
-        status: not_started
+        status: done
         gate: G3
+        retro: docs/plan/retros/2.3-policies-policy-gap.md
+        tasks_doc: docs/plan/sprints/2.3-policies-policy-gap.md
+        result:
+          checks: 10535
+          line_coverage: 100.00
+          branch_coverage: 95.61
+          g3_sigma: 2.24
+          g3_ratio: 1.14
+          g3_tolerance_sigma: 5.0
+          g3_tolerance_ratio: 2.0
+          g3_secondary_sigma: 17.72
+          g3_verdict: defer
+          g3_defer_reason: >
+            The primary metric is the section 3 pass rate, whose bar section 3 deliberately sets LOW
+            - so it has almost no room to move and separates the decks by only 1.14x while the finer
+            counters separate them at 17.72 sigma. The signal is real; the instrument is too coarse.
+            Re-measure in E3 against a continuous objective.
+          gap_decomposition:
+            mulligan_only: {forgiving: 0.0761, demanding: 0.0745}
+            land_rule_only: {forgiving: 0.0000, demanding: 0.0123}
+          mutations: "23/23"
+          modules_added: [gap]
         exit_criteria:
           - greedy and careful policies implemented
           - gap measured
@@ -341,7 +363,7 @@ epics:
 
   - id: E3
     name: Solo evaluation
-    status: not_started
+    status: active
     sprints:
       - id: "3.1"
         name: Aggregate phases 5+
@@ -474,53 +496,73 @@ epics:
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
 tasks:
-  sprint: "2.3"
-  doc: docs/plan/sprints/2.3-policies-policy-gap.md
+  sprint: "3.1"
+  doc: docs/plan/sprints/3.1-aggregate-phases.md
   goal: >
-    The policy ladder, and gate G3: does naive-versus-careful separate decks that are known to be
-    forgiving from decks that are known to be demanding?
+    Turns 5+ in aggregate - development and execution - so a full solo run produces a phase-end
+    state rather than stopping at the opening gate.
   why_now: >
-    2.2 built one policy and deliberately built it badly — greedy will not cast a ritual to enable a
-    bigger spell, and it sequences taplands by a flag rather than by whether the mana would be used.
-    That gap is not a defect to fix quietly; it is the signal design section 5 says skill IS. G3 asks
-    whether the signal exists at all, and if it does not, the whole skill ladder is unfounded.
+    E2 is closed and its gate deferred for a reason that names this sprint: the opening produces
+    pass/fail and nothing else, which is right for fitness and too coarse to measure a policy gap
+    against. A continuous objective is what G3 needs re-measuring against, and it does not exist
+    until phases 5+ do.
   carried_in: []
   input_from_previous_retro:
     - >
-      The greedy baseline is weak ON PURPOSE. Do not improve it in place - a careful policy is a new
-      row in the ladder, and the gap between them is the measurement.
+      G3 is DEFERRED, not passed. Re-measure the policy gap here against whatever continuous score
+      this sprint produces, and record it beside the 2.3 numbers rather than over them.
     - >
-      The bottoming rule is a guess with no oracle behind it, carried since 2.1 and now affecting
-      every game played rather than only the hand. 2.3 measures policies; this is one of them.
+      A gate threshold expressed in standard errors has the sample size left blank. Significance is
+      free at scale. Every gate from here also needs an EFFECT SIZE. This applies to G4 in 3.3.
     - >
-      A defect can hide from the state vector. It reports the pool AFTER everything untaps, so
-      anything about timing within a turn is invisible through it. Tests that need to see a turn go
-      through the board API.
+      The skill gap is ~88% mulligan, and the mulligan component is the same on every deck. A
+      scalar gap is the wrong summary - report the components.
     - >
-      Draw and cost-reduction AMOUNTS are not in the metacard, so both assume one. This qualifies
-      G1 and it will qualify G3: a policy cannot sequence around a number the model does not carry.
+      G1 counted a clause as modelled when the opcode exists, but the metacard cannot carry the
+      AMOUNT the opcode needs (draw and cost reduction both assume one). Widening the phases
+      re-opens G1, and this is part of what it will find.
     - >
-      A gate must be unable to pass vacuously (2.1), and its threshold must be fixed before the
-      number is seen (2.1, 2.2). G3's separation criterion is the hard case, because "exceeding
-      measurement noise" needs the noise measured first.
+      Inert is relative to what is simulated. 90.3% of clauses are inert for turns 1-4; that number
+      falls here, and G1 falls with it. That is the model growing rather than breaking.
   split:
     - id: T1
-      name: the careful policy - sequence the tapland by whether the mana would be used
+      name: what aggregate means - the state that carries from turn 4 into turn 5
     - id: T2
-      name: the naive policy - a deliberately bad rung, written down as such
+      name: development phase, turns 5-7, in aggregate
     - id: T3
-      name: the policy ladder as data, all five rungs from design section 5
+      name: execution phase, turns 8+, in aggregate
     - id: T4
-      name: paired measurement - same seeds, same decks, both policies
+      name: a continuous phase-end score, and what it is a score OF
     - id: T5
-      name: the noise floor, measured BEFORE the separation threshold is chosen
+      name: re-measure G3 against it, beside the 2.3 numbers
     - id: T6
-      name: known-forgiving and known-demanding fixture decks, and why each is which
+      name: re-measure G1 now that more is simulated, beside 0.9325
     - id: T7
-      name: gate G3 - measured, recorded, and called
-    - id: T8
       name: retro and amendments
 retros:
+  - sprint: "2.3"
+    doc: docs/plan/retros/2.3-policies-policy-gap.md
+    gates: [G3]
+    design_amendments: 5
+    headline: >
+      G3 DEFERRED, and the reason is a bigger finding than the verdict. The policy gap was decomposed
+      because design section 4 asserts the mulligan is "a large part" of it and nothing had tested
+      that: it is right, and that turns out to be a problem for section 5. The mulligan is ~88% of
+      the gap and is the SAME SIZE on both decks, so it discriminates nothing and nearly cancels in a
+      difference of differences; the sequencing component is exactly 0.0000 on the deck with nothing
+      to sequence and +0.0123 on the deck built to punish it - a perfect qualitative separation, and
+      small. Averaging them dilutes a clean signal with a large constant. The primary metric moved
+      0.86 to 0.94 on BOTH decks because section 3 deliberately sets the opening bar low, so the
+      right gate for fitness is a poor instrument for a policy gap - the three-way pass/defer/fail
+      branch was written down beforehand precisely so this could not be recorded as "no skill signal
+      exists". The threshold rule itself was also wrong and is disclosed rather than patched: "5x a
+      measured noise floor" is a significance test, a noise floor shrinks as 1/sqrt(N), and the same
+      comparison read 1.26 sigma at 500 games a block and 5.32 at 8000. Gates now need an effect size
+      too, which no sample size can inflate - and under both criteria the verdict is unchanged at
+      every sample size and all eight seeds. Mutation testing found a survivor that was not an
+      equivalent mutant but a BETTER policy: taking the expensive ramp first beats curving out,
+      because a mana creature is summoning sick and a fetched land is not.
+    carry_over: []
   - sprint: "2.2"
     doc: docs/plan/retros/2.2-exact-turns.md
     gates: []

@@ -74,6 +74,43 @@ t6=$(grep '"record":"land_drops"' "$WORK/run.jsonl") || fail "no land_drops reco
     echo "t6.pass true"
 } >> "$WORK/actual.txt"
 
+# --- gate G3, on the same terms ---------------------------------------------
+# Both criteria, and the verdict. Recorded even though it is a defer: a gate is
+# passed, failed or deferred with a reason, never "done".
+g3=$(grep '"record":"g3"' "$WORK/run.jsonl") || fail "no g3 record in the artifact"
+# The record carries two nested diagnostics that repeat these key names, and a
+# greedy match would silently read the wrong one. Cut the line at the first
+# nested object and read the gate's own fields from the head.
+g3_head=${g3%%\"land_rule_only\"*}
+g3_seq=${g3#*\"land_rule_only\":}
+g3_seq=${g3_seq%%\"mulligan_only\"*}
+g3_mull=${g3#*\"mulligan_only\":}
+{
+    for field in separation noise_sd sigma ratio secondary_sigma; do
+        val=$(printf '%s' "$g3_head" | sed -n "s/.*\"$field\":\([0-9.e+-]*\).*/\1/p")
+        [ -n "$val" ] || fail "the g3 record has no '$field'"
+        echo "g3.$field $val"
+    done
+    verdict=$(printf '%s' "$g3_head" | sed -n 's/.*"verdict":"\([a-z]*\)".*/\1/p')
+    [ -n "$verdict" ] || fail "the g3 record has no verdict"
+    echo "g3.verdict $verdict"
+    # And the diagnostic that says why: the same comparison with the policies
+    # differing only in the land rule. Pinned because it is the number the
+    # retro's argument rests on.
+    for field in forgiving_gap demanding_gap sigma; do
+        val=$(printf '%s' "$g3_seq" | sed -n "s/.*\"$field\":\([0-9.e+-]*\).*/\1/p")
+        [ -n "$val" ] || fail "the land_rule_only diagnostic has no '$field'"
+        echo "g3.land_rule.$field $val"
+    done
+    # And the mulligan component, which is what tests §4's claim that keep/mull
+    # judgment is "a large part of the measured skill gap".
+    for field in forgiving_gap demanding_gap; do
+        val=$(printf '%s' "$g3_mull" | sed -n "s/.*\"$field\":\([0-9.e+-]*\).*/\1/p")
+        [ -n "$val" ] || fail "the mulligan_only diagnostic has no '$field'"
+        echo "g3.mulligan.$field $val"
+    done
+} >> "$WORK/actual.txt"
+
 # --- and the card table, which is the first real data the harness measures ---
 cat > "$WORK/pre.json" <<EOF
 {"artifact_path":"$WORK/pre.jsonl","card_table_path":"$WORK/cards.bin",

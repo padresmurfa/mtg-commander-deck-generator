@@ -26,6 +26,7 @@
 | `reduce` | Index-ordered collection: arrival order cannot reach the answer |
 | `turn` | Turns 1-4 exactly: mana as a matching, castability pip by pip, sequencing |
 | `evaluate` | Many games of the opening phase, reduced in index order. Replaced `trial` in 2.2 |
+| `gap` | The policy gap and gate G3: does naive-vs-careful separate forgiving from demanding decks |
 | `jstream` | One value at a time out of a JSON array too large to hold |
 | `card` | The card record, its normalisation, and the printing merge rules |
 | `scryfall` | Bulk-export field names, and nothing else |
