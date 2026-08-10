@@ -1,5 +1,6 @@
 #include "harness.h"
 
+#include "mf/arena.h"
 #include "mf/objective.h"
 
 #include <string.h>
@@ -16,6 +17,11 @@
  * fail that have nothing to do with what is being asked. */
 
 enum { OBJ_DECKS = 4 };
+
+/* One arena for the suite, released at the end. The per-game scores the tail
+   term sorts are the only thing here that allocates, and claiming an arena per
+   test would be claiming one inside a phase rather than at its boundary. */
+static mf_arena *ARENA;
 
 static void land(mf_metacard *k, uint8_t colours, bool tapped) {
     k->types = MF_TYPE_LAND;
@@ -252,7 +258,7 @@ MF_TEST(the_mean_is_an_integer_total_divided_once) {
     mf_turn_policy p = mf_policy_rung(MF_RUNG_CURVE_OUT);
 
     mf_objective_run a;
-    mf_objective_measure(&d, &p, 4242, 64, 0, MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, &a);
+    mf_objective_measure(ARENA, &d, &p, 4242, 64, 0, MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, &a);
     MF_EQ_INT(a.games, 64);
     MF_CHECK(a.total > 0);
     MF_EQ_DBL(a.mean, (double)a.total / 64.0);
@@ -260,12 +266,12 @@ MF_TEST(the_mean_is_an_integer_total_divided_once) {
     /* Same seed, same games, same answer — bit for bit, which a mean
        accumulated game by game would not give. */
     mf_objective_run b;
-    mf_objective_measure(&d, &p, 4242, 64, 0, MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, &b);
+    mf_objective_measure(ARENA, &d, &p, 4242, 64, 0, MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, &b);
     MF_EQ_U64(a.total, b.total);
 
     /* Nothing measured is zero, not a division. */
     mf_objective_run none;
-    mf_objective_measure(&d, &p, 4242, 0, 0, MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, &none);
+    mf_objective_measure(ARENA, &d, &p, 4242, 0, 0, MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, &none);
     MF_EQ_INT(none.total, 0);
     MF_EQ_DBL(none.mean, 0.0);
 }
@@ -287,7 +293,7 @@ MF_TEST(the_objective_ranks_decks_and_does_not_rank_strategies) {
     deck_set(decks);
     mf_objective_row rows[OBJ_DECKS];
     mf_objective_check v;
-    mf_objective_check_decks(decks, OBJ_DECKS, MF_RUNG_ALL, 20260810, 2048,
+    mf_objective_check_decks(ARENA, decks, OBJ_DECKS, MF_RUNG_ALL, 20260810, 2048,
                              MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, rows, &v);
 
     MF_EQ_INT(v.decks, OBJ_DECKS);
@@ -324,11 +330,11 @@ MF_TEST(the_worst_rung_wins_on_its_mulligan_and_loses_on_its_cast_rule) {
         mull.mulligan = greedy.mulligan;
         cast.casts = greedy.casts;
         mf_objective_run base, m, c;
-        mf_objective_measure(&decks[i], &top, 20260810, 2048, 0, MF_SOLO_TURNS - MF_PHASE_TURNS,
+        mf_objective_measure(ARENA, &decks[i], &top, 20260810, 2048, 0, MF_SOLO_TURNS - MF_PHASE_TURNS,
                              &base);
-        mf_objective_measure(&decks[i], &mull, 20260810, 2048, 0, MF_SOLO_TURNS - MF_PHASE_TURNS,
+        mf_objective_measure(ARENA, &decks[i], &mull, 20260810, 2048, 0, MF_SOLO_TURNS - MF_PHASE_TURNS,
                              &m);
-        mf_objective_measure(&decks[i], &cast, 20260810, 2048, 0, MF_SOLO_TURNS - MF_PHASE_TURNS,
+        mf_objective_measure(ARENA, &decks[i], &cast, 20260810, 2048, 0, MF_SOLO_TURNS - MF_PHASE_TURNS,
                              &c);
         MF_CHECK(m.mean > base.mean); /* the worse mulligan scores higher */
         MF_CHECK(c.mean < base.mean); /* the worse cast rule scores lower */
@@ -363,9 +369,9 @@ MF_TEST(casting_cheap_first_wins_or_ties_and_never_loses) {
             large.casts = MF_CAST_EXPENSIVE_FIRST;
             mf_objective_run a, b;
             uint64_t first = (uint64_t)block * 8192u;
-            mf_objective_measure(&decks[i], &small, 20260810, 1024, first,
+            mf_objective_measure(ARENA, &decks[i], &small, 20260810, 1024, first,
                                  MF_SOLO_TURNS - MF_PHASE_TURNS, &a);
-            mf_objective_measure(&decks[i], &large, 20260810, 1024, first,
+            mf_objective_measure(ARENA, &decks[i], &large, 20260810, 1024, first,
                                  MF_SOLO_TURNS - MF_PHASE_TURNS, &b);
             if (i == 2) {
                 double rel = (a.mean - b.mean) / a.mean;
@@ -422,7 +428,7 @@ MF_TEST(a_check_with_no_admissible_rung_measured_nothing) {
     deck_set(decks);
     mf_objective_row rows[OBJ_DECKS];
     mf_objective_check v;
-    mf_objective_check_decks(decks, OBJ_DECKS, 0u, 7, 16,
+    mf_objective_check_decks(ARENA, decks, OBJ_DECKS, 0u, 7, 16,
                              MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, rows, &v);
     MF_EQ_INT(v.stable, 0);
     MF_CHECK(!v.ranks_decks);
@@ -437,7 +443,7 @@ MF_TEST(a_narrowed_band_of_rungs_is_scored_only_within_it) {
     deck_set(decks);
     mf_objective_row rows[OBJ_DECKS];
     mf_objective_check v;
-    mf_objective_check_decks(decks, OBJ_DECKS, MF_RUNG_BIT(MF_RUNG_CURVE_OUT), 7, 32,
+    mf_objective_check_decks(ARENA, decks, OBJ_DECKS, MF_RUNG_BIT(MF_RUNG_CURVE_OUT), 7, 32,
                              MF_DEVELOPMENT_TURNS + MF_EXECUTION_TURNS, rows, &v);
     for (unsigned i = 0; i < OBJ_DECKS; i++) {
         MF_EQ_INT(rows[i].best, MF_RUNG_CURVE_OUT);
@@ -448,7 +454,168 @@ MF_TEST(a_narrowed_band_of_rungs_is_scored_only_within_it) {
     MF_CHECK(!v.ranks_strategies);
 }
 
+/* ---- the tail term, and the composite (T3) ------------------------------- */
+
+/* A deck whose score is whatever the caller wants it to be, so the tail term
+   can be checked against a distribution known in advance rather than against
+   whatever the simulator happened to produce. Two spells and a mana base sized
+   by the shuffle would not give a known decile; a hand-built vector does. */
+static double cvar_of(const uint16_t *scores, unsigned n, unsigned *tail_out) {
+    unsigned k = n / MF_OBJ_CVAR_DENOM;
+    if (!k && n) k = 1;
+    uint16_t sorted[64];
+    for (unsigned i = 0; i < n; i++) sorted[i] = scores[i];
+    for (unsigned i = 1; i < n; i++) { /* plain insertion sort: the oracle, not the code */
+        uint16_t v = sorted[i];
+        unsigned j = i;
+        while (j && sorted[j - 1] > v) { sorted[j] = sorted[j - 1]; j--; }
+        sorted[j] = v;
+    }
+    uint64_t t = 0;
+    for (unsigned i = 0; i < k; i++) t += sorted[i];
+    if (tail_out) *tail_out = k;
+    return k ? (double)t / (double)k : 0.0;
+}
+
+MF_TEST(the_tail_is_the_worst_tenth_and_never_more) {
+    /* Rounding *down*, with a floor of one. Rounding up would make CVaR_10 a
+       CVaR over an eighth at eleven games and soften the statistic §3 wants
+       sharp — so the boundary is asserted rather than left to arithmetic. */
+    uint16_t scores[64];
+    for (unsigned i = 0; i < 64; i++) scores[i] = (uint16_t)(i + 1);
+    unsigned k;
+    MF_EQ_DBL(cvar_of(scores, 40, &k), 2.5); /* 4 games: 1,2,3,4 */
+    MF_EQ_INT(k, 4);
+    MF_EQ_DBL(cvar_of(scores, 11, &k), 1.0); /* still one game, not two */
+    MF_EQ_INT(k, 1);
+    MF_EQ_DBL(cvar_of(scores, 5, &k), 1.0); /* below ten, a tail of one */
+    MF_EQ_INT(k, 1);
+    MF_EQ_DBL(cvar_of(scores, 0, &k), 0.0);
+    MF_EQ_INT(k, 0);
+}
+
+MF_TEST(the_composite_is_the_mean_plus_lambda_times_the_tail) {
+    mf_deck d;
+    midrange_deck(&d);
+    mf_turn_policy p = mf_policy_rung(MF_RUNG_CURVE_OUT);
+    mf_objective_run r;
+    mf_objective_measure(ARENA, &d, &p, 4242, 320, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &r);
+
+    MF_EQ_INT(r.games, 320);
+    MF_EQ_INT(r.tail, 32);
+    MF_EQ_DBL(r.mean, (double)r.total / 320.0);
+    MF_EQ_DBL(r.cvar, (double)r.tail_total / 32.0);
+    MF_EQ_DBL(r.composite, r.mean + MF_OBJ_LAMBDA * r.cvar);
+    /* The worst decile really is worse than the average — a tail term equal to
+       the mean would mean the sort did nothing. */
+    MF_CHECK(r.cvar < r.mean);
+    MF_CHECK(r.tail_total > 0);
+
+    /* Nothing measured stays zero throughout rather than dividing. */
+    mf_objective_run none;
+    mf_objective_measure(ARENA, &d, &p, 4242, 0, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &none);
+    MF_EQ_INT(none.tail, 0);
+    MF_EQ_DBL(none.cvar, 0.0);
+    MF_EQ_DBL(none.composite, 0.0);
+}
+
+MF_TEST(the_tail_agrees_with_a_sort_written_the_other_way) {
+    /* The implementation counts rather than compares, because a comparison sort
+       needs a tie-break rule to be reproducible and a counting sort has no ties
+       to break. Checked against an insertion sort, which is the obvious
+       algorithm and shares no code with it. */
+    mf_deck decks[OBJ_DECKS];
+    deck_set(decks);
+    for (unsigned i = 0; i < OBJ_DECKS; i++) {
+        mf_turn_policy p = mf_policy_rung(MF_RUNG_CURVE_OUT);
+        uint16_t scores[64];
+        for (unsigned g = 0; g < 64; g++) {
+            mf_solo_state s;
+            mf_solo_run_turns(&decks[i], &p, 4242, g, MF_SOLO_TURNS - MF_PHASE_TURNS, &s);
+            scores[g] = mf_objective_score(&s);
+        }
+        mf_objective_run r;
+        mf_objective_measure(ARENA, &decks[i], &p, 4242, 64, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &r);
+        unsigned k;
+        MF_EQ_DBL(r.cvar, cvar_of(scores, 64, &k));
+        MF_EQ_INT(r.tail, k);
+    }
+}
+
+MF_TEST(an_evaluation_repeated_does_not_grow_the_arena) {
+    /* An arena claimed per call and never released is a leak the invariant
+       cannot see, because nothing fails until the pool runs out mid-run. */
+    mf_deck d;
+    midrange_deck(&d);
+    mf_turn_policy p = mf_policy_rung(MF_RUNG_CURVE_OUT);
+    mf_objective_run r;
+    mf_objective_measure(ARENA, &d, &p, 4242, 128, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &r);
+    size_t after_one = mf_arena_used(ARENA);
+    for (unsigned i = 0; i < 8; i++)
+        mf_objective_measure(ARENA, &d, &p, 4242, 128, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &r);
+    MF_EQ_INT(mf_arena_used(ARENA), after_one);
+}
+
+/* ---- §4's max over admissible strategies (T2) ---------------------------- */
+
+MF_TEST(fitness_is_the_max_over_the_band_and_never_the_average) {
+    mf_deck decks[OBJ_DECKS];
+    deck_set(decks);
+    for (unsigned i = 0; i < OBJ_DECKS; i++) {
+        mf_objective_row_fit f;
+        mf_objective_fit(ARENA, &decks[i], MF_RUNG_ALL, 909, 256, 0, MF_SOLO_TURNS - MF_PHASE_TURNS,
+                         &f);
+        double top = 0.0, sum = 0.0;
+        for (unsigned r = 0; r < MF_RUNG_COUNT; r++) {
+            if (f.composite[r] > top) top = f.composite[r];
+            sum += f.composite[r];
+        }
+        MF_EQ_DBL(f.fitness, top);
+        MF_EQ_DBL(f.composite[f.best], top);
+        /* And it is not the average, which is the whole of §4's sentence: a
+           deck excellent under one plan and mediocre generally is a find. */
+        MF_CHECK(f.fitness > sum / (double)MF_RUNG_COUNT);
+    }
+}
+
+MF_TEST(widening_the_band_can_never_lower_a_decks_fitness) {
+    /* **The property that distinguishes a max from an average**, and the reason
+       it is tested as a property rather than with a hand-built example: an
+       average falls the moment the added strategy is worse than the ones
+       already admitted, and a max cannot. */
+    mf_deck decks[OBJ_DECKS];
+    deck_set(decks);
+    for (unsigned i = 0; i < OBJ_DECKS; i++) {
+        double narrow = 0.0;
+        for (unsigned r = 0; r < MF_RUNG_COUNT; r++) {
+            mf_objective_row_fit one, band;
+            unsigned upto = 0;
+            for (unsigned q = 0; q <= r; q++) upto |= MF_RUNG_BIT(q);
+            mf_objective_fit(ARENA, &decks[i], MF_RUNG_BIT(r), 909, 128, 0,
+                             MF_SOLO_TURNS - MF_PHASE_TURNS, &one);
+            mf_objective_fit(ARENA, &decks[i], upto, 909, 128, 0, MF_SOLO_TURNS - MF_PHASE_TURNS,
+                             &band);
+            MF_EQ_INT(one.best, r);
+            MF_CHECK(band.fitness >= narrow);
+            MF_CHECK(band.fitness >= one.fitness);
+            narrow = band.fitness;
+        }
+    }
+}
+
+MF_TEST(a_deck_with_no_admissible_strategy_has_no_fitness) {
+    /* An empty band is not fitness zero — zero is a score a real deck could
+       earn. It is "no strategy was admitted", and the sentinel says so. */
+    mf_deck d;
+    aggro_deck(&d);
+    mf_objective_row_fit f;
+    mf_objective_fit(ARENA, &d, 0u, 909, 64, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &f);
+    MF_EQ_INT(f.best, MF_RUNG_COUNT);
+    MF_EQ_DBL(f.fitness, 0.0);
+}
+
 void run_objective_tests(void) {
+    ARENA = mf_arena_create("objective-test", 8u << 20);
     MF_RUN(the_objective_is_the_aggregate_phases_and_never_the_opening);
     MF_RUN(a_statistic_constant_on_every_deck_is_rejected);
     MF_RUN(an_objective_one_rung_wins_everywhere_is_rejected);
@@ -459,6 +626,13 @@ void run_objective_tests(void) {
     MF_RUN(the_worst_rung_wins_on_its_mulligan_and_loses_on_its_cast_rule);
     MF_RUN(casting_cheap_first_wins_or_ties_and_never_loses);
     MF_RUN(and_it_is_not_because_a_phase_is_a_subset_sum);
+    MF_RUN(the_tail_is_the_worst_tenth_and_never_more);
+    MF_RUN(the_composite_is_the_mean_plus_lambda_times_the_tail);
+    MF_RUN(the_tail_agrees_with_a_sort_written_the_other_way);
+    MF_RUN(an_evaluation_repeated_does_not_grow_the_arena);
+    MF_RUN(fitness_is_the_max_over_the_band_and_never_the_average);
+    MF_RUN(widening_the_band_can_never_lower_a_decks_fitness);
+    MF_RUN(a_deck_with_no_admissible_strategy_has_no_fitness);
     MF_RUN(a_check_with_no_admissible_rung_measured_nothing);
     MF_RUN(a_narrowed_band_of_rungs_is_scored_only_within_it);
 }

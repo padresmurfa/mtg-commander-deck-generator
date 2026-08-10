@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "mf/arena.h"
 #include "mf/solo.h"
 
 /* What a solo evaluation is a score *of*, and what it is *for*.
@@ -174,28 +175,102 @@
  *
  * Condition 1 passes with room: the deck set separates 4.6× (10.4 to 48.2)
  * against a bar of 0.20. The objective ranks decks, which is the whole of what
- * §3.2 decided it is for. */
+ * §3.2 decided it is for.
+ *
+ * **And the tail term does not rescue condition 2**, which is the obvious next
+ * hope and worth recording as checked rather than left for someone to try
+ * again. A loose mulligan keeps hands a strict one throws away, so `greedy`
+ * should own the worst decile and `mean + λ·CVaR₁₀` should punish it. The check
+ * ranks strategies by the composite, not the mean, and `greedy` is still the
+ * argmax on all four decks: the cards a mulligan costs outweigh the disasters
+ * it avoids at every point of the distribution this model can see. */
 
 /* One game. Integer, because §17.1 reduces in index order and accumulates in
    integers; the single conversion to double happens in the scalarisation. */
 uint16_t mf_objective_score(const mf_solo_state *s);
 
-/* ---- fitness over one deck ----------------------------------------------
- * The mean per-game score under one policy. Counted as an integer total and
- * divided once (§17.1), so a partitioned run and a serial one agree bit for
- * bit. The CVaR term and `mean + λ·CVaR₁₀` are sprint 3.2 T3. */
+/* ---- the scalarisation (§3, sprint 3.2 T3) -------------------------------
+ *
+ *     **`mean + λ·CVaR₁₀`**, where CVaR₁₀ is the mean of the worst decile.
+ *
+ * §3's argument for the tail term rather than a worst case: minimax degenerates
+ * here, because every deck's worst game is "mulligan to four, no lands" and they
+ * are all about equally bad. The decile mean captures how bad the bad games are
+ * without collapsing, and it is free from the Monte Carlo sample.
+ *
+ * Both terms are benefits — a higher score is better — so `λ > 0` rewards a
+ * high *floor*, which is what "consistency" means here.
+ *
+ * **The sort is a counting sort, and that is a determinism decision before it
+ * is a speed one.** A comparison sort needs a tie-break rule to be reproducible,
+ * and a rule nobody wrote down is a rule that differs between partitions. A
+ * counting sort over integer scores never compares two elements, so there are no
+ * ties to break: the multiset determines the answer and nothing else can reach
+ * it. It also costs O(n + max) rather than O(n log n) on a fitness path.
+ *
+ * **The tail never claims more than a tenth.** `floor(n/10)`, with a floor of
+ * one game so a small sample still has a tail. Rounding up would make CVaR₁₀ a
+ * CVaR over an eighth at n = 11 and quietly soften exactly the statistic §3
+ * wants sharp. */
+
+/* The spec's default (`parameters.objective.lambda`). **Not tuned here, and
+   that is deliberate**: λ trades ceiling against consistency, and there is no
+   ranking to judge the trade against until G4 in sprint 3.3. Fitting a constant
+   before there is anything to fit it to is how a metric acquires a value nobody
+   can defend. §15.5 also argues for keeping it modest — CVaR₁₀ is estimated
+   from n/10 games, so a large λ buys variance the formula does not show. */
+#define MF_OBJ_LAMBDA 0.5
+#define MF_OBJ_CVAR_DENOM 10
 
 typedef struct {
     unsigned games;
     uint64_t total; /* summed in index order, never averaged early */
+    unsigned tail;  /* games in the worst decile; `floor(games/10)`, at least 1 */
+    uint64_t tail_total;
+    /* Converted from the integer totals once, here, and never accumulated as
+       floats along the way (§17.1). */
     double mean;
+    double cvar;
+    double composite; /* mean + MF_OBJ_LAMBDA * cvar */
 } mf_objective_run;
 
 /* `first_game` offsets the block of game indices, so disjoint blocks of the same
-   seed give independent samples — the `mf_gap_noise_floor` shape. Keep it even:
-   §4 puts even games on the play, and an odd offset would measure one seat. */
-void mf_objective_measure(const mf_deck *d, const mf_turn_policy *p, uint64_t seed, unsigned games,
-                          uint64_t first_game, uint8_t aggregate_turns, mf_objective_run *out);
+ * seed give independent samples — the `mf_gap_noise_floor` shape. Keep it even:
+ * §4 puts even games on the play, and an odd offset would measure one seat.
+ *
+ * The arena holds the per-game scores the tail term has to sort, and is pushed
+ * and popped around the call, so repeated evaluations do not grow it. */
+void mf_objective_measure(mf_arena *a, const mf_deck *d, const mf_turn_policy *p, uint64_t seed,
+                          unsigned games, uint64_t first_game, uint8_t aggregate_turns,
+                          mf_objective_run *out);
+
+/* ---- §4's matrix, and the max over it (sprint 3.2 T2) --------------------
+ *
+ * > "Fitness is *max over admissible strategies*, not an average. A deck that
+ * > is mediocre generally but excellent under one plan is a real find;
+ * > averaging hides it."
+ *
+ * One row of §4's (deck × strategy) matrix, and the max of it. The property
+ * that distinguishes a max from an average, and the one the tests pin, is
+ * **monotonicity in the admissible set**: widening the band a deck may be
+ * played under can never lower its fitness. An average violates that the moment
+ * the added strategy is worse than the ones already there.
+ *
+ * T1 measured that this max is currently attained by `greedy` on every deck, so
+ * the row has one meaningful column at this rung of the fidelity ladder. The
+ * structure is built anyway, and deliberately: §4 is the design of record, the
+ * collapse is a property of a solo model rather than of the code, and E5 widens
+ * the set rather than rewriting the shape. */
+
+typedef struct {
+    double composite[MF_RUNG_COUNT]; /* zero for a rung outside the band */
+    mf_rung best;                    /* MF_RUNG_COUNT if the band was empty */
+    double fitness;                  /* composite[best] */
+} mf_objective_row_fit;
+
+void mf_objective_fit(mf_arena *a, const mf_deck *d, unsigned admissible, uint64_t seed,
+                      unsigned games, uint64_t first_game, uint8_t aggregate_turns,
+                      mf_objective_row_fit *out);
 
 /* ---- the degeneracy check ------------------------------------------------ */
 
@@ -212,7 +287,7 @@ void mf_objective_measure(const mf_deck *d, const mf_turn_policy *p, uint64_t se
 #define MF_OBJ_SEEDS 3
 
 typedef struct {
-    double score[MF_RUNG_COUNT]; /* mean per game, seed 0, admissible rungs only */
+    double score[MF_RUNG_COUNT]; /* the composite, seed 0, admissible rungs only */
     mf_rung best;                /* argmax under seed 0 */
     bool stable;                 /* and the same argmax under every seed */
 } mf_objective_row;
@@ -252,8 +327,8 @@ void mf_objective_verdict(const mf_objective_row *rows, unsigned n, mf_objective
 #define MF_RUNG_BIT(r) (1u << (r))
 #define MF_RUNG_ALL (MF_RUNG_BIT(MF_RUNG_COUNT) - 1u)
 
-void mf_objective_check_decks(const mf_deck *decks, unsigned n, unsigned admissible, uint64_t seed,
-                              unsigned games, uint8_t aggregate_turns, mf_objective_row *rows,
-                              mf_objective_check *out);
+void mf_objective_check_decks(mf_arena *a, const mf_deck *decks, unsigned n, unsigned admissible,
+                              uint64_t seed, unsigned games, uint8_t aggregate_turns,
+                              mf_objective_row *rows, mf_objective_check *out);
 
 #endif
