@@ -12,19 +12,19 @@
 # See docs/simulator-design.md for reasoning, docs/simulator-spec.yaml for values.
 
 meta:
-  status: blocked_on_gate
-  current_sprint: "3.3.1"
-  task_split_valid_for: "3.3.1"     # task-splitting any other sprint is speculative
-  # NOT advanced, deliberately. CLAUDE.md section 5: a failed gate is a stop-and-escalate, and
-  # G4's written failure branch is "the objective is wrong, redesign section 3". Which sprint
-  # follows is the decision that branch demands; task-splitting one here would answer it by
-  # choosing the work. See docs/plan/retros/3.3.1-fixture-resolution.md.
-  blocked_by:
+  status: in_progress
+  current_sprint: "3.3.2"
+  task_split_valid_for: "3.3.2"     # task-splitting any other sprint is speculative
+  # 3.3.1 ended blocked on a FAILED G4 and did not advance. The escalation was answered: diagnose
+  # the feasibility number before redesigning section 3. G4 stays failed throughout 3.3.2 and
+  # nothing in that sprint is permitted to un-fail it.
+  open_gate_failure:
     gate: G4
     verdict: fail
     measured: "rho -0.0357, z -0.24, corpus 48, scored 48, feasible 15 (sprint 3.3.1)"
     branch: redesign_objective_section_3
     not: lambda_tuning
+    branch_deferred_pending: "3.3.2 - why are 33 of 48 real precons infeasible"
   baseline: greenfield
   language: c
   deliverable: cli
@@ -688,135 +688,62 @@ epics:
 # ---------------------------------------------------------------------------
 # CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
 # ---------------------------------------------------------------------------
+
 tasks:
-  sprint: "3.3.1"
-  doc: docs/plan/sprints/3.3.1-fixture-resolution.md
+  sprint: "3.3.2"
   goal: >
-    Make G4 measurable. Not one of the 190 precons resolves completely against the card table, so
-    the corpus the gate needs is empty; this sprint decides - in advance - what a deck containing an
-    unrepresentable card IS, and re-runs the gate with 3.3's thresholds unchanged.
-  why_now: >
-    G4 did not fail, it could not be measured. A gate that has not answered is not one that has been
-    passed, and E4 builds the search against the objective G4 exists to validate.
-  carried_in:
-    - >
-      PRE-REGISTER the substitution semantics before measuring anything. rho = -0.0137 has already
-      been seen on patched decks; choosing the patch rule now, in the light of it, is the move
-      pre-registration forbids. Write the rule and its argument down, commit it, then measure.
-    - >
-      Thresholds do NOT move. 3.3 fixed rho >= 0.35, z >= 2, 2048 games per deck, n >= 100. Only the
-      instrument changes, which is 3.1's rule about improving an instrument and a bar at once.
-  input_from_previous_retro:
-    - >
-      G1's clause coverage does not bound per-deck completeness, and the two were being read as
-      though one implied the other. Report both from now on.
-    - >
-      A fixture that patches itself hides the state of the world. The hole-filling resolver was
-      three lines, looked defensive, and turned an empty corpus into 35 plausible decks and a
-      number. Prefer refusing.
-    - >
-      Pre-registration protects the threshold and does not make you think of everything: three
-      blind spots were named in advance and none of them is why G4 deferred.
-  preregistered_rule:            # committed BEFORE the code that could measure its effect
-    statement: >
-      A card the opcode set cannot represent enters a FIXTURE as the most neutral card of the same
-      cost, type and colour identity the model can express - and never enters the search pool.
-    nonland: same cmc, same pips, same types, NO modelled effects
-    land: >
-      the same, plus a tap for one mana of any colour in its identity. A land's whole modelled
-      contribution is mana; one producing none would break what the substitution exists to preserve,
-      and 563 of 6257 distinct precon cards are lands.
-    why: >
-      Not a new compromise - the one the model already makes, applied one clause further. G1
-      measures 90.33% of clauses as INERT, so the table routinely carries cards whose text it almost
-      entirely ignores; a card excluded outright for one unrepresentable clause is treated MORE
-      harshly than a card whose clauses are all inert.
-    distorts:
-      - {what: substituted nonlands contribute no ramp/draw/tutor, direction: understates}
-      - {what: a substituted land taps unconditionally, direction: overstates}
-      - {what: an unrepresentable COMMANDER becomes a vanilla, direction: understates, share: "19% of precons"}
-    distortion_is_deck_differential: >
-      Like 3.1's aggregation error, and correlated with commander complexity - a bias G4 inherits
-      and cannot correct, so the counts are reported beside rho.
-    where_they_live: >
-      A second table file written by preprocess with the oracle text stripped, so neither the table
-      format nor the search pool changes. mf/precon's own shape: a side table joined at deck-scoring
-      granularity.
-  diagnosis:                     # measured before designing round it (the 1.2.1 lesson)
-    precon_cards_distinct: 6257
-    absent_from_card_set: 0
-    not_commander_legal: 2       # Trade Secrets, Dockside Extortionist - both banned, filter working
-    conclusion: >
-      Everything else missing from the table is missing because mf_opcode_representable said no, and
-      the card set already carries cmc, pips, types and identity for all of them. The blocker was
-      never data acquisition. The table IS the pool (mf_table_write is called with `pool`), so
-      widening it would widen what the GA may choose, which 7.9 forbids.
+    Find out why 33 of 48 real precons are infeasible, BEFORE redesigning section 3. One cheap step
+    on 1.2.1's rule - go and look before designing round it - because the number beside rho is
+    strange enough to change what "redesign section 3" would mean.
+  already_known_without_measuring: >
+    The 0.5 solo gate rate was calibrated on SYNTHETIC decks and its own comment in mf/objective.h
+    calls them real: "sprint 2.3 measured real decks at 0.86 and 0.94 ... half is far below anything
+    a functioning deck produces". The decks measured were g3_forgiving and g3_demanding, hand-built
+    fixtures in src/worker.c. Thirty-three published precons now produce below it. The design made a
+    falsifiable claim about real decks from a measurement of synthetic ones and reality contradicted
+    it; that is a design amendment regardless of what else this sprint finds.
+  gate_under_question: "mana >= 3 AND spells >= 1 on entry to turn 5; pass rate >= 0.5 per deck"
+  prereg:
+    committed_before: the instrument that would measure it
+    not_mutually_exclusive: true
+    all_three_reported: true
+    hypotheses:
+      - id: H1
+        claim: the bar or the gate is mis-set
+        supported_when: >
+          at least half the infeasible decks have a pass rate in [0.35, 0.50) - near-misses, a
+          threshold sitting in the middle of the distribution rather than below it
+      - id: H2
+        claim: the substitution broke the decks
+        supported_when: "spearman(pass_rate, substituted) <= -0.35 across the 48"
+        why_that_bar: 3.3.1's own effect size, reused rather than freshly chosen
+      - id: H3
+        claim: the model cannot play real decks
+        supported_when: >
+          neither H1 nor H2, AND median infeasible pass rate < 0.20, AND the zero-substitution
+          controls pass comfortably
+    controls: [g3_forgiving, g3_demanding]
+    why_those_controls: >
+      Zero substitutions, and they are the decks the 0.5 bar was set on - the right comparison
+      rather than a convenient one. If they pass at 0.86/0.94 while real decks sit near zero, the
+      difference is about real decks and not about the gate arithmetic.
+  may_not:
+    - move MF_SOLO_GATE_RATE, MF_GATE_MIN_MANA or MF_GATE_MIN_SPELLS
+    - re-run G4
+  why_may_not: >
+    Diagnosing a threshold and changing it in the same sprint is 3.1's forbidden move - improving an
+    instrument and a bar at once. H1 being supported is a FINDING, not a licence. And G4 stays
+    failed until something about the model changes; a re-run here is the post-hoc rescue 3.3.1
+    refused.
   split:
     - id: T1
-      name: diagnose why cards are missing, then pre-register the substitution rule
+      name: pre-register the decision rule, before the instrument exists
     - id: T2
-      name: the stand-in table - preprocess writes it, and the pool is untouched
+      name: per-deck feasibility emitted by the tool, controls in the same record
     - id: T3
-      name: resolution through the stand-in, with substitution counts reported
+      name: adjudicate all three hypotheses against their signatures
     - id: T4
-      name: per-deck completeness carried beside G1's fraction
-      status: done
-      emits: preprocess -> coverage.per_deck, in the same object as legal_fraction
-      fields: [decks, complete, buildable, substituted, unresolved, commanders_substituted,
-               min_gap, max_gap]
-      counts_not_a_fraction: >
-        complete beside decks cannot be misread the way a lone 0.0 can, and there is no division to
-        guard. The vacuous case is refused one step earlier - mf_precons_load rejects a file with no
-        decks in it - so there is no untestable branch here.
-      label_corrected: >
-        The 3.3 amendment called G1 "a fraction over clauses" in design 13.5, the spec hazard and
-        the retro. It is a fraction over CARDS - legal_representable / legal - with the clause
-        tallies a separate object beside it, and the label contradicted the per-card arithmetic in
-        its own sentence. Conclusion unchanged and sharper stated correctly (0.9301^100 ~ 0.0008),
-        but a reader taking the label literally would compute a far more forgiving implication for a
-        deck. Corrected in design, spec and gates.md; the 3.3 retro keeps its wording with a
-        correction note, on 1.2.1's rule that a published measurement is superseded in the open.
-        SECOND time G1 has been quoted as the answer to a question it was not measuring.
-    - id: T5
-      name: re-run G4 with 3.3's thresholds unchanged
-      status: done
-      verdict: FAIL
-      measured: "corpus 48, scored 48, feasible 15, rho -0.0357, z -0.24"
-      seed_robustness: "[-0.036, -0.021, -0.033, -0.022, -0.027] over seeds 1/2/3/7/31337"
-      note: >
-        Thresholds unchanged; only the instrument changed. The stand-in made the corpus real - 48
-        of 48 rows score where 0 did - at 11.9 substituted cards a deck, reported beside rho. Not
-        noise: a tight cluster about zero with 43.3 points of simulated spread against 27.0 of
-        win-rate spread.
-      diagnostics_added: >
-        feasible 15/48 and best_rung {greedy 38, curve-out 8, role-aware 2, sequencing-aware 0},
-        both already computed inside the per-deck fit and previously discarded. "Ordered no better
-        than chance" and "cannot be played at all" give the same rho and want different fixes.
-      post_hoc_forbidden: >
-        rho over the feasible 15 is NOT computed - a subgroup chosen after seeing a failure. If it
-        becomes a gate it is pre-registered first, with its own threshold and sample size.
-    - id: T6
-      name: G4 written to the run artifact by mfsim validate
-      status: done
-      taken_before: T5
-      why_reordered: >
-        T5 needed a way to run the gate against the real tables, and the alternative was a
-        throwaway harness to be deleted the same day. Wiring it into the tool first made T5 a
-        matter of running it.
-      gated_on: config win_rate_path; an unconfigured run writes NO g4 record
-      why_silent_not_zeroed: >
-        A g4 record carrying a `defer` verdict because nobody supplied a corpus reads exactly like
-        a gate that ran and could not decide. That is 2.1's defect. Absence cannot be faked.
-      found_on_first_real_run: >
-        The tables were read into the ROOT arena, which is 1 MB and sized for records. It
-        exhausted, and the orchestrator grew arena_bytes three times to the ceiling - the wrong
-        knob, correctly and uselessly. The growth loop cannot help when the arena that is short is
-        the fixed one, and the fatal report did not say which arena had run out.
-    - id: T7
-      name: retro and amendments
-      status: done
-      doc: docs/plan/retros/3.3.1-fixture-resolution.md
-      current_sprint_advanced: false
+      name: retro and amendments, including the 0.5 bar's justification
 retros:
   - sprint: "3.3.1"
     doc: docs/plan/retros/3.3.1-fixture-resolution.md
