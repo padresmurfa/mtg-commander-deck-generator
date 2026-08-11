@@ -35,10 +35,10 @@ g3s.decay.6 0 1.2483333333333333
 g3s.decay.8 0 0.8246666666666667
 g3s.decay.12 0 0.127
 g3s.decay.20 0 0.0013333333333333333
-cards.cards 6
-cards.printings 8
+cards.cards 7
+cards.printings 9
 cards.other_games 2
 cards.legality_disagreements 1
-cards.digest 02756043db62232f974472aac7c48897
+cards.digest 60944572c2f39dd8396baa4b3665c863
 cards.table_hash 55d8fe02a5a08087653ebb998cdb95b2
 cards.table_bytes 364

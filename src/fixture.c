@@ -89,6 +89,24 @@ unsigned mf_winrates_total_games(const mf_winrates *w) {
     return w->total_games;
 }
 
+const char *mf_standin_land_text(mf_arena *a, uint8_t identity) {
+    static const char *PIP[5] = {"{W}", "{U}", "{B}", "{R}", "{G}"};
+    char buf[64] = "{T}: Add ";
+    size_t at = strlen(buf);
+    unsigned found = 0;
+    for (unsigned i = 0; i < 5; i++) {
+        if (!(identity & (1u << i))) continue;
+        if (found++) at += (size_t)snprintf(buf + at, sizeof buf - at, " or ");
+        at += (size_t)snprintf(buf + at, sizeof buf - at, "%s", PIP[i]);
+    }
+    /* A colourless identity is a real thing — an artifact land, or a land with
+       no coloured pip anywhere on it — and it taps for colourless rather than
+       for nothing. */
+    if (!found) at += (size_t)snprintf(buf + at, sizeof buf - at, "{C}");
+    snprintf(buf + at, sizeof buf - at, ".");
+    return mf_mem_strdup(a, buf);
+}
+
 /* ---- a precon as a deck --------------------------------------------------- */
 
 static bool find_card(const mf_table *t, const char *oracle_id, uint32_t *out) {
@@ -105,33 +123,52 @@ static bool find_card(const mf_table *t, const char *oracle_id, uint32_t *out) {
     return false;
 }
 
-bool mf_precon_deck(const mf_table *t, const mf_precons *p, size_t index, mf_deck *out,
-                    mf_precon_fit *fit) {
+bool mf_precon_deck(const mf_table *t, const mf_table *standin, const mf_precons *p, size_t index,
+                    mf_deck *out, mf_precon_fit *fit) {
     memset(fit, 0, sizeof *fit);
     size_t count = 0;
     const char *const *ids = mf_precons_cards(p, index, &count);
     if (count != MF_DECK_CARDS) return false;
 
-    /* `mf/precon` lists commanders first and `mf_deck` wants the commander
-       last, so the two are reordered rather than assumed to agree. */
-    uint32_t idx[MF_DECK_CARDS];
-    uint32_t commander = 0;
+    /* **Built field by field rather than through `mf_deck_build`**, which takes
+       indices into a single table — and a fixture deck draws from two. The
+       `table_index` it fills is the pool index where there is one and
+       `MF_STANDIN_INDEX` where the card came from the stand-in, so nothing
+       downstream can expand a substitute into a real card by accident. */
+    mf_metacard key[MF_DECK_CARDS];
+    uint32_t src[MF_DECK_CARDS];
+    mf_metacard commander_key = {0};
+    uint32_t commander_src = 0;
     bool have_commander = false;
     size_t at = 0;
     for (size_t i = 0; i < count; i++) {
         uint32_t card = 0;
-        if (!find_card(t, ids[i], &card)) {
+        mf_metacard k;
+        uint32_t where;
+        if (find_card(t, ids[i], &card)) {
+            fit->matched++;
+            k = mf_table_at(t, card)->key;
+            where = card;
+        } else if (standin && find_card(standin, ids[i], &card)) {
+            fit->substituted++;
+            if (mf_table_at(standin, card)->key.types & MF_TYPE_LAND) fit->substituted_lands++;
+            if (i == 0) fit->commander_substituted = true;
+            k = mf_table_at(standin, card)->key;
+            where = MF_STANDIN_INDEX;
+        } else {
             fit->unmatched++;
             continue;
         }
-        fit->matched++;
         /* No bound on `at`: the list is exactly `MF_DECK_CARDS` long, checked
            above, so at most `MF_DECK_LIBRARY` non-commander cards can arrive. */
         if (i == 0) {
-            commander = card;
+            commander_key = k;
+            commander_src = where;
             have_commander = true;
         } else {
-            idx[at++] = card;
+            key[at] = k;
+            src[at] = where;
+            at++;
         }
     }
     if (!have_commander) return false;
@@ -150,11 +187,20 @@ bool mf_precon_deck(const mf_table *t, const mf_precons *p, size_t index, mf_dec
 
        `fit` still carries the counts, so a caller can say how far off it was
        rather than only that it failed. */
-    fit->complete = fit->unmatched == 0 && at == MF_DECK_LIBRARY;
-    if (!fit->complete) return false;
+    /* `complete` means **every card came from the pool** — a substituted deck is
+       buildable and is not the published list, and conflating those is what the
+       first version of this did. `unmatched` is the harder failure: a card in
+       neither table is one this build cannot represent at all. */
+    fit->complete = fit->unmatched == 0 && fit->substituted == 0 && at == MF_DECK_LIBRARY;
+    if (fit->unmatched || at != MF_DECK_LIBRARY) return false;
 
-    idx[MF_DECK_COMMANDER] = commander;
-    mf_deck_build(t, idx, out);
+    memset(out, 0, sizeof *out);
+    for (size_t i = 0; i < MF_DECK_LIBRARY; i++) {
+        out->key[i] = key[i];
+        out->table_index[i] = src[i];
+    }
+    out->key[MF_DECK_COMMANDER] = commander_key;
+    out->table_index[MF_DECK_COMMANDER] = commander_src;
     return true;
 }
 
@@ -169,8 +215,8 @@ const char *mf_g4_verdict_name(mf_g4_verdict v) {
     }
 }
 
-void mf_g4_measure(mf_arena *a, const mf_table *t, const mf_precons *p, const mf_winrates *w,
-                   uint64_t seed, double *fitness, mf_g4 *out) {
+void mf_g4_measure(mf_arena *a, const mf_table *t, const mf_table *standin, const mf_precons *p,
+                   const mf_winrates *w, uint64_t seed, double *fitness, mf_g4 *out) {
     memset(out, 0, sizeof *out);
     size_t n = mf_winrates_count(w);
 
@@ -196,7 +242,7 @@ void mf_g4_measure(mf_arena *a, const mf_table *t, const mf_precons *p, const mf
         mf_deck d;
         mf_precon_fit fit;
         memset(&fit, 0, sizeof fit);
-        if (which == mf_precons_count(p) || !mf_precon_deck(t, p, which, &d, &fit)) {
+        if (which == mf_precons_count(p) || !mf_precon_deck(t, standin, p, which, &d, &fit)) {
             out->unjoined++;
             out->unresolved_cards += fit.unmatched;
             continue;
@@ -205,6 +251,9 @@ void mf_g4_measure(mf_arena *a, const mf_table *t, const mf_precons *p, const mf
         mf_objective_row_fit f;
         mf_objective_fit(a, &d, MF_RUNG_ALL, seed, MF_G4_GAMES, 0, MF_SOLO_TURNS - MF_PHASE_TURNS,
                          &f);
+        out->substituted += fit.substituted;
+        out->substituted_lands += fit.substituted_lands;
+        out->commanders_substituted += fit.commander_substituted ? 1u : 0u;
         sim[out->scored] = f.fitness;
         real[out->scored] = r->win_rate;
         if (fitness) fitness[out->scored] = f.fitness;

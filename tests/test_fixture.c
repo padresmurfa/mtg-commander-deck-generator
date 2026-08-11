@@ -1,6 +1,8 @@
 #include "harness.h"
 
 #include "mf/classes.h"
+#include "mf/metacard.h"
+#include "mf/opcode.h"
 #include "mf/fixture.h"
 #include "mf/spearman.h"
 
@@ -68,6 +70,38 @@ MF_TEST(a_row_that_is_not_a_row_is_an_error_and_not_a_fatal) {
     }
 }
 
+/* ---- the stand-in (3.3.1) ------------------------------------------------ */
+
+MF_TEST(a_land_stand_in_taps_for_its_identity_and_nothing_else) {
+    /* Written as oracle text and run through the real scanner, so a stand-in is
+       exactly what the model would have made of a card this plain — a second
+       path to a metacard is a second place to disagree with the first. */
+    MF_EQ_STR(mf_standin_land_text(ARENA, MF_COLOUR_G), "{T}: Add {G}.");
+    MF_EQ_STR(mf_standin_land_text(ARENA, MF_COLOUR_W | MF_COLOUR_U), "{T}: Add {W} or {U}.");
+    MF_EQ_STR(mf_standin_land_text(ARENA, MF_COLOUR_W | MF_COLOUR_B | MF_COLOUR_G),
+              "{T}: Add {W} or {B} or {G}.");
+    /* A colourless identity is a real thing — an artifact land, or a land with
+       no coloured pip on it — and it taps for colourless rather than nothing. */
+    MF_EQ_STR(mf_standin_land_text(ARENA, 0), "{T}: Add {C}.");
+
+    /* And the scanner really does read it as a mana source, which is the whole
+       point: text that produced a metacard with no `produces` would be a land
+       that makes nothing, and would gut the mana base it exists to preserve. */
+    mf_card c = {0};
+    snprintf(c.oracle_id, sizeof c.oracle_id, "standin");
+    c.name = "Stand-in Land";
+    c.oracle_text = mf_standin_land_text(ARENA, MF_COLOUR_W | MF_COLOUR_U);
+    c.types = MF_TYPE_LAND;
+    c.identity = MF_COLOUR_W | MF_COLOUR_U;
+    c.commander_legal = true;
+    mf_opcode_scan sc;
+    mf_opcode_scan_text(c.oracle_text, &sc);
+    mf_metacard k;
+    mf_metacard_of(&c, &sc, &k);
+    MF_CHECK(k.produces != 0);
+    MF_CHECK(k.produces_max >= 1);
+}
+
 /* ---- a precon as a deck -------------------------------------------------- */
 
 /* A two-card table and a hand-built precon file, so the resolution can be
@@ -119,6 +153,33 @@ static void write_precons(const char *path) {
     fclose(f);
 }
 
+/* The stand-in table: the "ghost" ids the pool table lacks, as cost-and-type
+   cards — a land that taps for its identity and a vanilla creature. Built the
+   same way and with the same writer, because it IS a card table; it is simply
+   not the pool. */
+static const mf_table *standin_table(void) {
+    static mf_table *t;
+    if (t) return t;
+    mf_card c[4] = {0};
+    for (unsigned i = 0; i < 4; i++) {
+        snprintf(c[i].oracle_id, sizeof c[i].oracle_id, "ghost-%u", i);
+        c[i].name = i ? "Stand-in Spell" : "Stand-in Land";
+        c[i].oracle_text = i ? "" : mf_standin_land_text(ARENA, MF_COLOUR_G);
+        c[i].types = i ? MF_TYPE_CREATURE : MF_TYPE_LAND;
+        c[i].cmc = i ? (uint8_t)i : 0;
+        c[i].pips = i ? (mf_pips){.generic = (uint8_t)(i - 1), .g = 1} : (mf_pips){0};
+        c[i].identity = MF_COLOUR_G;
+        c[i].commander_legal = true;
+    }
+    mf_classset *cs = mf_classes_build(ARENA, c, 4);
+    mf_skill floors[4] = {MF_SKILL_ANY, MF_SKILL_ANY, MF_SKILL_ANY, MF_SKILL_ANY};
+    const char *path = "build/test-fixture-standin.bin";
+    mf_table_write(ARENA, path, MF_GAME_PAPER, c, 4, cs, floors, NULL);
+    mf_table_read(ARENA, path, &t);
+    remove(path);
+    return t;
+}
+
 static const mf_table *tiny_table(void) {
     static mf_table *t;
     if (t) return t;
@@ -153,7 +214,7 @@ MF_TEST(a_precon_becomes_a_deck_with_the_commander_last) {
 
     mf_deck d;
     mf_precon_fit fit;
-    MF_CHECK(mf_precon_deck(tiny_table(), p, 0, &d, &fit));
+    MF_CHECK(mf_precon_deck(tiny_table(), NULL, p, 0, &d, &fit));
     MF_EQ_INT(fit.matched, MF_DECK_CARDS);
     MF_EQ_INT(fit.unmatched, 0);
     MF_CHECK(fit.complete);
@@ -182,7 +243,7 @@ MF_TEST(an_incomplete_deck_is_refused_and_never_patched) {
 
     mf_deck d;
     mf_precon_fit fit;
-    MF_CHECK(!mf_precon_deck(tiny_table(), p, 1, &d, &fit));
+    MF_CHECK(!mf_precon_deck(tiny_table(), NULL, p, 1, &d, &fit));
     MF_EQ_INT(fit.unmatched, 10);
     MF_EQ_INT(fit.matched, MF_DECK_CARDS - 10);
     MF_CHECK(!fit.complete);
@@ -206,7 +267,7 @@ MF_TEST(a_corpus_that_resolved_nothing_defers_and_never_fails) {
     MF_EQ_INT(mf_winrates_load(ARENA, WR_PATH, &w), MF_OK);
 
     mf_g4 g;
-    mf_g4_measure(ARENA, tiny_table(), p, w, 1, NULL, &g);
+    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 1, NULL, &g);
     MF_CHECK(g.corpus > 0); /* the filter admitted decks... */
     MF_EQ_INT(g.scored, 0); /* ...and none of them resolved */
     MF_EQ_INT(g.unjoined, g.corpus);
@@ -248,7 +309,7 @@ MF_TEST(a_corpus_that_does_resolve_is_correlated_and_graded) {
 
     double fit[8];
     mf_g4 g;
-    mf_g4_measure(ARENA, tiny_table(), p, w, 4242, fit, &g);
+    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 4242, fit, &g);
     MF_EQ_INT(g.corpus, 5);   /* the sixth is under MF_G4_MIN_GAMES */
     MF_EQ_INT(g.scored, 1);   /* only "Whole" resolves */
     MF_EQ_INT(g.unjoined, 4); /* holed, headless, short, and absent */
@@ -292,7 +353,7 @@ MF_TEST(the_gate_passes_when_the_orderings_agree_and_fails_when_they_invert) {
     MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
     double fit[WHOLE_DECKS + 2];
     mf_g4 probe;
-    mf_g4_measure(ARENA, tiny_table(), p, w, 77, fit, &probe);
+    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 77, fit, &probe);
     MF_EQ_INT(probe.scored, WHOLE_DECKS);
     MF_CHECK(probe.sim_spread > 0.0);
     MF_CHECK(probe.data_spread > 0.0);
@@ -303,7 +364,7 @@ MF_TEST(the_gate_passes_when_the_orderings_agree_and_fails_when_they_invert) {
     numbered_corpus(wp, WHOLE_DECKS, fit);
     MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
     mf_g4 good;
-    mf_g4_measure(ARENA, tiny_table(), p, w, 77, NULL, &good);
+    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 77, NULL, &good);
     MF_EQ_INT(good.scored, WHOLE_DECKS);
     MF_EQ_DBL(good.rho, 1.0);
     MF_CHECK(good.z >= MF_G4_Z);
@@ -315,7 +376,7 @@ MF_TEST(the_gate_passes_when_the_orderings_agree_and_fails_when_they_invert) {
     numbered_corpus(wp, WHOLE_DECKS, invert);
     MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
     mf_g4 bad;
-    mf_g4_measure(ARENA, tiny_table(), p, w, 77, NULL, &bad);
+    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 77, NULL, &bad);
     MF_EQ_DBL(bad.rho, -1.0);
     MF_EQ_INT(bad.verdict, MF_G4_FAIL);
     remove(wp);
@@ -340,11 +401,11 @@ MF_TEST(a_perfect_ordering_over_a_small_corpus_still_defers) {
     MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
     double fit[4];
     mf_g4 probe;
-    mf_g4_measure(ARENA, tiny_table(), p, w, 77, fit, &probe);
+    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 77, fit, &probe);
     numbered_corpus(wp, 3, fit);
     MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
     mf_g4 g;
-    mf_g4_measure(ARENA, tiny_table(), p, w, 77, NULL, &g);
+    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 77, NULL, &g);
     remove(wp);
 
     MF_EQ_INT(g.scored, 3);
@@ -367,12 +428,94 @@ MF_TEST(the_thresholds_are_the_ones_committed_before_the_data) {
     MF_EQ_STR(mf_g4_verdict_name(MF_G4_FAIL), "fail");
 }
 
+MF_TEST(a_stand_in_makes_an_unbuildable_deck_buildable_and_says_so) {
+    /* **3.3.1's rule, and the counts it insists on.** A deck the pool alone
+       cannot build resolves through the stand-in — and `complete` stays false,
+       because a substituted deck is buildable and is *not* the published list.
+       Conflating those is what 3.3's first resolver did. */
+    const char *path = "build/test-fixture-precons.jsonl";
+    write_precons(path);
+    mf_precons *p = NULL;
+    MF_EQ_INT(mf_precons_load(ARENA, path, &p), MF_OK);
+    remove(path);
+
+    mf_deck d;
+    mf_precon_fit fit;
+    /* "Holed" is ten ghosts in the library and no ghost commander. */
+    MF_CHECK(!mf_precon_deck(tiny_table(), NULL, p, 1, &d, &fit));
+    MF_CHECK(mf_precon_deck(tiny_table(), standin_table(), p, 1, &d, &fit));
+    MF_EQ_INT(fit.substituted, 10);
+    MF_EQ_INT(fit.matched, MF_DECK_CARDS - 10);
+    MF_EQ_INT(fit.unmatched, 0);
+    MF_CHECK(!fit.commander_substituted);
+    MF_CHECK(!fit.complete); /* buildable, and not the published list */
+
+    /* "Headless" is the 19% case: the commander itself is a stand-in, which is
+       the worst of the three distortions and is flagged on its own. */
+    MF_CHECK(mf_precon_deck(tiny_table(), standin_table(), p, 2, &d, &fit));
+    MF_EQ_INT(fit.substituted, 1);
+    MF_CHECK(fit.commander_substituted);
+
+    /* A whole deck is unchanged by the stand-in being available — nothing is
+       substituted that did not need to be. */
+    mf_precon_fit whole;
+    MF_CHECK(mf_precon_deck(tiny_table(), standin_table(), p, 0, &d, &whole));
+    MF_EQ_INT(whole.substituted, 0);
+    MF_CHECK(whole.complete);
+}
+
+MF_TEST(a_substituted_card_can_never_be_expanded_into_a_real_one) {
+    /* The stand-in is not in the pool, and `table_index` must not pretend it
+       is: a substitute carries `MF_STANDIN_INDEX`, so nothing downstream can
+       walk it back to a card the optimiser is allowed to choose. §7.9 prunes
+       the pool by representability, and this is the seam where that could leak. */
+    const char *path = "build/test-fixture-precons.jsonl";
+    write_precons(path);
+    mf_precons *p = NULL;
+    MF_EQ_INT(mf_precons_load(ARENA, path, &p), MF_OK);
+    remove(path);
+
+    mf_deck d;
+    mf_precon_fit fit;
+    MF_CHECK(mf_precon_deck(tiny_table(), standin_table(), p, 1, &d, &fit));
+    unsigned marked = 0;
+    for (unsigned i = 0; i < MF_DECK_CARDS; i++) {
+        if (d.table_index[i] == MF_STANDIN_INDEX) marked++;
+        else MF_CHECK(d.table_index[i] < mf_table_count(tiny_table()));
+    }
+    MF_EQ_INT(marked, fit.substituted);
+}
+
+MF_TEST(a_land_stand_in_keeps_the_deck_producing_mana) {
+    /* The carve-out earning its place. A stand-in land that produced nothing
+       would gut the mana base the substitution exists to preserve, and the
+       deck would score near zero for a reason that is about the fixture rather
+       than about the deck. */
+    const char *path = "build/test-fixture-precons.jsonl";
+    write_precons(path);
+    mf_precons *p = NULL;
+    MF_EQ_INT(mf_precons_load(ARENA, path, &p), MF_OK);
+    remove(path);
+
+    mf_deck d;
+    mf_precon_fit fit;
+    MF_CHECK(mf_precon_deck(tiny_table(), standin_table(), p, 1, &d, &fit));
+    mf_objective_row_fit f;
+    mf_objective_fit(ARENA, &d, MF_RUNG_ALL, 31337, 256, 0, MF_SOLO_TURNS - MF_PHASE_TURNS, &f);
+    MF_CHECK(f.fitness > 0.0);
+    MF_CHECK(f.feasible);
+}
+
 void run_fixture_tests(void) {
     ARENA = mf_arena_create("fixture-test", 8u << 20);
     MF_RUN(the_transcription_carries_its_own_checksums);
     MF_RUN(a_row_that_is_not_a_row_is_an_error_and_not_a_fatal);
+    MF_RUN(a_land_stand_in_taps_for_its_identity_and_nothing_else);
     MF_RUN(a_precon_becomes_a_deck_with_the_commander_last);
     MF_RUN(an_incomplete_deck_is_refused_and_never_patched);
+    MF_RUN(a_stand_in_makes_an_unbuildable_deck_buildable_and_says_so);
+    MF_RUN(a_substituted_card_can_never_be_expanded_into_a_real_one);
+    MF_RUN(a_land_stand_in_keeps_the_deck_producing_mana);
     MF_RUN(a_corpus_that_resolved_nothing_defers_and_never_fails);
     MF_RUN(a_corpus_that_does_resolve_is_correlated_and_graded);
     MF_RUN(the_gate_passes_when_the_orderings_agree_and_fails_when_they_invert);

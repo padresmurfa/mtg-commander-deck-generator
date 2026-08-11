@@ -73,14 +73,55 @@ unsigned mf_winrates_total_games(const mf_winrates *w);
  * thing this model really simulates. A fixture that is 11% invented is not a
  * fixture, and a gate run on one reports a verdict about something else. */
 
+/* ---- the stand-in (sprint 3.3.1, pre-registered in T1) -------------------
+ *
+ * > A card the opcode set cannot represent enters a **fixture** as the most
+ * > neutral card of the same cost, type and colour identity the model can
+ * > express — and never enters the search pool.
+ *
+ * Not a new compromise: it is the one the model already makes, applied one
+ * clause further. G1 measures **90.33% of clauses as inert**, so the card table
+ * routinely carries cards whose text it almost entirely ignores — and a card
+ * excluded outright for having one unrepresentable clause is being treated more
+ * harshly than a card whose clauses are all inert.
+ *
+ * `preprocess` writes these to a second table, using the same writer and the
+ * same format. It is a card table; it is simply **not the pool**, and §7.9
+ * prunes the pool by representability for reasons that have nothing to do with
+ * what a published deck contains.
+ *
+ * **The oracle text a land stand-in gets.** A land's whole modelled contribution
+ * is mana, and one producing none would break the mana base the substitution
+ * exists to preserve — 563 of the 6,257 distinct precon cards are lands. So it
+ * taps for one mana of any colour in its identity, *expressed as text and run
+ * through the same scanner as every other card*, because a second path to a
+ * metacard is a second place to disagree with the first.
+ *
+ * What that overstates is written down: a utility land that really taps
+ * conditionally, or not at all, becomes one that always does. */
+const char *mf_standin_land_text(mf_arena *a, uint8_t identity);
+
+/* What `mf_deck.table_index` holds for a substituted card: not an index into
+   anything, so nothing downstream can expand one into a real card by accident. */
+#define MF_STANDIN_INDEX 0xFFFFFFFFu
+
 typedef struct {
-    unsigned matched;   /* oracle ids found in the card table */
-    unsigned unmatched; /* not found — unrepresentable, or a different table */
-    bool complete;      /* every one of the 100 resolved */
+    unsigned matched;   /* oracle ids found in the pool table */
+    unsigned unmatched; /* found in neither table — a different table, or banned */
+    /* Found in the stand-in table: present in the game, absent from the pool
+       because the opcode set cannot express it. Reported, never hidden — the
+       distortion is deck-differential and G4 inherits it. */
+    unsigned substituted;
+    unsigned substituted_lands;
+    bool commander_substituted; /* 19% of precons, and the worst case of the three */
+    bool complete;              /* every one of the 100 came from the pool table */
 } mf_precon_fit;
 
-bool mf_precon_deck(const mf_table *t, const mf_precons *p, size_t index, mf_deck *out,
-                    mf_precon_fit *fit);
+/* `standin` may be NULL, which is sprint 3.3's behaviour exactly: refuse any
+   deck that does not resolve entirely from the pool. With one supplied, a card
+   the pool lacks is taken from it and counted. */
+bool mf_precon_deck(const mf_table *t, const mf_table *standin, const mf_precons *p, size_t index,
+                    mf_deck *out, mf_precon_fit *fit);
 
 /* ---- gate G4, pre-registered in sprint 3.3 T1 ---------------------------
  *
@@ -120,6 +161,12 @@ typedef struct {
     unsigned unjoined;  /* rows whose deck could not be found or built */
     unsigned unresolved_cards; /* summed over the decks that could not be built */
     double mean_gap;           /* per unbuildable deck — how far off it was */
+    /* The substitution's footprint, reported **beside** ρ and never after it:
+       the distortion is deck-differential and correlated with commander
+       complexity, so it is a bias G4 inherits and cannot correct. */
+    unsigned substituted;
+    unsigned substituted_lands;
+    unsigned commanders_substituted;
     double rho;
     double z;
     /* Reported beside ρ because §13.2's whole caution is that a rank
@@ -132,7 +179,7 @@ typedef struct {
 /* Runs every corpus deck at `MF_G4_GAMES` under the full band and correlates the
    two orderings. `rows` receives one fitness per scored deck, in corpus order,
    and must hold `mf_winrates_count(w)` entries. */
-void mf_g4_measure(mf_arena *a, const mf_table *t, const mf_precons *p, const mf_winrates *w,
-                   uint64_t seed, double *fitness, mf_g4 *out);
+void mf_g4_measure(mf_arena *a, const mf_table *t, const mf_table *standin, const mf_precons *p,
+                   const mf_winrates *w, uint64_t seed, double *fitness, mf_g4 *out);
 
 #endif

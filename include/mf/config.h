@@ -28,6 +28,12 @@ typedef struct {
        the acquisition-path cost model (§7.5) and precon seeding (§5) want them,
        and a card table can be built without either. */
     char precon_path[MF_PATH_MAX];
+    /* Where preprocess writes the **stand-in table** (sprint 3.3.1): the
+       commander-legal but unrepresentable cards, reduced to cost, type and
+       identity. Optional, and empty by default, because it is wanted only by
+       §13.2's fixtures — and it is **never the search pool**, which is what
+       §7.9 prunes by representability in the first place. */
+    char standin_table_path[MF_PATH_MAX];
     /* Which game's card set to build. **No default**, deliberately: paper,
        Arena and Magic Online are different card pools — 37,553, 16,223 and
        30,950 cards, with 976 of Arena's existing nowhere else — so choosing one

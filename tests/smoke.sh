@@ -136,7 +136,7 @@ ok "a bulk file that is not there is a plain failure"
 "$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
     --bulk tests/fixtures/bulk-sample.json >/dev/null 2>&1 ||
     fail "preprocess on the fixture failed"
-grep -q '"cards":6' "$WORK/pre.jsonl" || fail "wrong card count"
+grep -q '"cards":7' "$WORK/pre.jsonl" || fail "wrong card count"
 grep -q '"game":"paper"' "$WORK/pre.jsonl" || fail "the game was not recorded"
 grep -q '"other_games":2' "$WORK/pre.jsonl" || fail "other games were not dropped"
 grep -q '"legality_disagreements":1' "$WORK/pre.jsonl" || fail "the disagreement was not counted"

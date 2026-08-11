@@ -15,6 +15,7 @@
 #include "mf/skill.h"
 #include "mf/table.h"
 #include "mf/evaluate.h"
+#include "mf/fixture.h"
 #include "mf/gap.h"
 #include "mf/solo.h"
 
@@ -650,6 +651,36 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
         if (cards[i].commander_legal && mf_opcode_representable(&sc)) pool[pool_count++] = cards[i];
     }
 
+    /* ---- the stand-in table (sprint 3.3.1) -------------------------------
+     * The commander-legal but **unrepresentable** cards, reduced to what the
+     * model can express about them: cost, type, colour identity, no effects.
+     *
+     * **Never the pool.** §7.9 prunes the search space by representability, and
+     * the pool above is what `mf_table_write` receives — so this is a second
+     * file that nothing searches. It exists for §13.2's fixtures, where the
+     * question is "what is this published deck" rather than "what may the
+     * optimiser choose", and those want opposite answers.
+     *
+     * **Described as oracle text and run through the same scanner**, rather than
+     * having its metacards built by a second path. A second path is a second
+     * place to disagree with the first, and the whole point of a stand-in is to
+     * be exactly what the model would have made of a card this plain. */
+    mf_card *standin = mf_arena_array(durable, count ? count : 1, sizeof *standin);
+    size_t standin_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        mf_opcode_scan sc;
+        mf_opcode_scan_text(cards[i].oracle_text, &sc);
+        if (!cards[i].commander_legal || mf_opcode_representable(&sc)) continue;
+        mf_card sub = cards[i];
+        /* A land taps for one mana of any colour in its identity. Its whole
+           modelled contribution is mana, and one producing none would break the
+           mana base the substitution exists to preserve. */
+        sub.oracle_text = (cards[i].types & MF_TYPE_LAND)
+                              ? mf_standin_land_text(durable, cards[i].identity)
+                              : "";
+        standin[standin_count++] = sub;
+    }
+
     mf_classset *classes = mf_classes_build(durable, pool, pool_count);
     size_t classes_raw = mf_classes_count(classes);
     size_t unpriced_before = mf_classes_unpriced(classes);
@@ -684,6 +715,20 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
             rc = MF_EXIT_FAILURE;
         } else {
             mf_digest_hex(&th, table_hash);
+        }
+    }
+
+    /* The stand-in table, when a path was given. Written with the same writer
+       and the same format — it is a card table, it is simply not the pool. */
+    if (rc == MF_EXIT_OK && c->standin_table_path[0] != '\0') {
+        mf_classset *sc_classes = mf_classes_build(durable, standin, standin_count);
+        mf_skill *sc_floors = mf_arena_array(durable, standin_count ? standin_count : 1,
+                                             sizeof *sc_floors);
+        for (size_t i = 0; i < standin_count; i++) sc_floors[i] = mf_skill_floor(&standin[i]);
+        if (mf_table_write(durable, c->standin_table_path, c->game, standin, standin_count,
+                           sc_classes, sc_floors, NULL) != MF_OK) {
+            fprintf(stderr, "mfsim: cannot write stand-in table: %s\n", c->standin_table_path);
+            rc = MF_EXIT_FAILURE;
         }
     }
 
@@ -737,6 +782,7 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
     mf_jw_key(w, "coverage");
     mf_jw_obj_begin(w);
     mf_jw_key(w, "cards");               mf_jw_int(w, (long long)count);
+    mf_jw_key(w, "standins");            mf_jw_int(w, (long long)standin_count);
     mf_jw_key(w, "representable");       mf_jw_int(w, (long long)representable);
     mf_jw_key(w, "commander_legal");     mf_jw_int(w, (long long)legal);
     mf_jw_key(w, "legal_representable"); mf_jw_int(w, (long long)legal_representable);

@@ -148,6 +148,69 @@ MF_TEST(preprocess_records_the_precon_side_table_when_it_is_given) {
     remove(PATH);
 }
 
+MF_TEST(preprocess_writes_the_stand_in_table_without_touching_the_pool) {
+    /* Sprint 3.3.1. The commander-legal but unrepresentable cards, written to a
+       second table with the same writer and the same format — it IS a card
+       table, it is simply not the pool.
+
+       **The assertion that matters is the second one.** §7.9 prunes the search
+       space by representability, and a stand-in reaching the pool would undo
+       that silently: the optimiser would be free to pick a card the model
+       cannot simulate. So the pool table's size is checked to be exactly what
+       it was before the stand-in existed. */
+    remove(PATH);
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    c.game = MF_GAME_PAPER;
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.bin");
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_OK);
+    mf_table *pool_only = NULL;
+    MF_EQ_INT(mf_table_read(A, "build/test-worker-cards.bin", &pool_only), MF_OK);
+    size_t pool_before = mf_table_count(pool_only);
+    remove(PATH);
+
+    snprintf(c.standin_table_path, sizeof c.standin_table_path, "build/test-worker-standin.bin");
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_OK);
+    char *run = mf_mem_read_file(A, PATH, NULL);
+    MF_CHECK(strstr(run, "\"standins\":") != NULL);
+
+    mf_table *pool = NULL, *standin = NULL;
+    MF_EQ_INT(mf_table_read(A, "build/test-worker-cards.bin", &pool), MF_OK);
+    MF_EQ_INT(mf_table_read(A, "build/test-worker-standin.bin", &standin), MF_OK);
+    MF_EQ_INT(mf_table_count(pool), pool_before); /* the pool is untouched */
+    MF_CHECK(mf_table_count(standin) > 0);        /* and the stand-in is not empty */
+
+    /* Disjoint: nothing is in both, or a card would be searchable and
+       substitutable at once. */
+    for (size_t i = 0; i < mf_table_count(standin); i++) {
+        const char *id = mf_table_at(standin, i)->oracle_id;
+        for (size_t j = 0; j < mf_table_count(pool); j++) {
+            MF_CHECK(strcmp(mf_table_at(pool, j)->oracle_id, id) != 0);
+        }
+    }
+
+    remove("build/test-worker-standin.bin");
+    remove("build/test-worker-cards.bin");
+    remove(PATH);
+}
+
+MF_TEST(a_stand_in_table_that_cannot_be_written_fails_the_run) {
+    /* Optional to ask for, not optional to succeed — the same rule the precon
+       side table follows, for the same reason: a run told to produce one and
+       silently not producing it would leave G4 grading a corpus it could not
+       build, with no sign that anything had gone wrong. */
+    remove(PATH);
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    c.game = MF_GAME_PAPER;
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.bin");
+    snprintf(c.standin_table_path, sizeof c.standin_table_path,
+             "build/no-such-dir/standin.bin");
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_FAILURE);
+    remove("build/test-worker-cards.bin");
+    remove(PATH);
+}
+
 MF_TEST(a_precon_file_that_is_not_there_fails_the_run) {
     /* Optional to ask for, not optional to find: a run told to use precons and
        silently not using them would price acquisition paths wrongly with no
@@ -206,7 +269,7 @@ MF_TEST(preprocess_reads_a_bulk_file_and_writes_a_card_table) {
 
     char *run = mf_mem_read_file(A, PATH, NULL);
     MF_CHECK(strstr(run, "\"record\":\"preprocess\"") != NULL);
-    MF_CHECK(strstr(run, "\"cards\":6") != NULL);
+    MF_CHECK(strstr(run, "\"cards\":7") != NULL);
     MF_CHECK(strstr(run, "\"other_games\":2") != NULL);
     MF_CHECK(strstr(run, "\"game\":\"paper\"") != NULL);
     MF_CHECK(strstr(run, "\"no_oracle_id\":1") != NULL);
@@ -346,6 +409,8 @@ void run_worker_tests(void) {
     MF_RUN_A(validate_exercises_both_pool_disciplines);
     MF_RUN_A(the_unimplemented_subcommands_fail_rather_than_pretending);
     MF_RUN_A(preprocess_records_the_precon_side_table_when_it_is_given);
+    MF_RUN_A(preprocess_writes_the_stand_in_table_without_touching_the_pool);
+    MF_RUN_A(a_stand_in_table_that_cannot_be_written_fails_the_run);
     MF_RUN_A(a_precon_file_that_is_not_there_fails_the_run);
     MF_RUN_A(a_card_table_that_cannot_be_written_fails_the_run);
     MF_RUN_A(preprocess_without_a_game_is_a_usage_error);
