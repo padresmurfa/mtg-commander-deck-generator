@@ -506,6 +506,110 @@ MF_TEST(a_land_stand_in_keeps_the_deck_producing_mana) {
     MF_CHECK(f.feasible);
 }
 
+/* ---- per-deck completeness (3.3.1 T4) ------------------------------------ */
+
+/* Three decks and three answers, which is exactly what has to be told apart:
+   one that *is* the published list, one that is buildable and is not, and one
+   that is neither. The gapped deck comes first on purpose — a running minimum
+   that is only ever set on the first deck is one no test has exercised. */
+static void write_coverage_precons(const char *path) {
+    FILE *f = fopen(path, "w");
+    fputs("{\"code\":\"TST\",\"name\":\"Substituted\",\"released\":\"2020-01-01\","
+          "\"commanders\":1,\"cards\":[\"ghost-0\",\"id-0\",\"ghost-1\"]}\n"
+          "{\"code\":\"TST\",\"name\":\"Whole\",\"released\":\"2020-01-01\","
+          "\"commanders\":1,\"cards\":[\"id-1\",\"id-0\",\"id-2\"]}\n"
+          "{\"code\":\"TST\",\"name\":\"Unresolvable\",\"released\":\"2020-01-01\","
+          "\"commanders\":1,\"cards\":[\"id-0\",\"absent-0\"]}\n",
+          f);
+    fclose(f);
+}
+
+static const char **ids_of(const mf_table *t) {
+    size_t n = mf_table_count(t);
+    const char **ids = mf_arena_array(ARENA, n, sizeof *ids);
+    for (size_t i = 0; i < n; i++) ids[i] = mf_table_at(t, i)->oracle_id;
+    return ids;
+}
+
+static mf_precons *coverage_precons(void) {
+    const char *path = "build/test-fixture-coverage.jsonl";
+    write_coverage_precons(path);
+    mf_precons *p = NULL;
+    mf_precons_load(ARENA, path, &p);
+    remove(path);
+    return p;
+}
+
+MF_TEST(per_deck_completeness_is_measured_rather_than_inferred_from_coverage) {
+    /* 3.3's finding, and the reason this number exists at all: G1 read 0.9301
+       and per-deck completeness read 0 of 190, and the two were being taken as
+       though one implied the other. 93% per card over a hundred cards is one
+       deck in twelve hundred — the arithmetic is not close. */
+    mf_precons *p = coverage_precons();
+    MF_EQ_INT(mf_precons_count(p), 3);
+
+    const mf_table *pool = tiny_table(), *ghost = standin_table();
+    mf_precon_coverage cov;
+    mf_precon_coverage_measure(p, ids_of(pool), mf_table_count(pool), ids_of(ghost),
+                               mf_table_count(ghost), &cov);
+
+    MF_EQ_INT(cov.decks, 3);
+    MF_EQ_INT(cov.complete, 1);   /* one deck is the published list */
+    MF_EQ_INT(cov.buildable, 2);  /* two can be *built*, which is a weaker thing */
+    MF_EQ_INT(cov.substituted, 2);
+    MF_EQ_INT(cov.unresolved, 1);
+    MF_EQ_INT(cov.commanders_substituted, 1);
+    /* The distribution, because "0 of 190" says nothing about how close the 190
+       came — and on the real corpus the best was one card away. */
+    MF_EQ_INT(cov.min_gap, 0);
+    MF_EQ_INT(cov.max_gap, 2);
+
+    /* **And the same corpus against a pool that resolves nothing**, which is
+       3.3's actual shape: no deck complete, and the minimum still saying how
+       close the closest came. A minimum that is only ever seeded by `memset`
+       reports 0 here — "some deck was complete" — which is the precise lie this
+       measurement exists to stop, and the case above cannot catch it because a
+       deck of gap 0 is in it. */
+    mf_precon_coverage none;
+    mf_precon_coverage_measure(p, NULL, 0, ids_of(ghost), mf_table_count(ghost), &none);
+    MF_EQ_INT(none.complete, 0);
+    MF_EQ_INT(none.buildable, 0);
+    MF_EQ_INT(none.min_gap, 2);
+    MF_EQ_INT(none.max_gap, 3);
+}
+
+MF_TEST(without_a_stand_in_buildable_and_complete_are_the_same_number) {
+    /* Sprint 3.3's behaviour, kept reachable: the stand-in's effect is then a
+       difference between two measurements of the same corpus rather than a
+       claim about one of them. */
+    mf_precons *p = coverage_precons();
+    const mf_table *pool = tiny_table();
+    mf_precon_coverage cov;
+    mf_precon_coverage_measure(p, ids_of(pool), mf_table_count(pool), NULL, 0, &cov);
+
+    MF_EQ_INT(cov.complete, 1);
+    MF_EQ_INT(cov.buildable, 1);
+    MF_EQ_INT(cov.substituted, 0);
+    MF_EQ_INT(cov.commanders_substituted, 0);
+    /* The two ghosts and the absent card are all simply missing now. */
+    MF_EQ_INT(cov.unresolved, 3);
+    MF_EQ_INT(cov.max_gap, 2);
+}
+
+MF_TEST(an_empty_precon_file_is_an_error_and_never_a_corpus_of_none) {
+    /* 2.1's defect is that a statistic computed from nothing can read as
+       agreement, and `complete == decks` is true of an empty corpus. It is
+       headed off one step earlier: a precon file with no decks in it does not
+       load, so a zero-deck corpus never reaches the measurement and there is no
+       guard branch to leave untested. Asserted here because it is load-bearing
+       for the arithmetic above rather than incidental to it. */
+    const char *path = "build/test-fixture-empty.jsonl";
+    fclose(fopen(path, "w"));
+    mf_precons *p = NULL;
+    MF_EQ_INT(mf_precons_load(ARENA, path, &p), MF_ERR_PARSE);
+    remove(path);
+}
+
 void run_fixture_tests(void) {
     ARENA = mf_arena_create("fixture-test", 8u << 20);
     MF_RUN(the_transcription_carries_its_own_checksums);
@@ -516,6 +620,9 @@ void run_fixture_tests(void) {
     MF_RUN(a_stand_in_makes_an_unbuildable_deck_buildable_and_says_so);
     MF_RUN(a_substituted_card_can_never_be_expanded_into_a_real_one);
     MF_RUN(a_land_stand_in_keeps_the_deck_producing_mana);
+    MF_RUN(per_deck_completeness_is_measured_rather_than_inferred_from_coverage);
+    MF_RUN(without_a_stand_in_buildable_and_complete_are_the_same_number);
+    MF_RUN(an_empty_precon_file_is_an_error_and_never_a_corpus_of_none);
     MF_RUN(a_corpus_that_resolved_nothing_defers_and_never_fails);
     MF_RUN(a_corpus_that_does_resolve_is_correlated_and_graded);
     MF_RUN(the_gate_passes_when_the_orderings_agree_and_fails_when_they_invert);

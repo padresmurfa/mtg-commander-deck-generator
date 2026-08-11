@@ -148,6 +148,34 @@ MF_TEST(preprocess_records_the_precon_side_table_when_it_is_given) {
     remove(PATH);
 }
 
+MF_TEST(preprocess_carries_per_deck_completeness_beside_g1s_fraction) {
+    /* Sprint 3.3.1 T4. G1 is a fraction over the candidate pool and per-*deck*
+       completeness is a different number; sprint 3.3 read the first as though it
+       bounded the second, and 0.9301 per card meant 0 of 190 decks. So the two
+       are emitted in the same object, and the one that turned out to matter can
+       no longer be quoted without the one that did not.
+
+       Three decks and three answers — the published list, a deck that is
+       buildable and is not it, and a deck that is neither — because a block
+       whose numbers are all zero proves the key exists and nothing else. */
+    remove(PATH);
+    mf_config c = worker_cfg(4u << 20);
+    snprintf(c.bulk_path, sizeof c.bulk_path, "tests/fixtures/bulk-sample.json");
+    snprintf(c.precon_path, sizeof c.precon_path, "tests/fixtures/precons-coverage.jsonl");
+    c.game = MF_GAME_PAPER;
+    snprintf(c.card_table_path, sizeof c.card_table_path, "build/test-worker-cards.bin");
+
+    MF_EQ_INT(mf_worker_run(A, &c, MF_CMD_PREPROCESS, NULL), MF_EXIT_OK);
+    char *run = mf_mem_read_file(A, PATH, NULL);
+    MF_CHECK(strstr(run, "\"legal_fraction\":") != NULL);
+    MF_CHECK(strstr(run, "\"per_deck\":{\"decks\":3,\"complete\":1,\"buildable\":2,"
+                         "\"substituted\":1,\"unresolved\":1,\"commanders_substituted\":1,"
+                         "\"min_gap\":0,\"max_gap\":1}") != NULL);
+
+    remove("build/test-worker-cards.bin");
+    remove(PATH);
+}
+
 MF_TEST(preprocess_writes_the_stand_in_table_without_touching_the_pool) {
     /* Sprint 3.3.1. The commander-legal but unrepresentable cards, written to a
        second table with the same writer and the same format — it IS a card
@@ -409,6 +437,7 @@ void run_worker_tests(void) {
     MF_RUN_A(validate_exercises_both_pool_disciplines);
     MF_RUN_A(the_unimplemented_subcommands_fail_rather_than_pretending);
     MF_RUN_A(preprocess_records_the_precon_side_table_when_it_is_given);
+    MF_RUN_A(preprocess_carries_per_deck_completeness_beside_g1s_fraction);
     MF_RUN_A(preprocess_writes_the_stand_in_table_without_touching_the_pool);
     MF_RUN_A(a_stand_in_table_that_cannot_be_written_fails_the_run);
     MF_RUN_A(a_precon_file_that_is_not_there_fails_the_run);

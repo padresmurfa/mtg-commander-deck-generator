@@ -525,7 +525,7 @@ epics:
             losing only what the model already cannot see. Choosing it after seeing a correlation is
             the move pre-registration forbids.
           - or a wider opcode set, which is G1's own failure branch
-          - per-deck completeness reported beside G1's clause fraction
+          - per-deck completeness reported beside G1's fraction, everywhere G1 is quoted (done, T4)
           - G4 re-run with the 3.3 thresholds UNCHANGED, and its verdict recorded
           - G4 written to the run artifact by mfsim validate, as G1's and G2's are
 
@@ -738,7 +738,24 @@ tasks:
     - id: T3
       name: resolution through the stand-in, with substitution counts reported
     - id: T4
-      name: per-deck completeness carried beside G1's clause fraction
+      name: per-deck completeness carried beside G1's fraction
+      status: done
+      emits: preprocess -> coverage.per_deck, in the same object as legal_fraction
+      fields: [decks, complete, buildable, substituted, unresolved, commanders_substituted,
+               min_gap, max_gap]
+      counts_not_a_fraction: >
+        complete beside decks cannot be misread the way a lone 0.0 can, and there is no division to
+        guard. The vacuous case is refused one step earlier - mf_precons_load rejects a file with no
+        decks in it - so there is no untestable branch here.
+      label_corrected: >
+        The 3.3 amendment called G1 "a fraction over clauses" in design 13.5, the spec hazard and
+        the retro. It is a fraction over CARDS - legal_representable / legal - with the clause
+        tallies a separate object beside it, and the label contradicted the per-card arithmetic in
+        its own sentence. Conclusion unchanged and sharper stated correctly (0.9301^100 ~ 0.0008),
+        but a reader taking the label literally would compute a far more forgiving implication for a
+        deck. Corrected in design, spec and gates.md; the 3.3 retro keeps its wording with a
+        correction note, on 1.2.1's rule that a published measurement is superseded in the open.
+        SECOND time G1 has been quoted as the answer to a question it was not measuring.
     - id: T5
       name: re-run G4 with 3.3's thresholds unchanged
     - id: T6

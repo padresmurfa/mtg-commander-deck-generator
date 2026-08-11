@@ -1620,14 +1620,29 @@ Measure what fraction of a real commander's candidate pool the opcode set can ac
 Cards that cannot be modelled are excluded (§7.9), so coverage is a hard ceiling on how meaningful
 the output is.
 
-*(Second hazard, found in sprint 3.3.)* **Clause coverage does not predict whether any real deck can
-be built**, and the two numbers were being read as though one implied the other. G1 reads 0.9301 over
-clauses; per-*deck* completeness at that coverage is **0 of 190 precons**. The arithmetic is not
-subtle once stated — a hundred cards to a deck against a per-card miss rate of a few percent leaves
-essentially no chance that all hundred resolve — but nothing in this section said to ask. So a
-coverage figure is quoted with **three** things now: the fraction, the inert share, and what it
-implies for a hundred-card list. The first hazard, that G1 *rises* when less is simulated, is
-unchanged and still applies.
+*(Second hazard, found in sprint 3.3.)* **Coverage does not predict whether any real deck can be
+built**, and the two numbers were being read as though one implied the other. G1 reads 0.9301;
+per-*deck* completeness at that coverage is **0 of 190 precons**. The arithmetic is not subtle once
+stated — a hundred cards to a deck against a per-card miss rate of seven percent leaves essentially
+no chance that all hundred resolve — but nothing in this section said to ask. So a coverage figure is
+quoted with **three** things now: the fraction, the inert share, and what it implies for a
+hundred-card list. The first hazard, that G1 *rises* when less is simulated, is unchanged and still
+applies.
+
+*(Corrected in sprint 3.3.1.)* The amendment above originally called G1 "a fraction over clauses". It
+is not, and never was: `legal_fraction` is `legal_representable / legal`, both **card** counts, and
+the clause tallies are a separate object beside it. The label contradicted the per-card arithmetic in
+its own sentence. The conclusion is unchanged and in fact sharper stated correctly — 0.9301<sup>100</sup>
+≈ 0.0008 — but a reader who took "over clauses" literally would have computed a different and much
+more forgiving implication for a deck. **Ask what a coverage number is coverage *of*, and then check
+that the label and the arithmetic agree.**
+
+Sprint 3.3.1 stopped this recurring by making it structural rather than editorial: `preprocess` emits
+`coverage.per_deck` **inside the same object** as `legal_fraction`, carrying `decks`, `complete`,
+`buildable`, `substituted`, `unresolved`, `commanders_substituted` and the `min_gap`/`max_gap`
+spread. Counts and not a fraction — `complete` standing next to `decks` cannot be misread the way a
+lone `0.0` can, and a corpus of none never reaches the measurement because a precon file with no
+decks in it does not load.
 
 At 60%+ the approach is sound. At ~30% the optimiser is choosing from a minority of the legal pool
 and its "optimal" deck is an artefact of what happened to be representable — at which point the

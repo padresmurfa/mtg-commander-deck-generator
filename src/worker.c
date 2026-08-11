@@ -736,6 +736,8 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
        wanted by the acquisition-path cost model (§7.5) and precon seeding (§5),
        and a table can be built without either. */
     size_t precon_decks = 0, precon_cards = 0;
+    mf_precon_coverage pcov;
+    memset(&pcov, 0, sizeof pcov);
     if (rc == MF_EXIT_OK && c->precon_path[0] != '\0') {
         mf_precons *pre = NULL;
         if (mf_precons_load(durable, c->precon_path, &pre) != MF_OK) {
@@ -744,6 +746,20 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
         } else {
             precon_decks = mf_precons_count(pre);
             precon_cards = mf_precons_distinct_cards(pre);
+            /* Per-deck completeness (sprint 3.3.1 T4), measured here because
+               this is where both sets exist and neither has been written yet.
+               `count + 1` rather than a branch on an empty set: both subsets fit
+               inside the whole, and one spare pointer removes a case nothing can
+               reach — mf/fixture's own trick for the same shape. */
+            const char **pool_ids = mf_arena_array(durable, count + 1, sizeof *pool_ids);
+            for (size_t i = 0; i < pool_count; i++) pool_ids[i] = pool[i].oracle_id;
+            const char **standin_ids = mf_arena_array(durable, count + 1, sizeof *standin_ids);
+            for (size_t i = 0; i < standin_count; i++) standin_ids[i] = standin[i].oracle_id;
+            /* The stand-in set is passed whether or not it is being *written*:
+               "could this deck be built" is a question about what the opcode set
+               can express, not about which files a run happened to produce. */
+            mf_precon_coverage_measure(pre, pool_ids, pool_count, standin_ids, standin_count,
+                                       &pcov);
         }
     }
 
@@ -788,6 +804,27 @@ static int preprocess(mf_arena *root, const mf_config *c, mf_artifact *art) {
     mf_jw_key(w, "legal_representable"); mf_jw_int(w, (long long)legal_representable);
     mf_jw_key(w, "legal_fraction");
     mf_jw_num(w, legal ? (double)legal_representable / (double)legal : 0.0);
+    /* **Beside G1's fraction, and never after it** (sprint 3.3.1 T4). G1 is a
+       fraction over the candidate pool and per-*deck* completeness is a
+       different number; sprint 3.3 read the first as though it bounded the
+       second. It does not — at 0.9301 per card, a hundred cards all resolve
+       about one time in twelve hundred, and the measured answer was 0 of 190,
+       which is why G4 could not run. Counts and not a fraction: `complete`
+       standing next to `decks` cannot be misread the way a lone 0.0 can. */
+    mf_jw_key(w, "per_deck");
+    mf_jw_obj_begin(w);
+    mf_jw_key(w, "decks");       mf_jw_int(w, (long long)pcov.decks);
+    mf_jw_key(w, "complete");    mf_jw_int(w, (long long)pcov.complete);
+    mf_jw_key(w, "buildable");   mf_jw_int(w, (long long)pcov.buildable);
+    mf_jw_key(w, "substituted"); mf_jw_int(w, (long long)pcov.substituted);
+    mf_jw_key(w, "unresolved");  mf_jw_int(w, (long long)pcov.unresolved);
+    mf_jw_key(w, "commanders_substituted");
+    mf_jw_int(w, (long long)pcov.commanders_substituted);
+    /* How close the ones that failed came. "0 of 190" says nothing about
+       whether the corpus was one card short or fifty. */
+    mf_jw_key(w, "min_gap");     mf_jw_int(w, (long long)pcov.min_gap);
+    mf_jw_key(w, "max_gap");     mf_jw_int(w, (long long)pcov.max_gap);
+    mf_jw_obj_end(w);
     mf_jw_key(w, "clauses");
     mf_jw_obj_begin(w);
     for (int op = 1; op < MF_OP_COUNT; op++) {

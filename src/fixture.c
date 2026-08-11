@@ -204,6 +204,58 @@ bool mf_precon_deck(const mf_table *t, const mf_table *standin, const mf_precons
     return true;
 }
 
+static bool has_id(const char *const *ids, size_t n, const char *id) {
+    /* Linear, like `find_card` and for the same reason: 190 decks of a hundred
+       cards is a question asked once per `preprocess`, in a command that has
+       just parsed half a gigabyte of JSON. */
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(ids[i], id) == 0) return true;
+    }
+    return false;
+}
+
+void mf_precon_coverage_measure(const mf_precons *p, const char *const *pool, size_t pool_count,
+                                const char *const *standin, size_t standin_count,
+                                mf_precon_coverage *out) {
+    memset(out, 0, sizeof *out);
+    out->decks = (unsigned)mf_precons_count(p);
+    for (size_t d = 0; d < mf_precons_count(p); d++) {
+        size_t n = 0;
+        const char *const *ids = mf_precons_cards(p, d, &n);
+        unsigned subbed = 0, missing = 0;
+        for (size_t i = 0; i < n; i++) {
+            if (has_id(pool, pool_count, ids[i])) continue;
+            /* No null check on `standin`: a count of zero never dereferences
+               it, so the NULL case is the empty case and needs no branch of its
+               own to be right. */
+            if (has_id(standin, standin_count, ids[i])) {
+                subbed++;
+                /* `mf/precon` lists commanders first, so index 0 is the case
+                   worth its own counter: an unrepresentable commander is 19% of
+                   the real 190 and the worst of the three distortions. */
+                if (i == 0) out->commanders_substituted++;
+            } else {
+                missing++;
+            }
+        }
+        out->substituted += subbed;
+        out->unresolved += missing;
+        /* **Complete and buildable are counted apart.** A deck with a card
+           substituted is buildable and is not the published list, and 3.3's
+           first resolver conflated exactly these two. */
+        if (!subbed && !missing) out->complete++;
+        if (!missing) out->buildable++;
+
+        unsigned gap = subbed + missing;
+        if (gap > out->max_gap) out->max_gap = gap;
+        /* Seeded from the first deck rather than from a sentinel: `UINT_MAX`
+           would need a guard for a corpus of none, and would print as four
+           billion if anyone ever got one past `mf_precons_load`, which refuses
+           a file with no decks in it. */
+        if (d == 0 || gap < out->min_gap) out->min_gap = gap;
+    }
+}
+
 /* ---- gate G4 -------------------------------------------------------------- */
 
 const char *mf_g4_verdict_name(mf_g4_verdict v) {

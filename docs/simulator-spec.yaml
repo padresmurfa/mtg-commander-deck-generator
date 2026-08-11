@@ -1403,12 +1403,35 @@ validation:
           simulates nothing scores 1.0. The inert share is quoted beside the fraction, always.
       - id: does_not_bound_per_deck_completeness
         found: sprint 3.3
+        corrected: sprint 3.3.1
         note: >
-          It is a fraction over CLAUSES. Per-DECK completeness at 0.9301 is 0 of 190 precons,
-          because a hundred cards against a per-card miss rate of a few percent leaves essentially
-          no chance all hundred resolve. G4 could not run on it. A coverage figure is now quoted
-          with three things: the fraction, the inert share, and what it implies for a 100-card list.
+          It is a fraction over CARDS - legal_representable / legal, both card counts, with the
+          clause tallies a separate object beside it. Sprint 3.3 wrote "over CLAUSES" here and in
+          design 13.5, contradicting the per-card arithmetic in the same sentence; a reader taking
+          the label literally would compute a far more forgiving implication for a deck. Per-DECK
+          completeness at 0.9301 is 0 of 190 precons: 0.9301^100 is about 0.0008. G4 could not run
+          on it. A coverage figure is now quoted with three things: the fraction, the inert share,
+          and what it implies for a 100-card list.
     per_deck_completeness: "0/190 at G1 = 0.9301 (sprint 3.3)"
+    # Emitted inside the same object as legal_fraction, so the number that mattered cannot be
+    # quoted without the number that did not bound it (sprint 3.3.1 T4).
+    per_deck_artifact_fields:
+      emitted_at: preprocess -> coverage.per_deck
+      requires: --precons
+      fields:
+        - decks        # precons examined
+        - complete     # every card came from the pool: the deck IS the published list
+        - buildable    # every card is in the pool or expressible as a stand-in. Weaker, counted apart
+        - substituted  # cards taken from the stand-in, summed
+        - unresolved   # cards in neither - banned, or from another game
+        - commanders_substituted
+        - min_gap      # fewest cards outside the pool in one deck; 1 on the real corpus
+        - max_gap      # most; 22 on the real corpus
+      counts_not_a_fraction: >
+        complete beside decks cannot be misread the way a lone 0.0 can, and there is no division
+        to guard. A corpus of none never reaches the measurement: mf_precons_load refuses a file
+        with no decks in it, so the vacuous case is an error one step earlier rather than an
+        untestable branch here.
 
   determinism_matrix:
     ref: "17.4"

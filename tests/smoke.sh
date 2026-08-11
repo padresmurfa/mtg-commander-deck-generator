@@ -168,6 +168,19 @@ rc=0
 [ "$rc" -eq 1 ] || fail "a missing precon file should exit 1, got $rc"
 ok "the precon side table loads, and a missing one is a plain failure"
 
+# --- per-deck completeness, beside G1 (sprint 3.3.1) -----------------------
+# G1 is a fraction over the candidate pool; whether a hundred-card list resolves
+# is a different question, and 3.3 read the first as though it answered the
+# second. The tool emits both, in the same object, so the number that mattered
+# travels with the number that was quoted.
+"$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
+    --bulk tests/fixtures/bulk-sample.json \
+    --precons tests/fixtures/precons-coverage.jsonl >/dev/null 2>&1 ||
+    fail "preprocess with the coverage precons failed"
+grep -q '"per_deck":{"decks":3,"complete":1,"buildable":2,"substituted":1,"unresolved":1,"commanders_substituted":1,"min_gap":0,"max_gap":1}' \
+    "$WORK/pre.jsonl" || fail "per-deck completeness was not recorded beside G1"
+ok "per-deck completeness is emitted beside the coverage fraction"
+
 # --- the unmatched tail is a document the tool produces -------------------
 # Its own fixture rather than the one above: adding oracle text there would
 # change the card digest and mean regenerating a golden file to test a report.

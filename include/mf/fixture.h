@@ -123,6 +123,45 @@ typedef struct {
 bool mf_precon_deck(const mf_table *t, const mf_table *standin, const mf_precons *p, size_t index,
                     mf_deck *out, mf_precon_fit *fit);
 
+/* ---- per-deck completeness (sprint 3.3.1 T4) -----------------------------
+ *
+ * **The number G1 does not bound.** G1 is a fraction over the candidate pool —
+ * 0.9301 of commander-legal cards are representable — and sprint 3.3 read it as
+ * though it said something about whether a *deck* resolves. It does not: at
+ * 93% per card, a hundred cards agree about one time in twelve hundred, and the
+ * measured answer was **0 of 190**. The two numbers now travel together, because
+ * the one that was quoted is not the one that mattered.
+ *
+ * Ids rather than cards, because completeness is a membership question and
+ * nothing here needs to know what a card does. That is also what lets it be
+ * called from `preprocess`, where the pool exists as `mf_card`s and no table has
+ * been read back. */
+
+typedef struct {
+    unsigned decks;      /* precons examined */
+    /* **Every card came from the pool** — the deck is the published list, which
+       is §13.2's first reason for using precons at all. */
+    unsigned complete;
+    /* Every card is in the pool *or* expressible as a stand-in. Weaker, and
+       counted apart: conflating the two is exactly what 3.3's first resolver
+       did, and it turned an empty corpus into 35 plausible decks. */
+    unsigned buildable;
+    unsigned substituted; /* cards taken from the stand-in, summed over every deck */
+    unsigned unresolved;  /* cards in neither — banned, or from another game */
+    unsigned commanders_substituted; /* the worst of the three distortions; 19% of the real 190 */
+    /* The distribution, because "0 of 190" says nothing about how close the 190
+       came. Measured on the real corpus: 1 at best, 22 at worst. */
+    unsigned min_gap; /* fewest cards outside the pool in any one deck */
+    unsigned max_gap;
+} mf_precon_coverage;
+
+/* `standin` may be NULL, and then `buildable` equals `complete` — sprint 3.3's
+   behaviour, kept reachable so the effect of the stand-in is a difference
+   between two measurements rather than an assertion about one. */
+void mf_precon_coverage_measure(const mf_precons *p, const char *const *pool, size_t pool_count,
+                                const char *const *standin, size_t standin_count,
+                                mf_precon_coverage *out);
+
 /* ---- gate G4, pre-registered in sprint 3.3 T1 ---------------------------
  *
  * Every constant below was committed **before the win-rate table existed in the

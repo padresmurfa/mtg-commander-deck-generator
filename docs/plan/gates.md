@@ -14,7 +14,7 @@ a reason — never "done".
 
 | Gate | Sprint | Question | Threshold | Outcome |
 | ---- | ------ | -------- | --------- | ------- |
-| **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9301**, conditional, inert 90.33%. Re-measured in 3.1, superseding 0.9325 and 0.9357 ([retro](retros/3.1-aggregate-phases.md)) |
+| **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9301** of *cards*, conditional, inert 90.33%, **per-deck completeness 0/190**. Re-measured in 3.1, superseding 0.9325 and 0.9357 ([retro](retros/3.1-aggregate-phases.md)) |
 | **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | 5σ per cell, `SE = sqrt(p(1-p)/N)`, fixed in advance | **PASS — worst 2.43σ** ([retro](retros/2.1-shuffle-draw-mulligan.md)) |
 | **G3** Policy gap discriminates | 2.3 → **5.0** | Does naive-vs-careful separate known-forgiving from known-demanding decks? | 5x a noise floor measured first, **and** a 2x effect size | **DEFER — 2.24σ, ratio 1.14** (2.3). **Re-measured 3.1 against a continuous score: FAIL, −2.28σ** ([retro](retros/3.1-aggregate-phases.md)). Re-runs in **5.0 against a mirror** |
 | **G4** Precon rank correlation | 3.3 → **3.3.1** | Does the objective rank real decks in the right order? | ρ ≥ 0.35 **and** z ≥ 2, at 2,048 games/deck, precons with n≥100 — fixed before the data | **DEFER — corpus 48, scored 0.** Not one precon resolves; mean gap 11.8 cards ([retro](retros/3.3-fixture-validation.md)) |
@@ -52,6 +52,18 @@ classified `MF_OP_DRAW`, an opcode meaning *draw once, when cast*. Classificatio
 step — **recurrence** — kept separate from expressibility because the reason differs: the count is
 not unknown, it is unwritable, since `ops` has no repetition marker. 88 clauses moved to unmatched
 and 6 to inert.
+
+**Second hazard, found in sprint 3.3: G1 does not bound whether any real deck can be built.** At
+0.9301 per-*deck* completeness is **0 of 190 precons** — 0.9301<sup>100</sup> ≈ 0.0008 — and the two
+numbers were being read as though one implied the other. G4 could not run on it.
+
+*Corrected in 3.3.1:* the 3.3 amendment called G1 "a fraction over clauses". It is a fraction over
+**cards** — `legal_representable / legal` — with the clause tallies a separate object beside it, and
+the mislabel contradicted the per-card arithmetic in its own sentence. The conclusion is unchanged
+and sharper stated correctly, but a reader taking the label literally would have computed a far more
+forgiving implication for a deck. So 3.3.1 made it structural instead of editorial: `preprocess`
+emits `coverage.per_deck` **inside the same object** as `legal_fraction`, and the number that mattered
+can no longer be quoted without the one that did not bound it.
 
 Unrepresentable cards are excluded from the pool
 ([spec §13.5](../simulator-spec.yaml)), so coverage is a hard ceiling on how meaningful any
