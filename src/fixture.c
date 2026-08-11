@@ -306,6 +306,14 @@ void mf_g4_measure(mf_arena *a, const mf_table *t, const mf_table *standin, cons
         out->substituted += fit.substituted;
         out->substituted_lands += fit.substituted_lands;
         out->commanders_substituted += fit.commander_substituted ? 1u : 0u;
+        /* Kept because a failing ρ does not distinguish "ordered no better than
+           chance" from "could not be played at all", and the fit already knows.
+           `best` is `MF_RUNG_COUNT` when no rung was admitted — not an index,
+           and counting that as `greedy` would manufacture the very collapse
+           this is here to detect. The array has a slot for it instead of a
+           guard, so an unplayed deck lands in "none" rather than in rung zero. */
+        out->feasible += f.feasible ? 1u : 0u;
+        out->best_rung[f.best]++;
         sim[out->scored] = f.fitness;
         real[out->scored] = r->win_rate;
         if (fitness) fitness[out->scored] = f.fitness;

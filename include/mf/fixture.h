@@ -206,6 +206,23 @@ typedef struct {
     unsigned substituted;
     unsigned substituted_lands;
     unsigned commanders_substituted;
+    /* **What a failing ρ cannot tell you on its own** (added 3.3.1 T5, after G4
+       returned a measured FAIL). "The objective orders real decks no better
+       than chance" and "the objective cannot play real decks at all" are
+       different diagnoses with different fixes, and both produce the same ρ.
+       Both numbers are already computed inside the per-deck fit and were being
+       discarded. */
+    unsigned feasible; /* of `scored`, the ones clearing the solo gate rate */
+    /* Which rung won, per deck. §4 takes a max over admissible strategies, so a
+       corpus that collapses onto `greedy` says the strategy axis is not a
+       strategy axis — which is 3.2's finding, and this is the first time it is
+       asked of real decks. */
+    /* `MF_RUNG_COUNT + 1`, and the last slot is "no rung was admitted". G4
+       always offers the full band so it cannot arrive, but indexing it
+       unconditionally costs four bytes and removes a guard no test could
+       reach — mf/fixture's own `lines + 1` trick. It is emitted rather than
+       dropped, so a slot that is never supposed to fill is visible if it does. */
+    unsigned best_rung[MF_RUNG_COUNT + 1];
     double rho;
     double z;
     /* Reported beside ρ because §13.2's whole caution is that a rank

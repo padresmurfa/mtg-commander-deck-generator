@@ -325,6 +325,15 @@ MF_TEST(a_corpus_that_does_resolve_is_correlated_and_graded) {
     /* The three decks that failed to build were short by a real amount, and
        the one that was simply absent contributes nothing to that mean. */
     MF_CHECK(g.mean_gap > 0.0);
+
+    /* **What a ρ cannot say by itself** (3.3.1 T5). "Ordered no better than
+       chance" and "could not be played at all" produce the same number, so the
+       feasibility and the winning rung are recorded beside it. `Whole` is a
+       quarter basic Forests and three-quarters bears, which plays. */
+    MF_EQ_INT(g.feasible, 1);
+    unsigned won = 0;
+    for (unsigned r = 0; r <= MF_RUNG_COUNT; r++) won += g.best_rung[r];
+    MF_EQ_INT(won, g.scored); /* every scored deck won under exactly one rung */
 }
 
 /* A corpus of `n` of the numbered whole decks, with the win rates supplied. */

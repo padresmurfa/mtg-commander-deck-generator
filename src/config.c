@@ -30,6 +30,7 @@ void mf_config_defaults(mf_config *c) {
     c->bulk_path[0] = '\0';
     c->precon_path[0] = '\0';
     c->standin_table_path[0] = '\0';
+    c->win_rate_path[0] = '\0';
     c->game = MF_GAME_NONE;
 
     /* Eight megabytes rather than sixty-four: the pools are stocked eagerly, so
@@ -179,6 +180,8 @@ mf_err mf_config_load_json(mf_arena *a, mf_config *c, const char *text, char *eb
             e = want_string(v, key, c->precon_path, sizeof c->precon_path, eb, el);
         } else if (strcmp(key, "standin_table_path") == 0) {
             e = want_string(v, key, c->standin_table_path, sizeof c->standin_table_path, eb, el);
+        } else if (strcmp(key, "win_rate_path") == 0) {
+            e = want_string(v, key, c->win_rate_path, sizeof c->win_rate_path, eb, el);
         } else if (strcmp(key, "report_unmatched") == 0) {
             e = want_bool(v, key, &c->report_unmatched, eb, el);
         } else {
@@ -234,6 +237,7 @@ void mf_config_write(const mf_config *c, mf_jw *w) {
     mf_jw_key(w, "persist_growth");       mf_jw_bool(w, c->persist_growth);
     mf_jw_key(w, "precon_path");          mf_jw_str(w, c->precon_path);
     mf_jw_key(w, "standin_table_path");   mf_jw_str(w, c->standin_table_path);
+    mf_jw_key(w, "win_rate_path");        mf_jw_str(w, c->win_rate_path);
     mf_jw_key(w, "report_unmatched");     mf_jw_bool(w, c->report_unmatched);
     mf_jw_obj_end(w);
 }

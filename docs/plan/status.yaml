@@ -12,9 +12,19 @@
 # See docs/simulator-design.md for reasoning, docs/simulator-spec.yaml for values.
 
 meta:
-  status: in_progress
+  status: blocked_on_gate
   current_sprint: "3.3.1"
   task_split_valid_for: "3.3.1"     # task-splitting any other sprint is speculative
+  # NOT advanced, deliberately. CLAUDE.md section 5: a failed gate is a stop-and-escalate, and
+  # G4's written failure branch is "the objective is wrong, redesign section 3". Which sprint
+  # follows is the decision that branch demands; task-splitting one here would answer it by
+  # choosing the work. See docs/plan/retros/3.3.1-fixture-resolution.md.
+  blocked_by:
+    gate: G4
+    verdict: fail
+    measured: "rho -0.0357, z -0.24, corpus 48, scored 48, feasible 15 (sprint 3.3.1)"
+    branch: redesign_objective_section_3
+    not: lambda_tuning
   baseline: greenfield
   language: c
   deliverable: cli
@@ -136,10 +146,21 @@ gates:
     spec_ref: "13.2"
     on_failure: the objective is wrong; redesign section 3
     result: >
-      DEFER (3.3). Corpus 48, SCORED 0. Not one of the 190 precons resolves completely against the
-      card table - best gap 1, mean 9.3, worst 22, and 19% have an unrepresentable commander.
-      Deferred and not failed because FAIL is a claim about the objective and an empty corpus
-      supports none. None of the three blind spots named in advance is why.
+      FAIL (3.3.1). Corpus 48, scored 48, rho -0.0357, z -0.24, against a bar of rho >= 0.35 and
+      z >= 2 fixed before the data. Deferred first in 3.3 on an EMPTY corpus - not one of the 190
+      precons resolved - and the stand-in semantics made it measurable without moving a threshold.
+      Not noise: rho is -0.036/-0.021/-0.033/-0.022/-0.027 across five seeds, with 43.3 points of
+      simulated spread against 27.0 of win-rate spread. A precise measurement of no signal.
+    result_diagnostics: >
+      feasible 15 of 48 - the model does not merely rank real decks badly, it cannot PLAY two
+      thirds of them - and best_rung {greedy 38, curve-out 8, role-aware 2, sequencing-aware 0},
+      which is the third pre-registered blind spot confirmed on real decks: the objective ranks
+      decks and does not rank strategies.
+    failure_branch_engaged: true
+    failure_branch_note: >
+      "Redesign section 3", as written before the measurement. NOT lambda tuning; 3.2 left lambda
+      untuned precisely so it could not become the knob reached for here. current_sprint is NOT
+      advanced and no next sprint is task-split - that decision belongs to the branch.
   - id: G5
     sprint: "4.3"
     name: ga_beats_greedy
@@ -758,11 +779,70 @@ tasks:
         SECOND time G1 has been quoted as the answer to a question it was not measuring.
     - id: T5
       name: re-run G4 with 3.3's thresholds unchanged
+      status: done
+      verdict: FAIL
+      measured: "corpus 48, scored 48, feasible 15, rho -0.0357, z -0.24"
+      seed_robustness: "[-0.036, -0.021, -0.033, -0.022, -0.027] over seeds 1/2/3/7/31337"
+      note: >
+        Thresholds unchanged; only the instrument changed. The stand-in made the corpus real - 48
+        of 48 rows score where 0 did - at 11.9 substituted cards a deck, reported beside rho. Not
+        noise: a tight cluster about zero with 43.3 points of simulated spread against 27.0 of
+        win-rate spread.
+      diagnostics_added: >
+        feasible 15/48 and best_rung {greedy 38, curve-out 8, role-aware 2, sequencing-aware 0},
+        both already computed inside the per-deck fit and previously discarded. "Ordered no better
+        than chance" and "cannot be played at all" give the same rho and want different fixes.
+      post_hoc_forbidden: >
+        rho over the feasible 15 is NOT computed - a subgroup chosen after seeing a failure. If it
+        becomes a gate it is pre-registered first, with its own threshold and sample size.
     - id: T6
       name: G4 written to the run artifact by mfsim validate
+      status: done
+      taken_before: T5
+      why_reordered: >
+        T5 needed a way to run the gate against the real tables, and the alternative was a
+        throwaway harness to be deleted the same day. Wiring it into the tool first made T5 a
+        matter of running it.
+      gated_on: config win_rate_path; an unconfigured run writes NO g4 record
+      why_silent_not_zeroed: >
+        A g4 record carrying a `defer` verdict because nobody supplied a corpus reads exactly like
+        a gate that ran and could not decide. That is 2.1's defect. Absence cannot be faked.
+      found_on_first_real_run: >
+        The tables were read into the ROOT arena, which is 1 MB and sized for records. It
+        exhausted, and the orchestrator grew arena_bytes three times to the ceiling - the wrong
+        knob, correctly and uselessly. The growth loop cannot help when the arena that is short is
+        the fixed one, and the fatal report did not say which arena had run out.
     - id: T7
       name: retro and amendments
+      status: done
+      doc: docs/plan/retros/3.3.1-fixture-resolution.md
+      current_sprint_advanced: false
 retros:
+  - sprint: "3.3.1"
+    doc: docs/plan/retros/3.3.1-fixture-resolution.md
+    gates: [G4]
+    design_amendments: 8
+    headline: >
+      G4 FAILED. rho = -0.036 over 48 real precons, and the objective's ranking of real decks is
+      indistinguishable from chance. 3.3 deferred the gate on an empty corpus; the pre-registered
+      stand-in semantics made it measurable - 188 of 190 precons resolve, 48 of 48 corpus rows
+      score - with the thresholds untouched, which is 3.1's rule about never improving an
+      instrument and loosening a bar at once. Not a noisy weak signal: rho clusters tightly about
+      zero across five seeds, with 43.3 points of simulated spread against 27.0 of win-rate spread.
+      Of the three blind spots pre-registered in advance, the THIRD is the one that bit - "the
+      objective ranks decks and does not rank strategies" - and it is now confirmed against real
+      decks: greedy wins 38 of 48 and sequencing-aware, the top of section 5's ladder, wins NONE.
+      Two diagnostics were added because a failing rho cannot distinguish "ordered no better than
+      chance" from "cannot be played at all", and both were already being computed and discarded:
+      feasible is 15 of 48, so the model cannot play two thirds of real, published, playable decks.
+      rho over that feasible subset is deliberately NOT computed - a subgroup chosen after seeing a
+      failure is the move pre-registration forbids, and if it becomes a gate it is pre-registered
+      first. Also delivered: per-deck completeness beside G1 in the preprocess artifact, G4 emitted
+      by mfsim validate (silent when no corpus is configured, because a defer nobody asked for
+      reads like a gate that ran), and a correction - G1 is a fraction over CARDS, not clauses, as
+      3.3 mislabelled it in design, spec and its own retro.
+    carry_over: [what_to_do_about_a_failed_g4, precon_prices, price_fixture, lambda_untuned,
+                 stratify_on_the_kept_hand]
   - sprint: "3.3"
     doc: docs/plan/retros/3.3-fixture-validation.md
     gates: [G4]

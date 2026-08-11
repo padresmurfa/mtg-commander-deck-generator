@@ -1348,6 +1348,47 @@ validation:
         Either a pre-registered substitution semantics - an unrepresentable card still has a mana
         cost and a type, and a same-cost vanilla preserves the curve while losing only what the
         model cannot see - or a wider opcode set, which is G1's own failure branch. Sprint 3.3.1.
+    # --- re-run under the stand-in semantics, sprint 3.3.1 ---------------
+    standin_resolution:
+      sprint: "3.3.1"
+      buildable_decks: 190 - 2      # 188; the two are Trade Secrets and Dockside Extortionist, banned
+      complete_decks: 0             # unchanged: buildable is NOT the published list
+      substituted_per_deck_mean: 11.9
+      emitted_at: preprocess -> coverage.per_deck
+    g4_result_rerun:
+      sprint: "3.3.1"
+      thresholds_unchanged: true    # rho >= 0.35, z >= 2, 2048 games/deck, n >= 100
+      card_table_hash: "349888c09657e4361deac00e01c0f21c"   # 14.2: a rho is comparable only against the same table
+      card_table: "paper, Scryfall bulk of 2026-08-09, 37553 cards, 29604 in the pool"
+      corpus: 48
+      scored: 48
+      feasible: 15                  # of the 48 - the model cannot PLAY two thirds of real decks
+      best_rung: {greedy: 38, curve-out: 8, role-aware: 2, sequencing-aware: 0, none: 0}
+      substituted: 570
+      substituted_lands: 233
+      commanders_substituted: 13
+      rho: -0.0357
+      z: -0.24
+      sim_spread: 43.28
+      data_spread: 27.05
+      verdict: fail
+      seed_robustness: [-0.036, -0.021, -0.033, -0.022, -0.027]   # seeds 1, 2, 3, 7, 31337
+      why_not_noise: >
+        A tight cluster about zero across five seeds, with 43.3 points of simulated spread against
+        27.0 of win-rate spread. A precise measurement of no signal, not a noisy measurement of a
+        weak one.
+      blind_spot_that_bit: objective_ranks_decks_not_strategies
+      blind_spot_note: >
+        Pre-registered in 3.2 and confirmed here on REAL decks: section 4's max over admissible
+        plans is attained by greedy on 38 of 48, and by the top of section 5's ladder on none.
+      failure_branch: >
+        As written in gates.md before the measurement: the objective is wrong, redesign section 3.
+        NOT lambda tuning - 3.2 left lambda untuned precisely so it could not become the knob
+        reached for here.
+      post_hoc_forbidden: >
+        rho over the feasible 15 is NOT computed. It is a subgroup chosen after seeing a failure,
+        which is the move pre-registration exists to forbid. If it becomes a gate it is
+        pre-registered first, with its own threshold and sample size.
     caveats:
       - "Data is 4-player-normalised; this simulator is 2-player. Ordinal transfer plausible, cardinal not."
       - "Per-precon n ranges ~40-310. At n=41 a 36% win rate carries roughly +/-15pp — rank barely determined."

@@ -1568,6 +1568,35 @@ pre-registration forbids — so it is written down as a decision to be made in a
 same-cost vanilla preserves the curve while losing only what the model cannot see anyway), or a
 **wider opcode set**, which is §13.5's own failure branch.
 
+*(Re-run in sprint 3.3.1 under the stand-in semantics. **G4 FAILED.**)*
+
+    corpus 48   scored 48   feasible 15   substituted 570 (233 lands, 13 commanders)
+    rho -0.0357   z -0.24   sim_spread 43.28   data_spread 27.05      VERDICT = FAIL
+
+The stand-in made the corpus real — 188 of 190 precons resolve, and 48 of 48 corpus rows score,
+where 0 did — at a cost of 11.9 substituted cards a deck, reported beside ρ rather than after it.
+Thresholds were unchanged: ρ ≥ 0.35, z ≥ 2, 2,048 games per deck, n ≥ 100.
+
+**The orderings are unrelated, and the measurement is precise about it.** Across five seeds ρ is
+−0.036, −0.021, −0.033, −0.022, −0.027, and both sides have room to correlate: 43.3 points of
+simulated fitness against 27.0 percentage points of win rate. This is not a weak signal measured
+noisily.
+
+**Two numbers say more than ρ does, and both were being computed and thrown away.** "The objective
+orders real decks no better than chance" and "the objective cannot play real decks" produce the same
+ρ and want different fixes, so a G4 record now carries:
+
+- **`feasible` — 15 of 48.** Two-thirds of real, published, playable decks do not clear the solo
+  feasibility gate.
+- **`best_rung` — greedy 38, curve-out 8, role-aware 2, sequencing-aware 0.** §4's max over
+  admissible plans is attained by the simplest plan on four decks in five, and by the top of §5's
+  ladder on none of them. This is §13.2's own third pre-registered blind spot — *the objective ranks
+  decks and does not rank strategies* — confirmed against real decks rather than synthetic ones.
+
+**ρ over the feasible subset is not computed**, and this is the reason: it is a subgroup chosen after
+seeing a failure, which is exactly what pre-registration exists to forbid. If it is to be a gate it
+is pre-registered first, with its own threshold and sample size.
+
 ### 13.3 Synthetic known-bad decks
 
 Precons cover the plausible band. Also assert the pathological cases, which no data source will

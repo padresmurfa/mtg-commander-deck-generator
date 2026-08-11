@@ -17,7 +17,7 @@ a reason — never "done".
 | **G1** Opcode coverage | 1.2 | Can the opcode set represent enough of a real candidate pool? | ≥0.60 sound; ≤0.30 compromised | **PASS — 0.9301** of *cards*, conditional, inert 90.33%, **per-deck completeness 0/190**. Re-measured in 3.1, superseding 0.9325 and 0.9357 ([retro](retros/3.1-aggregate-phases.md)) |
 | **G2** Analytic agreement | 2.1 | Does the sampler converge to closed-form hypergeometric truth? | 5σ per cell, `SE = sqrt(p(1-p)/N)`, fixed in advance | **PASS — worst 2.43σ** ([retro](retros/2.1-shuffle-draw-mulligan.md)) |
 | **G3** Policy gap discriminates | 2.3 → **5.0** | Does naive-vs-careful separate known-forgiving from known-demanding decks? | 5x a noise floor measured first, **and** a 2x effect size | **DEFER — 2.24σ, ratio 1.14** (2.3). **Re-measured 3.1 against a continuous score: FAIL, −2.28σ** ([retro](retros/3.1-aggregate-phases.md)). Re-runs in **5.0 against a mirror** |
-| **G4** Precon rank correlation | 3.3 → **3.3.1** | Does the objective rank real decks in the right order? | ρ ≥ 0.35 **and** z ≥ 2, at 2,048 games/deck, precons with n≥100 — fixed before the data | **DEFER — corpus 48, scored 0.** Not one precon resolves; mean gap 11.8 cards ([retro](retros/3.3-fixture-validation.md)) |
+| **G4** Precon rank correlation | 3.3 → **3.3.1** | Does the objective rank real decks in the right order? | ρ ≥ 0.35 **and** z ≥ 2, at 2,048 games/deck, precons with n≥100 — fixed before the data | **FAIL — ρ = −0.036, z = −0.24, corpus 48, scored 48** (3.3.1). Deferred in 3.3 on an empty corpus ([retro](retros/3.3.1-fixture-resolution.md)) |
 | **G5** GA beats greedy | 4.3 | Is the landscape optimisable by population methods? | Margin exceeding the GA's own noise | *pending* |
 
 ---
@@ -208,6 +208,39 @@ a stated substitution semantics — a same-cost vanilla preserves the curve and 
 model cannot see — or a wider opcode set, which is G1's own failure branch and now has a far
 sharper argument than 0.9301 ever gave. **Sprint 3.3.1 is inserted for it, and E4 does not start
 first**: building the search against an unvalidated objective is what G4 exists to prevent.
+
+### G4 re-run in sprint 3.3.1 — **FAILED**
+
+    corpus 48   scored 48   feasible 15   substituted 570 (233 lands, 13 commanders)
+    rho -0.0357   z -0.24   sim_spread 43.28   data_spread 27.05      VERDICT = FAIL
+
+**Thresholds unchanged from 3.3** — ρ ≥ 0.35, z ≥ 2, 2,048 games per deck, n ≥ 100. Only the
+instrument changed, which is 3.1's rule about not improving an instrument and a bar at once. The
+stand-in made the corpus real: 48 of 48 rows now resolve where 0 did, at a cost of 11.9 substituted
+cards a deck.
+
+**Not noise.** ρ across five seeds is −0.036, −0.021, −0.033, −0.022, −0.027 — a tight cluster about
+zero, so this is a precise measurement of no signal rather than a noisy measurement of some. Both
+sides have spread to correlate: 43.3 points of simulated fitness against 27.0 of win rate.
+
+**The failure branch, as written above: the objective is wrong. Redesign §3.** Not λ tuning — the
+recorded branch names that explicitly, and 3.2 left λ untuned precisely so it could not become the
+knob somebody reached for here.
+
+**Two diagnostics recorded beside ρ, both of which were already computed and being discarded:**
+
+| | |
+| --- | --- |
+| **feasible 15 of 48** | Two-thirds of *real, published, playable* decks do not clear the solo feasibility gate. "Ordered no better than chance" and "cannot be played at all" produce the same ρ, and this says the second is in play |
+| **best rung: greedy 38, curve-out 8, role-aware 2, sequencing-aware 0** | §4's max over admissible plans is attained by `greedy` on 79% of real decks, and by the top of §5's ladder on **none**. The third pre-registered blind spot, confirmed on real decks rather than synthetic ones |
+
+**The third blind spot is the one that bit**, and it was named in advance: *the objective ranks decks
+and does not rank strategies*. G4 graded a ranking produced under essentially one policy.
+
+**What must not happen next, stated before anyone measures it:** ρ over the feasible 15 is the
+obvious follow-up and it is a **post-hoc subgroup chosen after seeing a failure**, which is the move
+pre-registration forbids. It is not computed here. If it is to be a gate it is pre-registered first,
+with its own threshold and sample size, exactly as 3.3 did for ρ itself.
 
 **G5 — GA beats greedy.** Greedy is the control experiment. *On failure:* either the landscape is
 too noisy for population methods or the crossover preserves nothing. Ship greedy, drop the GA —

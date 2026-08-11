@@ -34,6 +34,13 @@ typedef struct {
        §13.2's fixtures — and it is **never the search pool**, which is what
        §7.9 prunes by representability in the first place. */
     char standin_table_path[MF_PATH_MAX];
+    /* The precon win-rate corpus **gate G4** correlates against (§13.2). Empty
+       by default, and that is what decides whether `validate` runs G4 at all:
+       a `g4` record that appeared with a `defer` verdict because nobody
+       supplied a corpus would be indistinguishable from a gate that ran and
+       could not decide, which is 2.1's defect exactly. Absent says "not run";
+       nothing else can. */
+    char win_rate_path[MF_PATH_MAX];
     /* Which game's card set to build. **No default**, deliberately: paper,
        Arena and Magic Online are different card pools — 37,553, 16,223 and
        30,950 cards, with 976 of Arena's existing nowhere else — so choosing one

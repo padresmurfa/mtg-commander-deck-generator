@@ -205,6 +205,126 @@ static void write_record(mf_artifact *art, mf_jw *w) {
     }
 }
 
+/* Gate G4 (design §13.2, sprint 3.3.1 T6). Run by the tool, so the number is
+ * reproducible from `(seed, config, card table)` the way G1's and G2's are —
+ * sprint 3.3 measured it by hand, which is most of the way there and is not the
+ * artifact record the plan asks for.
+ *
+ * **Run only when a corpus was configured, and silent otherwise.** A `g4` record
+ * that appeared with a `defer` verdict because nobody supplied win rates would
+ * be indistinguishable from a gate that ran and could not decide. That is 2.1's
+ * defect — a gate reporting agreement it never observed — and the only reading
+ * that cannot be faked is an absent record.
+ *
+ * **Optional to ask for, not optional to succeed.** Every path below is a plain
+ * failure if it will not load, on the rule the precon side table already
+ * follows: a run told to measure G4 and silently not measuring it would leave
+ * the gate looking unrun for a reason nobody could see. */
+static int g4_into(mf_arena *work, mf_arena *root, const mf_config *c, mf_artifact *art) {
+    mf_table *pool = NULL, *standin = NULL;
+    mf_precons *pre = NULL;
+    mf_winrates *rates = NULL;
+
+    if (mf_table_read(work, c->card_table_path, &pool) != MF_OK) {
+        fprintf(stderr, "mfsim: G4 needs a card table: %s\n", c->card_table_path);
+        return MF_EXIT_FAILURE;
+    }
+    /* The stand-in is genuinely optional, and leaving it out is sprint 3.3's
+       measurement exactly: refuse any deck that does not resolve from the pool.
+       That is worth keeping runnable — it is the before to 3.3.1's after. */
+    if (c->standin_table_path[0] != '\0' &&
+        mf_table_read(work, c->standin_table_path, &standin) != MF_OK) {
+        fprintf(stderr, "mfsim: cannot read stand-in table: %s\n", c->standin_table_path);
+        return MF_EXIT_FAILURE;
+    }
+    if (mf_precons_load(work, c->precon_path, &pre) != MF_OK) {
+        fprintf(stderr, "mfsim: G4 needs precon decklists: %s\n", c->precon_path);
+        return MF_EXIT_FAILURE;
+    }
+    if (mf_winrates_load(work, c->win_rate_path, &rates) != MF_OK) {
+        fprintf(stderr, "mfsim: cannot read the win-rate corpus: %s\n", c->win_rate_path);
+        return MF_EXIT_FAILURE;
+    }
+
+    mf_g4 g4;
+    mf_g4_measure(work, pool, standin, pre, rates, c->seed, NULL, &g4);
+
+    mf_jw *w = mf_jw_new(root);
+    mf_jw_obj_begin(w);
+    mf_jw_key(w, "record");          mf_jw_str(w, "g4");
+    mf_jw_key(w, "corpus_path");     mf_jw_str(w, c->win_rate_path);
+    mf_jw_key(w, "standin");         mf_jw_bool(w, standin != NULL);
+    /* §14.2, and the reason the preprocess record carries one too: prices move
+       weekly and Scryfall changes underneath, so a ρ is only comparable to
+       another ρ measured against the same table. G4 will be re-measured after
+       whatever §3 redesign follows, and without this the comparison would be
+       between two numbers nobody can prove read the same cards. */
+    char table_hex[MF_DIGEST_HEX];
+    mf_table_hash_hex(pool, table_hex);
+    mf_jw_key(w, "card_table_hash"); mf_jw_str(w, table_hex);
+    /* The thresholds travel with the verdict, because a gate whose bar is only
+       in a header is one nobody can check the next run against. All four were
+       committed in sprint 3.3 **before the data existed in the tree**, and
+       3.3.1 changed the instrument and not one of them. */
+    mf_jw_key(w, "games_per_deck");  mf_jw_int(w, MF_G4_GAMES);
+    mf_jw_key(w, "min_games");       mf_jw_int(w, MF_G4_MIN_GAMES);
+    mf_jw_key(w, "threshold_rho");   mf_jw_num(w, MF_G4_RHO);
+    mf_jw_key(w, "threshold_z");     mf_jw_num(w, MF_G4_Z);
+    mf_jw_key(w, "min_corpus");      mf_jw_int(w, MF_G4_MIN_CORPUS);
+    mf_jw_key(w, "corpus");          mf_jw_int(w, g4.corpus);
+    mf_jw_key(w, "scored");          mf_jw_int(w, g4.scored);
+    mf_jw_key(w, "unjoined");        mf_jw_int(w, g4.unjoined);
+    mf_jw_key(w, "mean_gap");        mf_jw_num(w, g4.mean_gap);
+    /* **Beside ρ and never after it** (3.3.1's rule). The substitution's
+       distortion is deck-differential and correlates with commander
+       complexity, so it is a bias the correlation inherits and cannot correct
+       — reading ρ without these is reading it as though the corpus were the
+       published lists, which it is not. */
+    mf_jw_key(w, "substituted");            mf_jw_int(w, g4.substituted);
+    mf_jw_key(w, "substituted_lands");      mf_jw_int(w, g4.substituted_lands);
+    mf_jw_key(w, "commanders_substituted"); mf_jw_int(w, g4.commanders_substituted);
+    /* Beside ρ for the same reason the substitution counts are: a failing ρ
+       does not distinguish "ordered no better than chance" from "could not be
+       played at all", and the two have different fixes. `best_rung` is §4's max
+       over admissible strategies, counted per deck — a corpus that collapses
+       onto `greedy` says the strategy axis is not one, which 3.2 found on
+       synthetic decks and this asks of real ones. */
+    mf_jw_key(w, "feasible");        mf_jw_int(w, g4.feasible);
+    mf_jw_key(w, "best_rung");
+    mf_jw_obj_begin(w);
+    for (unsigned r = 0; r < MF_RUNG_COUNT; r++) {
+        mf_jw_key(w, mf_policy_rung((mf_rung)r).name);
+        mf_jw_int(w, g4.best_rung[r]);
+    }
+    /* The slot that is never supposed to fill, emitted rather than dropped. */
+    mf_jw_key(w, "none"); mf_jw_int(w, g4.best_rung[MF_RUNG_COUNT]);
+    mf_jw_obj_end(w);
+    mf_jw_key(w, "rho");             mf_jw_num(w, g4.rho);
+    mf_jw_key(w, "z");               mf_jw_num(w, g4.z);
+    /* A perfect ordering over a range of nothing is still a perfect ordering
+       (§13.2), so how far apart the two orderings actually spread is reported
+       with them. */
+    mf_jw_key(w, "sim_spread");      mf_jw_num(w, g4.sim_spread);
+    mf_jw_key(w, "data_spread");     mf_jw_num(w, g4.data_spread);
+    mf_jw_key(w, "verdict");         mf_jw_str(w, mf_g4_verdict_name(g4.verdict));
+    mf_jw_obj_end(w);
+    write_record(art, w);
+    return MF_EXIT_OK;
+}
+
+/* **One pooled arena for the whole gate, claimed at the phase boundary.** The
+   card table alone is megabytes and the root arena is sized for records rather
+   than for acquired artefacts — reading one into `root` exhausts it, and the
+   orchestrator then grows `arena_bytes`, which is the wrong knob and cannot
+   help. Every load and the measurement share this one, and it is given back on
+   every path including the failing ones. */
+static int validate_g4(mf_arena *root, const mf_config *c, mf_artifact *art, mf_pool *heap) {
+    mf_arena *work = mf_pool_acquire(heap);
+    int rc = g4_into(work, root, c, art);
+    mf_pool_release(heap, work);
+    return rc;
+}
+
 /* Exercises the memory layer for real: pooled arenas, a stack frame per item,
    released and recycled. It is also the only thing that currently allocates
    enough to run out, which makes it the honest end-to-end test of the
@@ -525,6 +645,13 @@ static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
     mf_jw_obj_end(sw);
     write_record(art, sw);
 
+    /* G4, when a corpus was configured. Placed after the other gates because it
+       is the only one that reads acquired artefacts rather than building its
+       own fixtures — and it is silent, not zeroed, when there is nothing to
+       read. */
+    int rc = MF_EXIT_OK;
+    if (c->win_rate_path[0] != '\0') rc = validate_g4(root, c, art, heap);
+
     mf_jw *w = mf_jw_new(root);
     mf_jw_obj_begin(w);
     mf_jw_key(w, "record");              mf_jw_str(w, "memcheck");
@@ -550,7 +677,7 @@ static int validate(mf_arena *root, const mf_config *c, mf_artifact *art) {
 
     mf_pool_destroy(stack);
     mf_pool_destroy(heap);
-    return MF_EXIT_OK;
+    return rc;
 }
 
 /* Reads the bulk export into a card set and writes it out.
