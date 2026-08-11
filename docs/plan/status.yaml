@@ -738,12 +738,43 @@ tasks:
   split:
     - id: T1
       name: pre-register the decision rule, before the instrument exists
+      status: done
+      commit: ab01cc3
     - id: T2
       name: per-deck feasibility emitted by the tool, controls in the same record
+      status: done
+      emits: "validate -> g4.decks[] and g4.controls[]"
     - id: T3
       name: adjudicate all three hypotheses against their signatures
+      status: done
+      verdict: {H1: supported, H2: refuted, H3: refuted}
+      measured:
+        near_misses: "20 of 33 infeasible in [0.35, 0.50) - 61%, bar was >= 50%"
+        rho_pass_rate_vs_substituted: 0.2324      # bar was <= -0.35; the SIGN is wrong
+        rho_pass_rate_vs_substituted_lands: 0.2335
+        median_infeasible_pass_rate: 0.376        # bar was < 0.20
+        median_pass_rate_all_48: 0.400
+        controls: {g3_forgiving: 0.848, g3_demanding: 0.825}
+        rho_pass_rate_vs_lands: -0.0404
+        median_lands: {feasible: 38, infeasible: 38}
+        rho_pass_rate_vs_fitness: 0.83
+      h2_refuted_with_the_sign_reversed: >
+        A finding rather than a null. All of the +0.23 is substituted LANDS, which is 3.3.1's own
+        pre-registered distortion - a substituted land taps unconditionally for its identity, so it
+        OVERSTATES - arriving as a measurement instead of a caveat. The stand-in did not break
+        these decks; it flattered them slightly.
+      does_not_rescue_g4: >
+        rho is over FITNESS, which every scored deck carries whether feasible or not. Recomputed
+        from the per-deck rows: -0.0357, exactly 3.3.1's figure. G4 remains FAILED.
+      what_it_does_change: >
+        The live hypothesis going in was that the model cannot play real decks. It can - median
+        0.40 where a hand-built fixture plays at 0.85. So "redesign section 3" is a question about
+        the OBJECTIVE and not about basic playability.
     - id: T4
       name: retro and amendments, including the 0.5 bar's justification
+      status: done
+      doc: docs/plan/retros/3.3.2-feasibility-diagnosis.md
+      bar_moved: false
 retros:
   - sprint: "3.3.1"
     doc: docs/plan/retros/3.3.1-fixture-resolution.md

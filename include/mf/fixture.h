@@ -232,10 +232,29 @@ typedef struct {
     mf_g4_verdict verdict;
 } mf_g4;
 
+/* ---- per deck (sprint 3.3.2) ---------------------------------------------
+ *
+ * G4's aggregate said `feasible 15 of 48`, and an aggregate cannot say whether
+ * that is a threshold sitting in the middle of a distribution, a corpus the
+ * stand-in broke, or a model that cannot play real decks. Those want different
+ * work, so the row behind each deck is emitted rather than summarised. */
+typedef struct {
+    const char *name; /* the precon's name, as joined */
+    double win_rate;
+    double fitness;
+    double pass_rate; /* at the winning rung — the number the 0.5 bar is applied to */
+    mf_rung best;
+    bool feasible;
+    unsigned substituted;
+    unsigned substituted_lands;
+    bool commander_substituted;
+    unsigned lands; /* in the resolved deck, commander included */
+} mf_g4_deck;
+
 /* Runs every corpus deck at `MF_G4_GAMES` under the full band and correlates the
-   two orderings. `rows` receives one fitness per scored deck, in corpus order,
-   and must hold `mf_winrates_count(w)` entries. */
+   two orderings. `rows` receives one entry per **scored** deck, in corpus order,
+   and must hold `mf_winrates_count(w)` entries; NULL to skip it. */
 void mf_g4_measure(mf_arena *a, const mf_table *t, const mf_table *standin, const mf_precons *p,
-                   const mf_winrates *w, uint64_t seed, double *fitness, mf_g4 *out);
+                   const mf_winrates *w, uint64_t seed, mf_g4_deck *rows, mf_g4 *out);
 
 #endif

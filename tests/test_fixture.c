@@ -307,13 +307,23 @@ MF_TEST(a_corpus_that_does_resolve_is_correlated_and_graded) {
     remove(wp);
     MF_EQ_INT(mf_winrates_count(w), 6);
 
-    double fit[8];
+    mf_g4_deck fit[8];
     mf_g4 g;
     mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 4242, fit, &g);
     MF_EQ_INT(g.corpus, 5);   /* the sixth is under MF_G4_MIN_GAMES */
     MF_EQ_INT(g.scored, 1);   /* only "Whole" resolves */
     MF_EQ_INT(g.unjoined, 4); /* holed, headless, short, and absent */
-    MF_CHECK(fit[0] > 0.0);
+    MF_CHECK(fit[0].fitness > 0.0);
+    /* The row behind the number (3.3.2's instrument). "Whole" is `id-0..id-3`
+       cycling, and `id-0` is the Forest — a quarter of the hundred, commander
+       included, which is what makes this a count and not a guess. */
+    MF_EQ_STR(fit[0].name, "Whole");
+    MF_EQ_INT(fit[0].lands, 25);
+    MF_EQ_DBL(fit[0].win_rate, 30.0);
+    MF_CHECK(fit[0].pass_rate >= 0.0 && fit[0].pass_rate <= 1.0);
+    MF_EQ_INT(fit[0].substituted, 0);
+    MF_CHECK(!fit[0].commander_substituted);
+    MF_EQ_INT(fit[0].feasible, g.feasible == 1);
     MF_EQ_DBL(g.sim_spread, 0.0);  /* one point has no spread... */
     MF_EQ_DBL(g.data_spread, 0.0);
     MF_EQ_DBL(g.rho, 0.0);         /* ...and nothing to correlate */
@@ -360,16 +370,18 @@ MF_TEST(the_gate_passes_when_the_orderings_agree_and_fails_when_they_invert) {
     numbered_corpus(wp, WHOLE_DECKS, flat);
     mf_winrates *w = NULL;
     MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
-    double fit[WHOLE_DECKS + 2];
+    mf_g4_deck row[WHOLE_DECKS + 2];
     mf_g4 probe;
-    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 77, fit, &probe);
+    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 77, row, &probe);
+    double fit[WHOLE_DECKS];
+    for (unsigned i = 0; i < WHOLE_DECKS; i++) fit[i] = row[i].fitness;
     MF_EQ_INT(probe.scored, WHOLE_DECKS);
     MF_CHECK(probe.sim_spread > 0.0);
     MF_CHECK(probe.data_spread > 0.0);
 
     /* Win rates in the simulator's own order: ρ = 1, z = sqrt(5) = 2.24, which
-       clears both bars. `fitness` is NULL here — the path a caller that wants
-       only the verdict takes. */
+       clears both bars. `rows` is NULL here — the path a caller that wants only
+       the verdict takes. */
     numbered_corpus(wp, WHOLE_DECKS, fit);
     MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
     mf_g4 good;
@@ -408,9 +420,11 @@ MF_TEST(a_perfect_ordering_over_a_small_corpus_still_defers) {
     numbered_corpus(wp, 3, flat);
     mf_winrates *w = NULL;
     MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
-    double fit[4];
+    mf_g4_deck row[4];
     mf_g4 probe;
-    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 77, fit, &probe);
+    mf_g4_measure(ARENA, tiny_table(), NULL, p, w, 77, row, &probe);
+    double fit[3];
+    for (unsigned i = 0; i < 3; i++) fit[i] = row[i].fitness;
     numbered_corpus(wp, 3, fit);
     MF_EQ_INT(mf_winrates_load(ARENA, wp, &w), MF_OK);
     mf_g4 g;

@@ -354,6 +354,21 @@ MF_TEST(validate_runs_g4_and_the_thresholds_travel_with_the_verdict) {
        zero. The corpus is degenerate on purpose; this pins the plumbing and
        the branch, not a claim about the objective. */
     MF_CHECK(strstr(g4, "\"verdict\":\"fail\"") != NULL);
+
+    /* **The rows behind the aggregate** (3.3.2). One per scored deck, and the
+       two zero-substitution controls on the same axis in the same record —
+       they are what separates "the model is broken" from "the corpus is
+       broken", so a record carrying the aggregate without them would be the
+       one shape this diagnosis cannot use. */
+    MF_CHECK(strstr(g4, "\"decks\":[{\"name\":\"Real\"") != NULL); /* corpus order */
+    MF_CHECK(strstr(g4, "\"name\":\"Ghosted\",\"win_rate\":20") != NULL);
+    MF_CHECK(strstr(g4, "\"lands\":0") != NULL); /* the fixture has none, by construction */
+    MF_CHECK(strstr(g4, "\"controls\":[{\"name\":\"g3_forgiving\"") != NULL);
+    MF_CHECK(strstr(g4, "\"name\":\"g3_demanding\"") != NULL);
+    /* The controls are real decks with real mana bases and they play, which is
+       the comparison the whole diagnosis rests on. */
+    const char *ctl = strstr(g4, "\"controls\":");
+    MF_CHECK(ctl != NULL && strstr(ctl, "\"feasible\":true") != NULL);
     remove(PATH);
 }
 

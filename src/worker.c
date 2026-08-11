@@ -247,7 +247,8 @@ static int g4_into(mf_arena *work, mf_arena *root, const mf_config *c, mf_artifa
     }
 
     mf_g4 g4;
-    mf_g4_measure(work, pool, standin, pre, rates, c->seed, NULL, &g4);
+    mf_g4_deck *rows = mf_arena_array(work, mf_winrates_count(rates), sizeof *rows);
+    mf_g4_measure(work, pool, standin, pre, rates, c->seed, rows, &g4);
 
     mf_jw *w = mf_jw_new(root);
     mf_jw_obj_begin(w);
@@ -307,6 +308,69 @@ static int g4_into(mf_arena *work, mf_arena *root, const mf_config *c, mf_artifa
     mf_jw_key(w, "sim_spread");      mf_jw_num(w, g4.sim_spread);
     mf_jw_key(w, "data_spread");     mf_jw_num(w, g4.data_spread);
     mf_jw_key(w, "verdict");         mf_jw_str(w, mf_g4_verdict_name(g4.verdict));
+
+    /* **The rows behind the aggregate** (sprint 3.3.2). `feasible 15 of 48` is
+       a number an aggregate cannot explain: a threshold sitting in the middle
+       of a distribution, a corpus the stand-in broke, and a model that cannot
+       play real decks all produce it, and they want different work. */
+    /* Names built from `mf_policy_rung` rather than restated, plus one slot for
+       the sentinel. `mf_policy_rung`'s default arm returns *greedy*, so an
+       unplayed deck asked for its rung would come back labelled as though it
+       had won under the simplest plan — the precise mislabel `best_rung` got a
+       "none" slot to avoid, and reading these rows is the whole sprint. */
+    const char *rung_name[MF_RUNG_COUNT + 1];
+    for (unsigned r = 0; r < MF_RUNG_COUNT; r++) rung_name[r] = mf_policy_rung((mf_rung)r).name;
+    rung_name[MF_RUNG_COUNT] = "none";
+
+    mf_jw_key(w, "decks");
+    mf_jw_arr_begin(w);
+    for (unsigned i = 0; i < g4.scored; i++) {
+        const mf_g4_deck *r = &rows[i];
+        mf_jw_obj_begin(w);
+        mf_jw_key(w, "name");        mf_jw_str(w, r->name);
+        mf_jw_key(w, "win_rate");    mf_jw_num(w, r->win_rate);
+        mf_jw_key(w, "fitness");     mf_jw_num(w, r->fitness);
+        mf_jw_key(w, "pass_rate");   mf_jw_num(w, r->pass_rate);
+        mf_jw_key(w, "best_rung");   mf_jw_str(w, rung_name[r->best]);
+        mf_jw_key(w, "feasible");    mf_jw_bool(w, r->feasible);
+        mf_jw_key(w, "lands");       mf_jw_int(w, r->lands);
+        mf_jw_key(w, "substituted"); mf_jw_int(w, r->substituted);
+        mf_jw_key(w, "substituted_lands");     mf_jw_int(w, r->substituted_lands);
+        mf_jw_key(w, "commander_substituted"); mf_jw_bool(w, r->commander_substituted);
+        mf_jw_obj_end(w);
+    }
+    mf_jw_arr_end(w);
+
+    /* **The controls, on the same axis and in the same record.** Zero
+       substitutions, and they are the decks `MF_SOLO_GATE_RATE` was actually
+       set on — §9 justifies the 0.5 bar by "sprint 2.3 measured real decks at
+       0.86 and 0.94", and these two are what it measured. If they pass
+       comfortably while real decks do not, the difference is about real decks
+       rather than about the gate arithmetic, and that is the only thing
+       separating "the model is broken" from "the corpus is broken". */
+    mf_jw_key(w, "controls");
+    mf_jw_arr_begin(w);
+    mf_deck cf, cd;
+    g3_forgiving(&cf);
+    g3_demanding(&cd);
+    const mf_deck *CONTROL[2] = {&cf, &cd};
+    static const char *CONTROL_NAME[2] = {"g3_forgiving", "g3_demanding"};
+    for (unsigned i = 0; i < 2; i++) {
+        mf_objective_row_fit f;
+        mf_objective_fit(work, CONTROL[i], MF_RUNG_ALL, c->seed, MF_G4_GAMES, 0,
+                         MF_SOLO_TURNS - MF_PHASE_TURNS, &f);
+        mf_jw_obj_begin(w);
+        mf_jw_key(w, "name");      mf_jw_str(w, CONTROL_NAME[i]);
+        mf_jw_key(w, "fitness");   mf_jw_num(w, f.fitness);
+        mf_jw_key(w, "pass_rate");
+        mf_jw_num(w, f.best == MF_RUNG_COUNT ? 0.0 : f.pass_rate[f.best]);
+        mf_jw_key(w, "best_rung"); mf_jw_str(w, rung_name[f.best]);
+        mf_jw_key(w, "feasible");  mf_jw_bool(w, f.feasible);
+        mf_jw_key(w, "substituted"); mf_jw_int(w, 0);
+        mf_jw_obj_end(w);
+    }
+    mf_jw_arr_end(w);
+
     mf_jw_obj_end(w);
     write_record(art, w);
     return MF_EXIT_OK;

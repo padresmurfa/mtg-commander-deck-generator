@@ -296,12 +296,29 @@ typedef struct {
  * the score, and the ladder promotes on feasibility and ranks on fitness. Two
  * numbers doing two jobs, which is what §3 and §9 respectively ask for.
  *
- * **The bar is set from a measurement, not guessed.** Sprint 2.3 measured real
- * decks at 0.86 and 0.94 under naive and careful play, on a per-game bar §3
- * deliberately sets low. Half is far below anything a functioning deck produces,
- * so the stage catches the pathological — a deck that cannot reach turn 5
- * functional in half its games — and leaves the ranking to do the ranking. A
- * bar tight enough to bind on real decks would be a second fitness term. */
+ * **The bar was set from a measurement of the wrong decks** (corrected sprint
+ * 3.3.2). It read: "set from a measurement, not guessed — sprint 2.3 measured
+ * real decks at 0.86 and 0.94, so half is far below anything a functioning deck
+ * produces". The decks 2.3 measured were `g3_forgiving` and `g3_demanding`,
+ * hand-built fixtures in `src/worker.c`, and the claim was generalised to a
+ * population it had never met.
+ *
+ * **48 published precons produce a median pass rate of 0.400**, unimodal, with
+ * 27 of them between 0.30 and 0.50 — so 0.5 sits on the *upper shoulder* of the
+ * distribution rather than below its mass, and it fails two thirds of real
+ * decks. The fixtures sit at 0.85, clear of every real precon but one. A
+ * measurement does not stop being a guess by being taken; it stops being a guess
+ * when it is taken on the thing the claim is about.
+ *
+ * **The bar is unchanged here anyway**, deliberately: 3.1's rule is that an
+ * instrument and its threshold do not move in the same breath, and 3.3.2 was a
+ * diagnosis. Where it belongs is pre-registered in a later sprint, against decks
+ * chosen in advance.
+ *
+ * **And it may not be a separate number at all.** ρ(pass rate, fitness) over
+ * those 48 is **0.83**. The intent above is "two numbers doing two jobs"; they
+ * are substantially one number, which is a question about this design and not
+ * about the value. */
 #define MF_SOLO_GATE_RATE 0.5
 
 void mf_objective_fit(mf_arena *a, const mf_deck *d, unsigned admissible, uint64_t seed,

@@ -1597,7 +1597,39 @@ orders real decks no better than chance" and "the objective cannot play real dec
 seeing a failure, which is exactly what pre-registration exists to forbid. If it is to be a gate it
 is pre-registered first, with its own threshold and sample size.
 
+*(Diagnosed in sprint 3.3.2, against hypotheses fixed before the per-deck data existed.)*
+**`feasible 15/48` is a mis-set bar, not an unplayable corpus — and it does not rescue G4.** The
+pass-rate distribution over the 48 is unimodal with a median of **0.400** and 27 of 48 decks between
+0.30 and 0.50; 20 of the 33 infeasible decks are near-misses in [0.35, 0.50). The 0.5 bar sits on
+the *upper shoulder* of the mass rather than below it, and the two decks it was calibrated on sit at
+**0.85**, clear of every real precon but one.
+
+Two competing explanations were refuted. The substitution did **not** break the decks —
+ρ(pass_rate, `substituted`) = **+0.23**, the wrong sign, and all of it carried by
+`substituted_lands` at +0.2335, which is §13.2's own pre-registered "a substituted land taps
+unconditionally → *overstates*" arriving as a measurement. Nor is it the mana base:
+ρ(pass_rate, lands) = **−0.04**, and feasible and infeasible decks share a median of 38 lands.
+
+**None of this touches ρ.** Fitness is computed for every scored deck regardless of feasibility, so
+the gate never entered the correlation; recomputed from the per-deck rows it is **−0.0357**, exactly
+as before. What it does change is the *live* explanation for G4's failure: the model plays real
+decks perfectly well, so "redesign §3" is a question about the objective and not about basic
+playability.
+
+**And the gate is not independent information.** ρ(pass_rate, fitness) = **+0.83**. §9 asks for two
+numbers doing two jobs — promote on feasibility, rank on fitness — and they are substantially the
+same number. Whether the gate earns its place is now an open question about §9's premise.
+
 ### 13.3 Synthetic known-bad decks
+
+*(Amended sprint 3.3.2, after a synthetic fixture was used to set a threshold for real decks.)*
+**A hand-built deck is a control, never a calibration set.** `g3_forgiving` is 38 basic Forests and
+62 one-mana bodies; `g3_demanding` is its deliberate opposite. They are exactly as extreme as they
+were designed to be, which is what makes them useful as controls and disqualifying as a sample.
+§9's solo gate rate was fixed at 0.5 because those two produced 0.85 and 0.94 and *"half is far
+below anything a functioning deck produces"* — and 48 published precons produce a median of **0.40**.
+The fixtures below are for asking *does the simulator shrug at this*; nothing about the population
+of real decks may be inferred from them.
 
 Precons cover the plausible band. Also assert the pathological cases, which no data source will
 contain because nobody plays them:

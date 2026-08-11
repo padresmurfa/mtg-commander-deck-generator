@@ -268,7 +268,7 @@ const char *mf_g4_verdict_name(mf_g4_verdict v) {
 }
 
 void mf_g4_measure(mf_arena *a, const mf_table *t, const mf_table *standin, const mf_precons *p,
-                   const mf_winrates *w, uint64_t seed, double *fitness, mf_g4 *out) {
+                   const mf_winrates *w, uint64_t seed, mf_g4_deck *rows, mf_g4 *out) {
     memset(out, 0, sizeof *out);
     size_t n = mf_winrates_count(w);
 
@@ -316,7 +316,25 @@ void mf_g4_measure(mf_arena *a, const mf_table *t, const mf_table *standin, cons
         out->best_rung[f.best]++;
         sim[out->scored] = f.fitness;
         real[out->scored] = r->win_rate;
-        if (fitness) fitness[out->scored] = f.fitness;
+        if (rows) {
+            mf_g4_deck *row = &rows[out->scored];
+            row->name = r->mtgjson_name;
+            row->win_rate = r->win_rate;
+            row->fitness = f.fitness;
+            /* The pass rate **at the winning rung**, which is the number the
+               0.5 bar is applied to — an average across rungs would be a
+               different statistic answering a question nobody asks. */
+            row->pass_rate = f.best == MF_RUNG_COUNT ? 0.0 : f.pass_rate[f.best];
+            row->best = f.best;
+            row->feasible = f.feasible;
+            row->substituted = fit.substituted;
+            row->substituted_lands = fit.substituted_lands;
+            row->commander_substituted = fit.commander_substituted;
+            row->lands = 0;
+            for (unsigned k = 0; k < MF_DECK_CARDS; k++) {
+                if (d.key[k].types & MF_TYPE_LAND) row->lands++;
+            }
+        }
         out->scored++;
     }
 

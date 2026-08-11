@@ -534,6 +534,36 @@ parameters:
       why_this_bar: >
         Set from 2.3's measurement of real decks at 0.86 and 0.94, not guessed. A bar tight enough
         to bind on a real deck would be a second fitness term wearing a gate's name.
+      # --- contradicted, sprint 3.3.2 -------------------------------------
+      measured_on_real_decks:
+        sprint: "3.3.2"
+        corpus: 48 precons with n >= 100
+        median_pass_rate: 0.400
+        distribution: unimodal, 27 of 48 between 0.30 and 0.50
+        feasible: 15                  # of 48
+        near_misses_in_0.35_to_0.50: "20 of 33 infeasible - 61%"
+        controls: {g3_forgiving: 0.848, g3_demanding: 0.825}
+        correction: >
+          The decks measured in 2.3 were g3_forgiving and g3_demanding, hand-built fixtures in
+          src/worker.c - not real decks. The bar was generalised from them to a population it had
+          never met, and it sits on the UPPER SHOULDER of the real distribution rather than below
+          its mass. "Half is far below anything a functioning deck produces" is true of the
+          fixtures and false of published precons. A measurement does not stop being a guess by
+          being taken; it stops being a guess when taken on the thing the claim is about.
+        does_not_rescue_g4: >
+          rho is computed over FITNESS, which every scored deck carries whether feasible or not, so
+          feasibility never entered the gate. Recomputed from the per-deck rows: rho -0.0357,
+          exactly 3.3.1's figure. G4 remains FAILED.
+        bar_not_moved: >
+          3.1's rule: diagnosing a threshold and changing it in the same sprint improves an
+          instrument and a bar at once. Any change is pre-registered later, against decks chosen in
+          advance.
+        gate_is_not_independent_information:
+          rho_pass_rate_vs_fitness: 0.83
+          note: >
+            Section 9 asks for "two numbers doing two jobs" - promote on feasibility, rank on
+            fitness. At rho 0.83 they are substantially the same number, and whether the gate earns
+            its place is now an open question about section 9's premise.
     forbidden_alternatives:
       - id: minimax
         why: >
