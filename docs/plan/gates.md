@@ -161,6 +161,18 @@ decaying**. If it still decays, the tempo explanation is wrong and something els
 table. Components reported separately — the mulligan reversed sign against a solo score, and this is
 where it reverses back or does not. Thresholds unchanged again: 5σ and 2×.
 
+**Sprint 5.0 pulled forward ahead of E4** (after 3.3.2), on the escalation from G4's failure. One
+explanation now stands for six separate findings, and a second prediction is committed with G3's:
+
+> **`best_rung` must stop collapsing onto `greedy`.** Sprint 3.3.1 measured greedy 38, curve-out 8,
+> role-aware 2, **sequencing-aware 0** across 48 real decks. With a mirror in place,
+> `sequencing-aware` must win on **more than zero** and `greedy`'s share must fall below 79%.
+
+**Not a gate** — it carries no pass/fail of its own. It is written down so "the opponent fixed it"
+cannot be claimed afterwards from a number that would have moved anyway, and so the *other* outcome
+is nameable: if the collapse survives an opponent, the clock explanation is wrong after six
+sightings, which matters more than any gate result in this epic.
+
 **G4 — precon rank correlation.** The objective is validated against 67 precons with ~11,700
 tracked games. Rank correlation, not absolute win-rate fitting — the data is 4-player-normalised
 and this simulator is 2-player. *On failure:* the objective is wrong. Redesign §3 rather than

@@ -13,14 +13,25 @@
 
 meta:
   status: in_progress
-  current_sprint: "3.3.2"
-  task_split_valid_for: "3.3.2"     # task-splitting any other sprint is speculative
+  current_sprint: "5.0"
+  task_split_valid_for: "5.0"       # task-splitting any other sprint is speculative
+  sprint_order_note: >
+    5.0 is PULLED FORWARD ahead of E4. Not a structural change - E4 is untouched and simply does
+    not start yet, which is the third sprint running and now for a measured reason. G4 failed
+    (3.3.1) and 3.3.2 eliminated the competing explanation, leaving one standing that has been
+    found six times: a null-opponent model with a fixed horizon prices position at zero. Redesigning
+    section 3 against a model that still cannot see position would fit a new objective to the same
+    blindness.
   # 3.3.1 ended blocked on a FAILED G4 and did not advance. The escalation was answered: diagnose
   # the feasibility number before redesigning section 3. G4 stays failed throughout 3.3.2 and
   # nothing in that sprint is permitted to un-fail it.
   open_gate_failure:
     gate: G4
     verdict: fail
+    still_open_in: "5.0"
+    not_rerun_in_5_0: >
+      Nothing in 5.0 un-fails G4. The objective gets its verdict again only when something about
+      the model has actually changed AND the re-run has been pre-registered.
     measured: "rho -0.0357, z -0.24, corpus 48, scored 48, feasible 15 (sprint 3.3.1)"
     branch: redesign_objective_section_3
     not: lambda_tuning
@@ -690,92 +701,99 @@ epics:
 # ---------------------------------------------------------------------------
 
 tasks:
-  sprint: "3.3.2"
-  goal: >
-    Find out why 33 of 48 real precons are infeasible, BEFORE redesigning section 3. One cheap step
-    on 1.2.1's rule - go and look before designing round it - because the number beside rho is
-    strange enough to change what "redesign section 3" would mean.
-  already_known_without_measuring: >
-    The 0.5 solo gate rate was calibrated on SYNTHETIC decks and its own comment in mf/objective.h
-    calls them real: "sprint 2.3 measured real decks at 0.86 and 0.94 ... half is far below anything
-    a functioning deck produces". The decks measured were g3_forgiving and g3_demanding, hand-built
-    fixtures in src/worker.c. Thirty-three published precons now produce below it. The design made a
-    falsifiable claim about real decks from a measurement of synthetic ones and reality contradicted
-    it; that is a design amendment regardless of what else this sprint finds.
-  gate_under_question: "mana >= 3 AND spells >= 1 on entry to turn 5; pass rate >= 0.5 per deck"
+  sprint: "5.0"
+  goal: give the model an opponent, and re-run G3 against a mirror with thresholds unchanged
+  why_now: >
+    The escalation from 3.3.1 was answered with (b). Six independent sightings of the same thing -
+    G3's gap decaying 19x (3.1); the strategy axis collapsing via the mulligan (3.2 T1); section
+    7.3's stratification premise false (3.2 T4); flood and screw escaping as tempo failures (3.2
+    T6); greedy winning 38 of 48 real decks and sequencing-aware winning none (3.3.1); and 3.3.2
+    showing it is NOT that the decks cannot be played.
+  may_not_conclude:
+    - >
+      A mirror's clock is SELF-SCALED - a slow deck races a slow deck. It is a policy instrument and
+      not a metagame; whether section 5's ladder separates against opponents of unrelated speed is
+      5.1's question. Reading a narrow instrument as a wide result is 2.3's mistake.
+    - >
+      It is not a fitness axis. A deck beats a copy of itself exactly half the time by symmetry
+      (13.6), so the mirror ranks nothing. Everything follows from the two sides being IDENTICAL.
+  scope_problem_stated_up_front:
+    combat: free of the opcode set - mf_metacard already carries power and toughness
+    removal: >
+      NOT free. There is no MF_OP_DESTROY, no damage, no bounce; the set is TAP_FOR_MANA, ADD_MANA,
+      ENTERS_TAPPED, DRAW, FETCH_LAND, COST_LESS, INERT, UNMATCHED. Removal means GROWING the opcode
+      set, which is G1's own written failure branch, and it will move G1's number.
+    resolution: >
+      Both in scope, neither dropped, sequenced combat-first - a game that ends is what every other
+      exit criterion depends on, and a sprint that spends its first week on opcodes has nothing to
+      test them with.
   prereg:
-    committed_before: the instrument that would measure it
-    not_mutually_exclusive: true
-    all_three_reported: true
-    hypotheses:
-      - id: H1
-        claim: the bar or the gate is mis-set
-        supported_when: >
-          at least half the infeasible decks have a pass rate in [0.35, 0.50) - near-misses, a
-          threshold sitting in the middle of the distribution rather than below it
-      - id: H2
-        claim: the substitution broke the decks
-        supported_when: "spearman(pass_rate, substituted) <= -0.35 across the 48"
-        why_that_bar: 3.3.1's own effect size, reused rather than freshly chosen
-      - id: H3
-        claim: the model cannot play real decks
-        supported_when: >
-          neither H1 nor H2, AND median infeasible pass rate < 0.20, AND the zero-substitution
-          controls pass comfortably
-    controls: [g3_forgiving, g3_demanding]
-    why_those_controls: >
-      Zero substitutions, and they are the decks the 0.5 bar was set on - the right comparison
-      rather than a convenient one. If they pass at 0.86/0.94 while real decks sit near zero, the
-      difference is about real decks and not about the gate arithmetic.
-  may_not:
-    - move MF_SOLO_GATE_RATE, MF_GATE_MIN_MANA or MF_GATE_MIN_SPELLS
-    - re-run G4
-  why_may_not: >
-    Diagnosing a threshold and changing it in the same sprint is 3.1's forbidden move - improving an
-    instrument and a bar at once. H1 being supported is a FINDING, not a licence. And G4 stays
-    failed until something about the model changes; a re-run here is the post-hoc rescue 3.3.1
-    refused.
+    g3: >
+      Already committed in gates.md before this sprint: the gap must STOP DECAYING against a mirror.
+      If it still decays 19x from turn 4 to turn 12, the tempo explanation is wrong. Thresholds
+      unchanged - 5 sigma and 2x. Components reported separately.
+    best_rung:
+      committed: sprint 5.0 T1, before any interaction code exists
+      claim: >
+        If the absent opponent is what collapsed the strategy axis, then with a mirror in place
+        sequencing-aware must win on MORE THAN ZERO decks and greedy's share must fall below the 79%
+        it holds now (3.3.1: greedy 38, curve-out 8, role-aware 2, sequencing-aware 0, of 48).
+      is_a_gate: false
+      why_written_down: >
+        So that "the opponent fixed it" cannot be asserted after the fact from a number that would
+        have moved anyway. If the collapse SURVIVES an opponent, the clock explanation is wrong
+        after six sightings - a far more important finding than a gate result.
+    liveness_before_symmetry: >
+      Not an ordering preference. A mirror in which no game ever ends is perfectly symmetric and a
+      seat-swap check passes on it - the 2.1 defect, a check reporting agreement it never observed.
+      Liveness is a separate, earlier assertion with its own test, and the rate is a number.
   split:
     - id: T1
-      name: pre-register the decision rule, before the instrument exists
-      status: done
-      commit: ab01cc3
+      name: pre-register the best_rung prediction, before any interaction code
     - id: T2
-      name: per-deck feasibility emitted by the tool, controls in the same record
-      status: done
-      emits: "validate -> g4.decks[] and g4.controls[]"
+      name: "mf/board - two seats and a life total, integers with no padding"
     - id: T3
-      name: adjudicate all three hypotheses against their signatures
-      status: done
-      verdict: {H1: supported, H2: refuted, H3: refuted}
-      measured:
-        near_misses: "20 of 33 infeasible in [0.35, 0.50) - 61%, bar was >= 50%"
-        rho_pass_rate_vs_substituted: 0.2324      # bar was <= -0.35; the SIGN is wrong
-        rho_pass_rate_vs_substituted_lands: 0.2335
-        median_infeasible_pass_rate: 0.376        # bar was < 0.20
-        median_pass_rate_all_48: 0.400
-        controls: {g3_forgiving: 0.848, g3_demanding: 0.825}
-        rho_pass_rate_vs_lands: -0.0404
-        median_lands: {feasible: 38, infeasible: 38}
-        rho_pass_rate_vs_fitness: 0.83
-      h2_refuted_with_the_sign_reversed: >
-        A finding rather than a null. All of the +0.23 is substituted LANDS, which is 3.3.1's own
-        pre-registered distortion - a substituted land taps unconditionally for its identity, so it
-        OVERSTATES - arriving as a measurement instead of a caveat. The stand-in did not break
-        these decks; it flattered them slightly.
-      does_not_rescue_g4: >
-        rho is over FITNESS, which every scored deck carries whether feasible or not. Recomputed
-        from the per-deck rows: -0.0357, exactly 3.3.1's figure. G4 remains FAILED.
-      what_it_does_change: >
-        The live hypothesis going in was that the model cannot play real decks. It can - median
-        0.40 where a hand-built fixture plays at 0.85. So "redesign section 3" is a question about
-        the OBJECTIVE and not about basic playability.
+      name: combat from the power/toughness already in mf_metacard, no new opcodes
     - id: T4
-      name: retro and amendments, including the 0.5 bar's justification
-      status: done
-      doc: docs/plan/retros/3.3.2-feasibility-diagnosis.md
-      bar_moved: false
+      name: the game loop, and a game that ends
+    - id: T5
+      name: liveness asserted first, as a rate rather than a yes
+    - id: T6
+      name: seat-swap symmetry bit-exact, and 13.6's half-the-time identity
+    - id: T7
+      name: removal, and the opcode set grows - G1's failure branch taken deliberately
+    - id: T8
+      name: G3 re-run against the mirror, thresholds unchanged, components separately
+    - id: T9
+      name: play/draw skew and self-clock as observables, scored by nothing
+    - id: T10
+      name: G1 re-measured, and the best_rung prediction adjudicated
+    - id: T11
+      name: retro and amendments
 retros:
+  - sprint: "3.3.2"
+    doc: docs/plan/retros/3.3.2-feasibility-diagnosis.md
+    gates: []
+    design_amendments: 6
+    headline: >
+      H1 SUPPORTED, H2 and H3 REFUTED, against signatures committed before the instrument existed.
+      The 0.5 solo gate rate was calibrated on g3_forgiving and g3_demanding - hand-built fixtures
+      that produce 0.85 - and generalised to a population it had never met. 48 published precons
+      produce a median pass rate of 0.400, unimodal, with 27 of 48 between 0.30 and 0.50, so the bar
+      sits on the UPPER SHOULDER of the distribution rather than below its mass; 20 of the 33
+      infeasible decks are near-misses in [0.35, 0.50). H2 is refuted with its SIGN REVERSED, which
+      is a finding rather than a null: rho(pass_rate, substituted) = +0.23 and all of it is carried
+      by substituted_lands at +0.2335, which is 3.3.1's own pre-registered "a substituted land taps
+      unconditionally, so it OVERSTATES" arriving as a measurement instead of a caveat. Not the mana
+      base either - rho(pass_rate, lands) = -0.04 and feasible and infeasible decks share a median
+      of 38 lands. NONE OF IT RESCUES G4: rho is over fitness, which every scored deck carries
+      whether feasible or not, and recomputing from the per-deck rows gives -0.0357 exactly. The bar
+      was NOT moved - 3.1's rule, and H1 being supported is a finding rather than a licence. What it
+      changes is the live explanation: the model plays real decks fine, so "redesign section 3" is
+      about the objective and not about playability. Also found: rho(pass_rate, fitness) = 0.83, so
+      section 9's "two numbers doing two jobs" are substantially one number.
+    carry_over: [where_the_feasibility_bar_belongs, whether_the_gate_is_worth_keeping,
+                 g4_still_failed, precon_prices, price_fixture, lambda_untuned]
   - sprint: "3.3.1"
     doc: docs/plan/retros/3.3.1-fixture-resolution.md
     gates: [G4]
