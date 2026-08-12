@@ -111,6 +111,13 @@ void mf_board_enters(const mf_deck *d, mf_board *b, uint8_t card, bool tapped);
    what turns 1-4 need from an upkeep. */
 void mf_board_untap(mf_board *b);
 
+/* Removes the permanent at `at`, closing the gap by moving the last entry down
+   (sprint 5.0 — the first thing in this model that leaves the battlefield).
+   **Order is not preserved**, and nothing may depend on it: the board is a set,
+   `mf_board_mana` sums it, and a caller removing several must go by DESCENDING
+   index so an earlier removal cannot renumber a later one. */
+void mf_board_leaves(mf_board *b, uint8_t at);
+
 /* The pool this battlefield offers. `ready_only` asks what can be tapped *now*,
    so a tapland that arrived this turn and a creature still summoning sick both
    contribute nothing; false asks what the deck can do once everything has

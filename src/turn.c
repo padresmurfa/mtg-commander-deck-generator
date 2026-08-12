@@ -181,6 +181,12 @@ void mf_board_enters(const mf_deck *d, mf_board *b, uint8_t card, bool forced_ta
     b->count++;
 }
 
+void mf_board_leaves(mf_board *b, uint8_t at) {
+    b->count--;
+    b->card[at] = b->card[b->count];
+    b->flags[at] = b->flags[b->count];
+}
+
 void mf_board_untap(mf_board *b) {
     for (uint8_t i = 0; i < b->count; i++) b->flags[i] = 0;
 }

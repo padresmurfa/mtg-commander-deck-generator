@@ -775,6 +775,28 @@ tasks:
       mutations: 3, all caught
     - id: T3
       name: combat from the power/toughness already in mf_metacard, no new opcodes
+      status: done
+      module: mf/combat
+      not_modelled: [vigilance, trample, flying, evasion, first_strike, deathtouch,
+                     combat_tricks, commander_damage]
+      attack_rule: >
+        Everything that can attack, does. A held-back blocker is a policy dimension section 5's
+        ladder should own; inventing a rung mid-sprint would mean grading the ladder against a rung
+        this sprint made up. It overstates aggressive decks and the mirror cancels that only
+        because both sides do it.
+      block_rule: >
+        A good block, or a chump block only against lethal. A PLACEHOLDER - defensible, not
+        measured - and one fixed rule for both seats, which is what a mirror needs. Blocking is
+        exactly the kind of decision section 5's rungs should eventually differ on.
+      defect_found_by_mutation: >
+        The comment claimed the SMALLEST good blocker takes the job and the loop took the BIGGEST,
+        with every test green either way. It matters because attackers descend by POWER while a
+        blocker needs POWER to beat TOUGHNESS: a 5/1 alongside a 3/9, against a 9/6 and a 2/6 -
+        spend the 9/6 on the 5/1 and the 3/9 walks in. Loop fixed, and that case is now the test.
+      mutations: >
+        6, all caught. Two of the first four died at compile on -Werror (an unused parameter), so
+        build-safe variants were run to confirm the TESTS catch them and not just the compiler.
+      board_api_added: mf_board_leaves - the first thing in this model that leaves the battlefield
     - id: T4
       name: the game loop, and a game that ends
     - id: T5
