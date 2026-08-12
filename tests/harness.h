@@ -113,6 +113,7 @@ void run_reduce_tests(void);
 void run_turn_tests(void);
 void run_gap_tests(void);
 void run_solo_tests(void);
+void run_duel_tests(void);
 void run_objective_tests(void);
 void run_strata_tests(void);
 void run_spearman_tests(void);

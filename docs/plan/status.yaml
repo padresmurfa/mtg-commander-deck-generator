@@ -750,8 +750,29 @@ tasks:
   split:
     - id: T1
       name: pre-register the best_rung prediction, before any interaction code
+      status: done
+      commit: 84b1e60
     - id: T2
-      name: "mf/board - two seats and a life total, integers with no padding"
+      name: "mf/duel - two seats and a life total, integers with no padding"
+      status: done
+      named_duel_not_game: mf_game is already the card set - paper, Arena, Magic Online
+      not_a_new_board: >
+        mf_board is one seat's battlefield and mf_live is one seat's whole live game, so two
+        players is a pair of those plus life, a turn and a winner.
+      one_stream_per_seat: >
+        Derived in the module, not at the call site. Sharing one stream would deal both sides
+        identical hands and the mirror would play itself in lockstep - perfectly symmetric,
+        perfectly deterministic, and not a game. That failure is INVISIBLE to a seat-swap check
+        because a lockstep is symmetric, so the streams are tested for pairwise distinctness over
+        a grid AND for actually dealing different cards.
+      frozen_not_sticky: >
+        A finished duel absorbs nothing further. The first draft of the test expected damage to
+        keep landing with the winner pinned, which leaves a final state depending on how much
+        damage was in flight after the game ended.
+      known_omission: >
+        The 21-point commander-damage rule is not modelled - it needs to know which creature dealt
+        which damage and combat here is aggregate. It shortens some real games.
+      mutations: 3, all caught
     - id: T3
       name: combat from the power/toughness already in mf_metacard, no new opcodes
     - id: T4

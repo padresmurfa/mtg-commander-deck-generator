@@ -28,6 +28,7 @@ int main(void) {
     run_analytic_tests();
     run_gap_tests();
     run_solo_tests();
+    run_duel_tests();
     run_objective_tests();
     run_fixture_tests();
     run_strata_tests();
