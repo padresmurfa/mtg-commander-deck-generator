@@ -1,0 +1,44 @@
+preprocess 49f02e19b3f081e6cc71f24fa668d948
+opening ed497bdebab2fe8ab6b8dd8b42cc52d4
+solo d187395c970cf49f6f4d4c76bb849950
+gauntlet 256b9d148ff96efc0478cd742d00748b
+run 57d7ea146acc16fb976bd206a66895c3
+seed 20260809
+games 32
+opening_total 102
+gate_passes 30
+state_total 8f6dfa9fbe24d2ba
+g2.worst_sigma 1.6670271123721763
+g2.pass true
+t6.worst_sigma 1.737586111601
+t6.pass true
+g3.separation 0.010687500000000072
+g3.noise_sd 0.0047660092058240955
+g3.sigma 2.242442164597558
+g3.ratio 1.1403940886699517
+g3.secondary_sigma 17.71912287419866
+g3.verdict defer
+g3.land_rule.forgiving_gap 0
+g3.land_rule.demanding_gap 0.01231250000000006
+g3.land_rule.sigma 3.9502841255150183
+g3.mulligan.forgiving_gap 0.076125
+g3.mulligan.demanding_gap 0.07450000000000001
+g3s.separation -0.5178124999999998
+g3s.noise_sd 0.2274293760571612
+g3s.sigma -2.276805701079947
+g3s.ratio 0
+g3s.verdict fail
+g3s.agg_error.forgiving 0
+g3s.agg_error.demanding 0.11717358006939452
+g3s.decay.4 0 1.308
+g3s.decay.6 0 1.2483333333333333
+g3s.decay.8 0 0.8246666666666667
+g3s.decay.12 0 0.127
+g3s.decay.20 0 0.0013333333333333333
+cards.cards 7
+cards.printings 9
+cards.other_games 2
+cards.legality_disagreements 1
+cards.digest 60944572c2f39dd8396baa4b3665c863
+cards.table_hash 55d8fe02a5a08087653ebb998cdb95b2
+cards.table_bytes 364
