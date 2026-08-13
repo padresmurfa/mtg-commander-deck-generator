@@ -394,6 +394,106 @@ void mf_phase_play(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
     mf_phase_play_live(d, p, game, start, out, &live);
 }
 
+void mf_turn_play(const mf_deck *d, const mf_turn_policy *p, bool draw, mf_live *live,
+                  mf_turn_result *out) {
+    memset(out, 0, sizeof *out);
+    mf_opening *o = &live->lib;
+    mf_board *b = &live->board;
+
+    mf_board_untap(b);
+
+    if (draw && o->drawn < MF_DECK_LIBRARY - o->bottomed) mf_opening_draw(o, 1);
+
+    /* The land drop, before casting: a land played now can pay for what
+       follows, and holding it back could only ever cost mana. Which land
+       is the policy's question — the tapland's cost is a turn of tempo,
+       and that turn is cheapest when there was nothing to cast anyway. */
+    uint8_t chosen;
+    out->made_drop = choose_land(d, p, b, o, &chosen);
+    if (out->made_drop) {
+        mf_board_enters(d, b, o->hand[chosen], false);
+        mf_from_hand(o, chosen);
+    } else {
+        live->missed_drops = mf_cap8(live->missed_drops + 1u);
+    }
+
+    mf_mana m = {0};
+    mf_board_mana(d, b, true, &m);
+
+    /* Greedy: keep casting the best castable thing until nothing is. Each
+       pass removes a card from hand or the commander from the zone, and
+       draws are bounded by the library, so it terminates. */
+    for (;;) {
+        uint8_t disc = mf_discount(d, b);
+        int best = -1;
+        unsigned best_cost = 0;
+        bool best_ramp = false;
+        /* The candidates are the hand **and the commander**, which §4 says
+           is always available and so unlike every other card can be counted
+           on. One loop over both, filtered identically: a land is played
+           and never cast, wherever it happens to be sitting. */
+        for (uint8_t i = 0; i <= o->hand_size; i++) {
+            bool is_commander = i == o->hand_size;
+            if (is_commander && live->commander_cast) continue;
+            const mf_metacard *k = &d->key[is_commander ? MF_DECK_COMMANDER : o->hand[i]];
+            if (k->types & MF_TYPE_LAND) continue;
+            if (!mf_mana_can_pay(&m, k, disc)) continue;
+            unsigned c = mf_mana_cost(k, disc);
+            if (best < 0 || mf_better_cast(p->casts, k, c, best_ramp, best_cost)) {
+                best = i;
+                best_cost = c;
+                best_ramp = mf_is_ramp(k);
+            }
+        }
+        if (best < 0) break;
+
+        bool best_is_commander = best == (int)o->hand_size;
+        uint8_t card = best_is_commander ? MF_DECK_COMMANDER : o->hand[best];
+        const mf_metacard *k = &d->key[card];
+        mf_mana_spend(&m, k, disc);
+        out->spent = mf_cap16(out->spent + best_cost);
+        out->spells++;
+        live->spells = mf_cap8(live->spells + 1u);
+        /* Printed cost, not the discounted one: a reducer is an efficiency
+           the deck earned rather than a smaller thing to have done (3.1 D2). */
+        live->deployed = mf_cap16(live->deployed + k->cmc);
+        if (best_is_commander) {
+            live->commander_cast = true;
+        } else {
+            mf_from_hand(o, (uint8_t)best);
+        }
+
+        /* Resolution. A ritual's mana arrives after its own cost is paid,
+           which is the only ordering that makes it a ritual rather than a
+           discount. */
+        if (mf_has_op(k, MF_OP_ADD_MANA) || mf_has_op(k, MF_OP_ADD_MANA_CHOICE)) {
+            if (k->produces && k->produces_max) mf_mana_add(&m, k->produces, k->produces_max);
+        }
+        if (mf_has_op(k, MF_OP_DRAW) && o->drawn < MF_DECK_LIBRARY - o->bottomed) {
+            /* One card. The count is not in the metacard either — see
+               `discount` above; the same gap, the same retro entry. */
+            mf_opening_draw(o, 1);
+        }
+        if (mf_has_op(k, MF_OP_FETCH_LAND)) {
+            uint8_t land;
+            if (mf_take_library_land(d, o, &land)) {
+                /* Tapped, because Rampant Growth, Cultivate, Farseek and
+                   nearly every printed equivalent say so — and the turn
+                   that costs is what this phase exists to measure. */
+                mf_board_enters(d, b, land, true);
+                tap_if_ready(d, b, (uint8_t)(b->count - 1), &m);
+            }
+        }
+        if (k->types & (MF_TYPE_CREATURE | MF_TYPE_ARTIFACT | MF_TYPE_ENCHANTMENT |
+                        MF_TYPE_PLANESWALKER | MF_TYPE_BATTLE)) {
+            mf_board_enters(d, b, card, false);
+            tap_if_ready(d, b, (uint8_t)(b->count - 1), &m);
+        }
+    }
+    out->wasted = mf_mana_left(&m);
+    live->turns = mf_cap8(live->turns + 1u);
+}
+
 void mf_phase_play_live(const mf_deck *d, const mf_turn_policy *p, uint64_t game,
                         const mf_opening *start, mf_phase_state *out, mf_live *live) {
     memset(out, 0, sizeof *out);
@@ -405,109 +505,20 @@ void mf_phase_play_live(const mf_deck *d, const mf_turn_policy *p, uint64_t game
        is always the one nothing reads until a later phase. */
     memset(live, 0, sizeof *live);
     live->lib = *start;
-    live->turns = p->turns;
     mf_opening *o = &live->lib;
     mf_board *b = &live->board;
 
     out->mulligans = o->mulligans;
 
-    bool commander_left = true;
     unsigned spent = 0, wasted = 0;
 
     for (uint8_t turn = 1; turn <= p->turns; turn++) {
-        mf_board_untap(b);
-
-        if ((turn > 1 || !out->on_play) && o->drawn < MF_DECK_LIBRARY - o->bottomed) {
-            mf_opening_draw(o, 1);
-        }
-
-        /* The land drop, before casting: a land played now can pay for what
-           follows, and holding it back could only ever cost mana. Which land
-           is the policy's question — the tapland's cost is a turn of tempo,
-           and that turn is cheapest when there was nothing to cast anyway. */
-        uint8_t chosen;
-        bool played = choose_land(d, p, b, o, &chosen);
-        if (played) {
-            mf_board_enters(d, b, o->hand[chosen], false);
-            mf_from_hand(o, chosen);
-        } else {
-            out->missed_drops++;
-        }
-
-        mf_mana m = {0};
-        mf_board_mana(d, b, true, &m);
-
-        /* Greedy: keep casting the best castable thing until nothing is. Each
-           pass removes a card from hand or the commander from the zone, and
-           draws are bounded by the library, so it terminates. */
-        for (;;) {
-            uint8_t disc = mf_discount(d, b);
-            int best = -1;
-            unsigned best_cost = 0;
-            bool best_ramp = false;
-            /* The candidates are the hand **and the commander**, which §4 says
-               is always available and so unlike every other card can be counted
-               on. One loop over both, filtered identically: a land is played
-               and never cast, wherever it happens to be sitting. */
-            for (uint8_t i = 0; i <= o->hand_size; i++) {
-                bool is_commander = i == o->hand_size;
-                if (is_commander && !commander_left) continue;
-                const mf_metacard *k = &d->key[is_commander ? MF_DECK_COMMANDER : o->hand[i]];
-                if (k->types & MF_TYPE_LAND) continue;
-                if (!mf_mana_can_pay(&m, k, disc)) continue;
-                unsigned c = mf_mana_cost(k, disc);
-                if (best < 0 || mf_better_cast(p->casts, k, c, best_ramp, best_cost)) {
-                    best = i;
-                    best_cost = c;
-                    best_ramp = mf_is_ramp(k);
-                }
-            }
-            if (best < 0) break;
-
-            bool best_is_commander = best == (int)o->hand_size;
-            uint8_t card = best_is_commander ? MF_DECK_COMMANDER : o->hand[best];
-            const mf_metacard *k = &d->key[card];
-            mf_mana_spend(&m, k, disc);
-            spent += best_cost;
-            out->spells++;
-            /* Printed cost, not the discounted one: a reducer is an efficiency
-               the deck earned rather than a smaller thing to have done (3.1 D2). */
-            live->deployed = mf_cap16(live->deployed + k->cmc);
-            if (best_is_commander) {
-                commander_left = false;
-                out->commander_cast = true;
-            } else {
-                mf_from_hand(o, (uint8_t)best);
-            }
-
-            /* Resolution. A ritual's mana arrives after its own cost is paid,
-               which is the only ordering that makes it a ritual rather than a
-               discount. */
-            if (mf_has_op(k, MF_OP_ADD_MANA) || mf_has_op(k, MF_OP_ADD_MANA_CHOICE)) {
-                if (k->produces && k->produces_max) mf_mana_add(&m, k->produces, k->produces_max);
-            }
-            if (mf_has_op(k, MF_OP_DRAW) && o->drawn < MF_DECK_LIBRARY - o->bottomed) {
-                /* One card. The count is not in the metacard either — see
-                   `discount` above; the same gap, the same retro entry. */
-                mf_opening_draw(o, 1);
-            }
-            if (mf_has_op(k, MF_OP_FETCH_LAND)) {
-                uint8_t land;
-                if (mf_take_library_land(d, o, &land)) {
-                    /* Tapped, because Rampant Growth, Cultivate, Farseek and
-                       nearly every printed equivalent say so — and the turn
-                       that costs is what this phase exists to measure. */
-                    mf_board_enters(d, b, land, true);
-                    tap_if_ready(d, b, (uint8_t)(b->count - 1), &m);
-                }
-            }
-            if (k->types & (MF_TYPE_CREATURE | MF_TYPE_ARTIFACT | MF_TYPE_ENCHANTMENT |
-                            MF_TYPE_PLANESWALKER | MF_TYPE_BATTLE)) {
-                mf_board_enters(d, b, card, false);
-                tap_if_ready(d, b, (uint8_t)(b->count - 1), &m);
-            }
-        }
-        wasted += mf_mana_left(&m);
+        /* §2.2's rule, and the whole of what this phase does with it: on the
+           play means one fewer card, every other turn draws. */
+        mf_turn_result r;
+        mf_turn_play(d, p, turn > 1 || !out->on_play, live, &r);
+        spent += r.spent;
+        wasted += r.wasted;
     }
 
     /* Entering the next turn everything untaps and nothing is sick, so this is
@@ -525,7 +536,11 @@ void mf_phase_play_live(const mf_deck *d, const mf_turn_policy *p, uint64_t game
     out->hand = o->hand_size;
     out->mana_spent = mf_cap8(spent);
     out->mana_wasted = mf_cap8(wasted);
-    live->commander_cast = out->commander_cast;
-    live->spells = out->spells;
-    live->missed_drops = out->missed_drops;
+    /* Read off the live state rather than accumulated beside it. The turn is
+       shared with a duel now, and a second running total kept here would be a
+       second thing to keep in step — the one that drifts is always the one
+       nothing reads until a later phase. */
+    out->spells = live->spells;
+    out->missed_drops = live->missed_drops;
+    out->commander_cast = live->commander_cast;
 }

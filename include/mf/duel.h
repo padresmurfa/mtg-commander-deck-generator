@@ -84,4 +84,45 @@ uint64_t mf_duel_stream(uint64_t game, unsigned seat);
    in the order damage was dealt, so a double kill has one answer (§17.1). */
 bool mf_duel_damage(mf_duel *g, unsigned seat, unsigned amount);
 
+/* ---- the game loop (sprint 5.0 T4) ---------------------------------------
+ *
+ * **Exact turns throughout, and §3's aggregation cannot be used here at all.**
+ * The solo model plays turns 1–4 exactly and 5+ as one mana budget, on §3's
+ * claim that "from turn 5 on, state is dominated by totals rather than order".
+ * An aggregate phase has no turns — that is the whole of what aggregating
+ * means — and combat is a per-turn exchange between two boards. There is no
+ * version of "attack in aggregate" that is not a different game.
+ *
+ * So a duel is exact for its whole length, and that is a **consequence of
+ * having an opponent rather than a decision this sprint took freely**: the
+ * clock is exactly the order-dependent thing §3 assumed away. It also means a
+ * duel's turns and a solo run's turns past four are not the same object, and
+ * G3's re-run must compare against an *exact* solo baseline at the same
+ * horizon or it will be measuring the aggregation instead of the opponent
+ * (`mf_turn_policy.turns` is a parameter, so that baseline is free).
+ *
+ * **Turns per seat, not plies.** Forty life, and a model with no evasion where
+ * damage gets through only when the attack outclasses what can block it — this
+ * game is slower than real Magic, not faster. A real Commander game is decided
+ * around turn 8–15, so a cap must be comfortably past that or the *cap*
+ * decides the game rather than the deck. Twenty is roughly twice a real game
+ * and still a cap. It is chosen on that argument and **then** measured: T5
+ * records the rate at which games actually end inside it, as a number rather
+ * than a yes, and the number is reported whatever it is. */
+#define MF_DUEL_TURNS 20
+
+/* One duel. Both seats mulligan on their own stream, then take alternating
+ * turns — untap, draw, land, cast, attack — until a seat is dead or the cap is
+ * reached. `out->winner` is `MF_DUEL_LIVE` in the second case, which is a real
+ * outcome and not an error.
+ *
+ * `p` is indexed by seat, so a mirror passes the same policy twice and G3
+ * passes two rungs. `first` is the seat on the play: it takes the first turn
+ * and skips the draw on it, which is the only asymmetry between two identical
+ * decks and therefore the one T9 has to observe rather than assume away.
+ *
+ * Pure — no clock, no allocation, no I/O (`no_io_in_loop`). */
+void mf_duel_run(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS], uint64_t seed,
+                 uint64_t game, unsigned first, mf_duel *out);
+
 #endif

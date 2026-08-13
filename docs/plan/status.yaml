@@ -799,6 +799,44 @@ tasks:
       board_api_added: mf_board_leaves - the first thing in this model that leaves the battlefield
     - id: T4
       name: the game loop, and a game that ends
+      status: done
+      aggregate_cannot_host_an_opponent: >
+        Found on starting, not planned for. An aggregate phase has no turns - that is the whole of
+        what aggregating means - and combat is a per-turn exchange between two boards, so a duel is
+        EXACT for its whole length and section 3's split describes the solo model only. Two
+        consequences: the duel's turn and the opening phase's turn must be the same code, so
+        mf_turn_play was extracted from mf_phase_play_live and the phase is now a loop over it; and
+        G3's re-run must compare against an EXACT solo baseline at the same horizon, or it will
+        attribute 3.1's aggregation error to the opponent.
+      extraction_was_behaviour_preserving: >
+        Asserted rather than assumed - golden run digests unchanged across the refactor, which is
+        the only evidence that matters for a change with no new behaviour of its own.
+      horizon: 20 turns per seat, chosen on an argument and measured in T5
+      seating_parameter: >
+        `first` says which seat is on the play. It takes the first turn and skips the draw on it,
+        which is the only asymmetry between two identical decks. T6 adds the stream swap alongside
+        it - 13.6's symmetry check is PAIRED and needs both knobs, because a pure relabelling moves
+        the play as well as the cards.
+      mutations: >
+        29, all caught - 17 on mf/duel and 12 on the extracted turn. THREE findings.
+        (1) The seats' per-ply POLICY was unpinned: a loop reading p[0] for both survived a
+        greedy-versus-curve-out check, because those rungs also mulligan differently and what the
+        check saw was the opening hand. The test now uses a second pair, role-aware against
+        sequencing-aware, whose mulligans are identical field for field.
+        (2) The FIXTURE could not tell the rungs apart at all at first - one land type, one cost,
+        a hand every policy keeps - and eight taplands left the two land rules playing an identical
+        game in three quarters of the sample. Fourteen taplands makes them differ in 29 of 64.
+        (3) The defender's real life total reaching mf_combat was unpinned; feeding a constant 40
+        left every test green, because chump blocks fire in about one attack in twenty-six and none
+        of the named games was one. A pinned table of eight games now anchors it.
+        Separately, removing the commander guard from the cast loop does not fail - it does not
+        TERMINATE, which is the loop's own written termination argument arriving as a measurement.
+      assumption_corrected_by_measurement: >
+        Everything that can attack does, and attacking taps, so the defender's board looked like it
+        would always be tapped out and blocking looked nearly impossible. Measured instead: a
+        blocker is available in 88.1% of attacks and something blocks in 26.2%, because creatures
+        cast on the defender's own turn are summoning-sick - which stops them attacking and not
+        blocking. The reverse was very nearly written into the retro as a finding.
     - id: T5
       name: liveness asserted first, as a rate rather than a yes
     - id: T6

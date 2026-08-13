@@ -42,4 +42,34 @@ bool mf_take_library_land(const mf_deck *d, mf_opening *o, uint8_t *out);
 uint8_t mf_cap8(unsigned v);
 uint16_t mf_cap16(unsigned v);
 
+/* ---- one exact turn (sprint 5.0 T4) --------------------------------------
+ *
+ * Untap, draw, land drop, and cast until nothing is castable. Extracted from
+ * `mf_phase_play_live`, which is now a loop over it, so that a duel's turn and
+ * the opening phase's turn are **the same turn** rather than two of them.
+ *
+ * That is the `turn_priv.h` argument again and it bites harder here: 5.0 exists
+ * to measure what an opponent changes, and a second copy of the turn would put
+ * a modelling difference inside the measurement — the one thing it must not be
+ * measuring. A duel cannot use `mf/solo`'s aggregate phase at all, because an
+ * aggregate phase has no turns and combat is a per-turn exchange, so without
+ * this the two-player model would have had to grow its own turn from scratch.
+ *
+ * `draw` is the caller's, not derived: the phase reads it off §2.2's play/draw
+ * rule and a duel off which seat is on the play, and they are different
+ * questions with the same answer shape.
+ *
+ * Everything cumulative lands in `live` — spells, missed drops, deployed mana,
+ * whether the commander is out — because that is where the *next* turn reads
+ * it. `out` carries only what is per-turn. */
+typedef struct {
+    uint16_t spent;  /* mana committed */
+    uint16_t wasted; /* available and never spent */
+    uint8_t spells;  /* cast this turn, commander included */
+    bool made_drop;
+} mf_turn_result;
+
+void mf_turn_play(const mf_deck *d, const mf_turn_policy *p, bool draw, mf_live *live,
+                  mf_turn_result *out);
+
 #endif

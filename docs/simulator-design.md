@@ -155,6 +155,30 @@ the other is the horizon the deck itself implies, which turns a fixed constant i
 distribution and gives this section something to calibrate 12 against (§13.6). Not a reason to defer
 the constant — a reason to expect it back.
 
+**Two players cannot use any of this, and that is a consequence rather than a choice.**
+*(Amended sprint 5.0 T4, when the two-player loop was built.)* An aggregate phase has no turns —
+that is the whole of what aggregating means — and combat is a per-turn exchange between two boards.
+There is no version of "attack in aggregate" that is still a model of the same game. So a **duel is
+exact for its whole length**, and the split above describes the solo model only. The clock is
+exactly the order-dependent thing this section assumed away, so an opponent removes the assumption
+rather than stressing it.
+
+Two things follow and both are load-bearing:
+
+- **A duel's turn and the opening phase's turn must be the same code.** They are: `mf_turn_play`
+  is one exact turn and `mf_phase_play_live` is a loop over it. Sprint 5.0 exists to measure what
+  an opponent changes, and a second copy of the turn would put a modelling difference inside the
+  measurement.
+- **G3's re-run compares a duel against an *exact* solo baseline at the same horizon**, not against
+  3.1's aggregate figure. `mf_turn_policy.turns` is a parameter, so that baseline costs nothing —
+  and skipping it would attribute the aggregation error to the opponent.
+
+The horizon question above gets its answer here too. A duel caps at **20 turns per seat**
+(`MF_DUEL_TURNS`): forty life, no evasion, and damage that gets through only when the attack
+outclasses what can block it make this game slower than real Magic rather than faster, so a cap
+must sit well past the turn 8–15 a real Commander game is decided on or the *cap* decides the game
+instead of the deck. Chosen on that argument and then measured, not the other way round.
+
 **Aggregate means the cards are real and the turn they arrive on is not.** The phase draws exactly
 what the shuffle dealt — which keeps it a sample from the same distribution and keeps §7.8's common
 random numbers intact — and then treats the whole phase as one mana budget and one pool of castable

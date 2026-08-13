@@ -858,6 +858,61 @@ phases:
           constraint still binds.
         chosen_before_measuring: true
 
+    # --- built in sprint 5.0 T4 -----------------------------------------
+    # NOT a phase of the solo model. A duel replaces the split above rather than extending it.
+    - id: duel
+      turns: "1-20 per seat"
+      simulation: exact              # for its whole length; see aggregate_cannot_host_an_opponent
+      module: mf/duel
+      seats: 2
+      start_life: 40
+      turn_cap_per_seat: 20
+      horizon_decision:
+        value: 20
+        sprint: "5.0"
+        why: >
+          Forty life, no evasion, and damage that gets through only when the attack outclasses what
+          can block it make this game slower than real Magic rather than faster. A real Commander
+          game is decided around turn 8-15, so a cap must sit well past that or the CAP decides the
+          game instead of the deck. Twenty is roughly twice a real game and still a cap.
+        chosen_before_measuring: true
+        measured_in: "5.0 T5"        # liveness as a RATE, reported whatever it is
+      known_omissions:               # each shortens or lengthens real games
+        - the 21-point commander damage rule (combat here is aggregate)
+        - vigilance, trample, flying and every other evasion, first strike, deathtouch
+        - combat tricks
+        - decking out - a library that runs dry simply stops drawing
+        - "removal: added in 5.0 T7, absent at T4"
+      block_rule: placeholder        # good block, or chump only against lethal; see 5.0 T3
+      block_rate_measured:           # not a threshold - a fact about how much the rule matters
+        sample: 500 mirror games, curve-out, the T4 fixture
+        attacks_with_a_blocker_available: 0.881
+        attacks_where_something_blocked: 0.262
+        note: >
+          Recorded because the reverse was assumed first. Everything that can attack does and
+          attacking taps, so the defender's board looked like it would always be tapped out; in fact
+          creatures cast on the defender's own turn are summoning-sick, which stops them attacking
+          and not blocking, so a blocker is available in seven attacks out of eight.
+
+  aggregate_cannot_host_an_opponent:
+    ref: "3"
+    added: sprint 5.0 T4
+    claim: >
+      An aggregate phase has no turns - that is the whole of what aggregating means - and combat is
+      a per-turn exchange between two boards. There is no version of "attack in aggregate" that is
+      still a model of the same game.
+    consequences:
+      shared_turn_required: >
+        mf_turn_play is ONE exact turn and mf_phase_play_live is a loop over it. 5.0 exists to
+        measure what an opponent changes, and a second copy of the turn would put a modelling
+        difference inside the measurement.
+      g3_baseline: >
+        G3's re-run compares a duel against an EXACT solo baseline at the same horizon, not against
+        3.1's aggregate figure. mf_turn_policy.turns is a parameter so the baseline is free, and
+        skipping it would attribute the aggregation error to the opponent.
+      policy_turns_field_is_unused_in_a_duel: >
+        mf_turn_policy.turns is the opening phase's four. A duel's horizon is MF_DUEL_TURNS.
+
   aggregate_model:
     ref: "3"
     added: sprint 3.1
