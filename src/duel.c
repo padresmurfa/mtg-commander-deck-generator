@@ -3,6 +3,7 @@
 #include "mf/combat.h"
 #include "turn_priv.h"
 
+#include <math.h>
 #include <string.h>
 
 void mf_duel_init(mf_duel *out) {
@@ -80,4 +81,43 @@ void mf_duel_run(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS], uint64
 
         out->active = (uint8_t)def;
     }
+}
+
+unsigned mf_duel_first(uint64_t game) {
+    return mf_phase_on_play(game) ? 0u : 1u;
+}
+
+void mf_duel_sample_run(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS], uint64_t seed,
+                        unsigned games, mf_duel_sample *out) {
+    memset(out, 0, sizeof *out);
+    out->games = games;
+
+    /* Integers throughout, divided once at the end (§17.1): a reduction over
+       doubles would depend on the order it was summed in. */
+    uint64_t sum = 0, sumsq = 0;
+    for (uint64_t g = 0; g < games; g++) {
+        mf_duel d1;
+        mf_duel_run(d, p, seed, g, mf_duel_first(g), &d1);
+        if (d1.winner == MF_DUEL_LIVE) continue; /* hit the cap; it has no length */
+        if (!out->ended || d1.turn < out->min_turn) out->min_turn = d1.turn;
+        if (d1.turn > out->max_turn) out->max_turn = d1.turn;
+        out->ended++;
+        out->seat_wins[d1.winner]++;
+        sum += d1.turn;
+        sumsq += (uint64_t)d1.turn * d1.turn;
+    }
+
+    if (games) out->end_rate = (double)out->ended / games;
+    if (!out->ended) return; /* no length distribution, rather than one at the cap */
+    double n = (double)out->ended;
+    out->mean_turn = (double)sum / n;
+    /* n·Σx² − (Σx)², over n². Non-negative by Cauchy–Schwarz and exact in
+       integers, where `Σx²/n − mean²` can go slightly negative when every game
+       is the same length and hand back a NaN. */
+    uint64_t num = (uint64_t)out->ended * sumsq - sum * sum;
+    out->turn_sd = sqrt((double)num / (n * n));
+}
+
+bool mf_duel_sample_live(const mf_duel_sample *s) {
+    return s->ended > 0 && s->max_turn > s->min_turn && s->seat_wins[0] > 0 && s->seat_wins[1] > 0;
 }

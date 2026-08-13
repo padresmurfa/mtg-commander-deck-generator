@@ -125,4 +125,53 @@ bool mf_duel_damage(mf_duel *g, unsigned seat, unsigned amount);
 void mf_duel_run(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS], uint64_t seed,
                  uint64_t game, unsigned first, mf_duel *out);
 
+/* ---- a sample of duels, and liveness (sprint 5.0 T5) ---------------------
+ *
+ * **Liveness is asserted before symmetry, and that is not an ordering
+ * preference.** A mirror in which no game ever ends is perfectly symmetric, and
+ * a seat-swap check passes on it without observing anything — the 2.1 defect,
+ * a statistic computed from nothing reading as agreement. §13.6 makes liveness
+ * a written precondition for that reason.
+ *
+ * **And the rate is a number rather than a yes.** "Games end" is the kind of
+ * claim that stays true while quietly becoming true of two games in a thousand.
+ * What the horizon is worth is the *fraction* that end inside it, so that is
+ * what is recorded — reported whatever it turns out to be, since the cap was
+ * argued in T4 before any of this was run. */
+
+/* Which seat is on the play, for a sampled duel. Even games seat 0, odd games
+   seat 1 — §2.2's proportional stratification applied to the die roll, so over
+   an even sample neither seat holds the play advantage. That balance is what
+   makes §13.6's half-the-time identity a checkable claim rather than a claim
+   about a coin nobody flipped. */
+unsigned mf_duel_first(uint64_t game);
+
+typedef struct {
+    unsigned games; /* attempted */
+    unsigned ended; /* a seat reached zero inside the cap */
+    unsigned seat_wins[MF_DUEL_SEATS];
+    /* Over the games that ended, in plies. Zero when none did — an unended
+       sample has no length distribution, rather than one centred on the cap. */
+    uint8_t min_turn, max_turn;
+    /* Summed as integers and divided once, here, at the end (§17.1). The
+       variance is `n*Σx² − (Σx)²` over `n²`, which is a non-negative integer
+       over a positive one by Cauchy–Schwarz — so it needs no clamp, where the
+       obvious `Σx²/n − mean²` can go slightly negative when every game is the
+       same length and hand a NaN to a caller. */
+    double mean_turn, turn_sd, end_rate;
+} mf_duel_sample;
+
+void mf_duel_sample_run(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS], uint64_t seed,
+                        unsigned games, mf_duel_sample *out);
+
+/* §13.6's three assertions, made executable: games end, the length
+ * distribution has spread, and the winner is not always the same seat.
+ *
+ * **A statement about a *mirror* sample**, which is the only place the symmetry
+ * check runs. The third condition is not valid in general — T8 pits two rungs
+ * against each other with the better one fixed in seat 0, and it winning every
+ * game is a live sample rather than a dead one. Scoping the predicate is
+ * cheaper than weakening it. */
+bool mf_duel_sample_live(const mf_duel_sample *s);
+
 #endif

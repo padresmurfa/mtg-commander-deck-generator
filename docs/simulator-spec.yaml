@@ -1975,6 +1975,50 @@ validation:
         why: >
           A symmetry check passes trivially on an engine where nothing happens, exactly as a sigma
           test passes trivially on zero samples. Assert liveness first, symmetry second.
+        # --- built and measured in sprint 5.0 T5 ---------------------------
+        implementation: mf_duel_sample_live
+        predicate: >
+          games ended AND the length distribution has spread AND the winner is not always the same
+          seat. All three, as an AND.
+        scoped_to_a_mirror: >
+          The third condition is not valid in general. T8 pits two rungs against each other with
+          the better one fixed in seat 0, and it winning every game is a live sample rather than a
+          dead one. Scoping the predicate to a mirror - which is the only place the symmetry check
+          runs - is cheaper than weakening it.
+        the_guard_on_the_guard: >
+          A liveness check that cannot report a dead sample is the vacuous pass it exists to
+          prevent, one level up. The stall fixture is the case that proves it can say no: two
+          boards of 0/4s attacking each other for twenty turns apiece, perfectly symmetric and
+          perfectly dead.
+        measured:
+          corpus: 188 of 190 precons buildable with stand-ins
+          card_table_hash: 349888c09657e4361deac00e01c0f21c   # the table 3.3.1's G4 used
+          games_per_deck: 256
+          seed: 4242
+          end_rate_by_rung:
+            greedy: 0.8938
+            curve-out: 0.8826
+            role-aware: 0.8856
+            sequencing-aware: 0.8855
+          decks_live: 188 of 188, at every rung
+          per_deck_end_rate_range: [0.266, 1.000]
+          slowest_deck: Peer Through Time
+          mean_plies: 26.8 to 27.1          # 13.4 to 13.5 turns per seat
+          sd_plies: 5.3
+          ply_range: [9, 40]
+        the_cap_binds_on_one_game_in_nine: >
+          11-12% of games reach the 20-turn cap and have no winner. Recorded rather than fixed: the
+          cap was argued in T4 before any of this was run, and moving it now would be choosing a
+          horizon from the measurement it is supposed to be independent of. T8 must account for the
+          censoring - a win-rate statistic over a sample where one game in nine has no winner is
+          not a win rate unless the unended games are handled explicitly.
+        self_clock_is_a_lower_bound: >
+          mean_plies is measured over the games that ENDED, so it is biased DOWNWARD as an estimate
+          of a deck's clock: the longest games are exactly the ones the cap censored. The true
+          figure is above 13.5 turns per seat, which makes section 3's solo horizon of 12 if
+          anything too short rather than too long. Provisional in any case - there is no removal
+          yet (T7), the block rule is a placeholder, and no evasion is modelled, so all three will
+          move this.
 
     observables:                      # measured here, never scored
       play_draw_skew:

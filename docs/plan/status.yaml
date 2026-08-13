@@ -839,6 +839,38 @@ tasks:
         blocking. The reverse was very nearly written into the retro as a finding.
     - id: T5
       name: liveness asserted first, as a rate rather than a yes
+      status: done
+      predicate: >
+        mf_duel_sample_live is 13.6's three conditions as an AND - games ended, the length
+        distribution has spread, and the winner is not always the same seat. SCOPED TO A MIRROR:
+        T8 fixes the better rung in seat 0 and it winning every game is a live sample, so the third
+        condition is not valid in general and narrowing the predicate beats weakening it.
+      guard_on_the_guard: >
+        A liveness check that cannot report a DEAD sample is the vacuous pass it exists to prevent,
+        one level up. The stall fixture proves it can say no.
+      measured_on_the_real_corpus: >
+        188 of 190 precons buildable, card table 349888c09657e4361deac00e01c0f21c (the one 3.3.1's
+        G4 used), 256 games per deck, seed 4242. End rate 0.8938 greedy, 0.8826 curve-out, 0.8856
+        role-aware, 0.8855 sequencing-aware; 188 of 188 decks live at every rung; mean 26.8-27.1
+        plies, sd 5.3, range [9, 40]; slowest deck Peer Through Time at 0.266. Measured on the real
+        corpus rather than on a fixture built to end, because a liveness rate taken only from decks
+        chosen to kill is close to vacuous.
+      cap_binds_on_one_game_in_nine: >
+        11-12% of games reach the cap with no winner. NOT fixed: 20 was argued in T4 before any of
+        this was run, and moving it now would be choosing a horizon from the measurement it is
+        supposed to be independent of. T8 must handle the censoring explicitly - a win rate over a
+        sample where one game in nine has no winner is not a win rate.
+      self_clock_is_a_lower_bound: >
+        The mean is over the games that ENDED, so it is biased downward - the longest games are
+        exactly the ones the cap censored. The true figure is above 13.5 turns per seat, which
+        makes section 3's solo horizon of 12 if anything TOO SHORT. That is the calibration 13.6
+        said a mirror could supply, arriving with the sign nobody predicted. Provisional: no
+        removal yet (T7), placeholder block rule, no evasion.
+      mutations: >
+        17, all caught - four only after build-safe variants, because they died at -Werror on an
+        unused parameter and a compiler rejection says nothing about the tests. A third fixture was
+        needed: a deck that kills its own copy SOMETIMES (0.42), because an end rate of 1.0 and one
+        of 0.0 both exercise a rate as a flag.
     - id: T6
       name: seat-swap symmetry bit-exact, and 13.6's half-the-time identity
     - id: T7
