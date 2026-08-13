@@ -1,0 +1,12 @@
+# LeakSanitizer suppressions.
+#
+# Apple's printf family allocates internal scratch for floating-point conversion
+# and never releases it, so every "%g" of a hard value (denormals, 1/3, huge
+# exponents) shows up as a leak rooted in libsystem_c. Confirmed by reading the
+# stacks: frames #0-#8 are malloc -> libsystem_malloc -> libsystem_c -> vsnprintf,
+# with our frame appearing only as the caller.
+#
+# Scoped to the system libraries deliberately. Nothing in src/ is suppressed —
+# a leak we own must fail the build.
+leak:libsystem_c.dylib
+leak:libsystem_malloc.dylib

@@ -1,0 +1,92 @@
+# Commander precon win rates — gate G4's ground truth (design §13.2)
+#
+# Source:      https://playgroup.gg/commander/precons
+# Fetched:     2026-08-10
+# Corpus:      67 decks, 11,855 tracked games played with the stock decklist
+# Normalised:  4-player, 25% baseline. ORDINAL transfer only — this simulator
+#              is 2-player, so the ranks are usable and the rates are not.
+# Gated at:    >= 20 games from >= 10 distinct pilots (the source's own filter)
+#
+# Transcribed by hand because no API or bulk export is offered. The transcription
+# is checked two ways rather than trusted: the row count must be 67 and the games
+# column must sum to 11,855, which is the total the page states for itself. Both
+# hold. A transcription that dropped or invented a row would miss one or both.
+#
+# `mtgjson_name` is the deck's name in the MTGJSON AllDeckFiles bulk that
+# tools/fetch-precons.sh consumes, and it is spelled out rather than derived
+# because five of the 67 differ from Playgroup's spelling. Four are the Final
+# Fantasy decks, which MTGJSON suffixes with their sub-title; their "Collector's
+# Edition" variants were checked and carry an IDENTICAL 100-card list, so the
+# base list is used and the choice changes nothing. The fifth is Playgroup's
+# "Mind Flayarrgh" against MTGJSON's "Mind Flayarrrs", which is the product's
+# printed name; there is one Baldur's Gate deck it could be, so the match is
+# unambiguous.
+#
+# name<TAB>set<TAB>win_rate_percent<TAB>games<TAB>mtgjson_name
+Planeswalker Party	Commander Masters	40.55	119	Planeswalker Party
+Blame Game	Murders at Karlov Manor	35.12	42	Blame Game
+Legends' Legacy	Dominaria United	33.02	53	Legends' Legacy
+Jeskai Striker	Tarkir Dragonstorm	32.94	63	Jeskai Striker
+Eldrazi Unbound	Commander Masters	32.62	128	Eldrazi Unbound
+The Fantastic Four	Marvel Super Heroes	32.18	94	The Fantastic Four
+Tricky Terrain	Modern Horizons 3	31.86	224	Tricky Terrain
+Lorehold Spirit	Secrets of Strixhaven	31.17	239	Lorehold Spirit
+Prismari Artistry	Secrets of Strixhaven	29.47	179	Prismari Artistry
+Miracle Worker	Duskmourn: House of Horror	29.41	102	Miracle Worker
+Goblin Storm	Goblin Storm	29.26	88	Goblin Storm
+World Shaper	Edge of Eternities	28.79	33	World Shaper
+Hail, Caesar	Fallout	28.62	242	Hail, Caesar
+Dance of the Elements	Lorwyn Eclipsed	28.25	300	Dance of the Elements
+Temur Roar	Tarkir Dragonstorm	27.78	63	Temur Roar
+Wakanda Forever	Marvel Super Heroes	27.74	219	Wakanda Forever
+Endless Punishment	Duskmourn: House of Horror	27.29	295	Endless Punishment
+Veloci-Ramp-Tor	The Lost Caverns of Ixalan	26.81	235	Veloci-Ramp-Tor
+Revenant Recon	Murders at Karlov Manor	26.68	104	Revenant Recon
+Scions & Spellcraft	Final Fantasy	26.42	424	Scions & Spellcraft (FINAL FANTASY XIV)
+Creative Energy	Modern Horizons 3	26.34	168	Creative Energy
+Desert Bloom	Outlaws of Thunder Junction	25.98	102	Desert Bloom
+Quick Draw	Outlaws of Thunder Junction	25.71	105	Quick Draw
+Peace Offering	Bloomburrow	25.4	343	Peace Offering
+Animated Army	Bloomburrow	25.0	393	Animated Army
+Explorers of the Deep	The Lost Caverns of Ixalan	24.92	314	Explorers of the Deep
+Mardu Surge	Tarkir Dragonstorm	24.52	105	Mardu Surge
+Sultai Arisen	Tarkir Dragonstorm	24.49	243	Sultai Arisen
+Squirreled Away	Bloomburrow	24.46	327	Squirreled Away
+Revival Trance	Final Fantasy	24.17	272	Revival Trance (FINAL FANTASY VI)
+Eldrazi Incursion	Modern Horizons 3	24.03	284	Eldrazi Incursion
+Exit from Exile	Commander Legends: Battle for Baldur's Gate	24.0	75	Exit from Exile
+Cavalry Charge	March of the Machine	23.83	64	Cavalry Charge
+Limit Break	Final Fantasy	23.83	396	Limit Break (FINAL FANTASY VII)
+Riders of Rohan	Tales of Middle-earth	23.74	267	Riders of Rohan
+Family Matters	Bloomburrow	23.42	269	Family Matters
+Party Time	Commander Legends: Battle for Baldur's Gate	23.21	28	Party Time
+Graveyard Overdrive	Modern Horizons 3	23.18	96	Graveyard Overdrive
+The Hosts of Mordor	Tales of Middle-earth	22.94	200	The Hosts of Mordor
+Food and Fellowship	Tales of Middle-earth	22.9	131	Food and Fellowship
+Abzan Armor	Tarkir Dragonstorm	22.8	148	Abzan Armor
+Science!	Fallout	22.66	107	Science!
+Jump Scare!	Duskmourn: House of Horror	22.59	218	Jump Scare!
+Death Toll	Duskmourn: House of Horror	22.45	108	Death Toll
+Enduring Enchantments	Commander Masters	22.38	124	Enduring Enchantments
+Sliver Swarm	Commander Masters	22.18	62	Sliver Swarm
+Avengers Assemble	Marvel Super Heroes	21.74	276	Avengers Assemble
+Quandrix Unlimited	Secrets of Strixhaven	21.14	259	Quandrix Unlimited
+Call for Backup	March of the Machine	20.97	31	Call for Backup
+Counter Intelligence	Edge of Eternities	20.94	154	Counter Intelligence
+Silverquill Influence	Secrets of Strixhaven	20.08	244	Silverquill Influence
+Turtle Power!	Teenage Mutant Ninja Turtles	19.53	64	Turtle Power!
+Deep Clue Sea	Murders at Karlov Manor	19.39	107	Deep Clue Sea
+Most Wanted	Outlaws of Thunder Junction	19.38	160	Most Wanted
+Scrappy Survivors	Fallout	19.37	111	Scrappy Survivors
+Counter Blitz	Final Fantasy	19.18	352	Counter Blitz (FINAL FANTASY X)
+Doom Prevails	Marvel Super Heroes	19.01	294	Doom Prevails
+Blight Curse	Lorwyn Eclipsed	18.3	209	Blight Curse
+Witherbloom Pestilence	Secrets of Strixhaven	18.16	320	Witherbloom Pestilence
+Blood Rites	The Lost Caverns of Ixalan	18.15	84	Blood Rites
+Ahoy Mateys	The Lost Caverns of Ixalan	18.11	98	Ahoy Mateys
+Obscura Operation	Streets of New Capenna	16.38	29	Obscura Operation
+Mind Flayarrgh	Commander Legends: Battle for Baldur's Gate	16.2	135	Mind Flayarrrs
+Mutant Menace	Fallout	15.37	392	Mutant Menace
+Grand Larceny	Outlaws of Thunder Junction	13.5	163	Grand Larceny
+Elven Council	Tales of Middle-earth	12.5	84	Elven Council
+Deadly Disguise	Murders at Karlov Manor	11.7	94	Deadly Disguise

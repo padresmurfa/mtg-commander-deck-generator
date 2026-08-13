@@ -1,0 +1,1148 @@
+# Deck simulator & optimiser — implementation plan, machine-readable
+#
+# Companion to docs/simulator-plan.md (narrative). This file is the living status
+# skeleton: epics, sprints, gates, and the task split of the CURRENT sprint only.
+#
+# Update contract:
+#   - epics/sprints: fixed up front; `status` changes, structure does not
+#   - `current_sprint`: advanced at each retro
+#   - `tasks`: replaced wholesale at each sprint planning; only ever the current sprint
+#   - `retros`: appended at each retro; never edited in place
+#
+# See docs/simulator-design.md for reasoning, docs/simulator-spec.yaml for values.
+
+meta:
+  status: in_progress
+  current_sprint: "5.0"
+  task_split_valid_for: "5.0"       # task-splitting any other sprint is speculative
+  sprint_order_note: >
+    5.0 is PULLED FORWARD ahead of E4. Not a structural change - E4 is untouched and simply does
+    not start yet, which is the third sprint running and now for a measured reason. G4 failed
+    (3.3.1) and 3.3.2 eliminated the competing explanation, leaving one standing that has been
+    found six times: a null-opponent model with a fixed horizon prices position at zero. Redesigning
+    section 3 against a model that still cannot see position would fit a new objective to the same
+    blindness.
+  # 3.3.1 ended blocked on a FAILED G4 and did not advance. The escalation was answered: diagnose
+  # the feasibility number before redesigning section 3. G4 stays failed throughout 3.3.2 and
+  # nothing in that sprint is permitted to un-fail it.
+  open_gate_failure:
+    gate: G4
+    verdict: fail
+    still_open_in: "5.0"
+    not_rerun_in_5_0: >
+      Nothing in 5.0 un-fails G4. The objective gets its verdict again only when something about
+      the model has actually changed AND the re-run has been pre-registered.
+    measured: "rho -0.0357, z -0.24, corpus 48, scored 48, feasible 15 (sprint 3.3.1)"
+    branch: redesign_objective_section_3
+    not: lambda_tuning
+    branch_deferred_pending: "3.3.2 - why are 33 of 48 real precons infeasible"
+  baseline: greenfield
+  language: c
+  deliverable: cli
+
+# ---------------------------------------------------------------------------
+# What survives from the existing TypeScript app. Reference only, not a foundation.
+# ---------------------------------------------------------------------------
+baseline_disposition:
+  keep_as_reference:
+    - path: src/services/scryfall/
+      why: acquisition logic ported in E1
+    - path: src/services/edhrec/
+      why: acquisition logic ported in E1
+    - path: src/services/tagger/
+      why: role tags feed skill floors (spec ref 7.4)
+    - path: src/services/deckBuilder/deckAnalyzer.ts
+      why: hypergeometric functions are the analytic validation oracle (spec ref 13.1)
+  delete:
+    - src/components/
+    - src/pages/
+    - src/store/
+    - infra/
+  not_part_of_project:
+    - docker/mock-api/
+    - docker-compose.yml MSSQL services
+  note: Git history preserves everything; deletion is safe.
+
+# ---------------------------------------------------------------------------
+# Process. Three levels, asymmetric detail by design.
+# ---------------------------------------------------------------------------
+process:
+  levels:
+    epics:
+      decided: up_front
+      mutable: false
+      detail: goal + sprint split
+    sprints:
+      decided: up_front
+      detail: goal + exit criteria
+      tasks_included: false
+    tasks:
+      decided: at_sprint_start
+      detail: full split, each with a checkable definition of done
+      rule: only the current sprint is ever task-split
+      why: >
+        Task-splitting a future sprint is speculative work that the intervening retro
+        would invalidate.
+  cycle: [sprint_planning, implementation, retro]
+  sprint_planning:
+    inputs: [sprint_exit_criteria, previous_retro_output]
+    output: task list with checkable definitions of done
+  retro:
+    outputs:
+      - id: delivered_vs_exit_criteria
+        note: Includes what was NOT delivered, explicitly.
+      - id: design_amendments
+        note: >
+          Where reality contradicted simulator-design.md or simulator-spec.yaml, both are
+          corrected in the same pass. A design of record that drifts is worse than none.
+      - id: revised_risks
+        note: What got scarier, what stopped mattering.
+      - id: carry_over
+        note: Work moving into the next sprint, with the reason.
+    feeds: next_sprint_planning
+
+# ---------------------------------------------------------------------------
+# Go/no-go gates. Placed as early as the dependency graph allows.
+# ---------------------------------------------------------------------------
+gates:
+  - id: G1
+    sprint: "1.2"
+    name: opcode_coverage
+    question: Can the opcode set represent enough of a real candidate pool?
+    threshold: ">= 0.60 sound; <= 0.30 compromised"
+    spec_ref: "13.5"
+    on_failure: grow the opcode set, or stop
+    result: "pass - 0.9301, inert 90.33% (re-measured 3.1, superseding 0.9325 and 0.9357)"
+
+  - id: G2
+    sprint: "2.1"
+    name: analytic_agreement
+    question: Does the sampler converge to closed-form hypergeometric truth?
+    spec_ref: "13.1"
+    on_failure: the simulation core is wrong; fix before anything builds on it
+    result: "pass - worst cell 2.43 sigma against a 5 sigma tolerance fixed in advance (2.1)"
+  - id: G3
+    sprint: "5.0"                   # measured in 2.3 and 3.1; re-runs here. See sprint_history.
+    sprint_history: ["2.3", "3.1"]
+    name: policy_gap_discriminates
+    question: Does naive-vs-careful separate known-forgiving from known-demanding decks?
+    spec_ref: "5, 13.6"
+    on_failure: the skill ladder is unfounded; redesign section 5
+    result: >
+      defer (2.3, gate pass rate) then FAIL (3.1, continuous score, -2.28 sigma). The failure branch
+      was engaged and NOT taken: section 5 separates the decks perfectly at every horizon, and what
+      fails is measuring it against a SOLO objective at all. Moved to E5, where an opponent supplies
+      the clock a tempo signal needs.
+    instrument: mirror
+    instrument_why: >
+      The 3.1 amendment moved G3 to E5 without naming an opponent, and section 6's opponent is a
+      GAUNTLET needing E4's generator - which put a gate about section 5 behind the whole search
+      epic, against the rule that gates go as early as the dependency graph allows. A mirror needs
+      the interaction layer and nothing else, and is the better instrument besides: it is degenerate
+      as a DECK comparison for exactly the reason it is clean as a POLICY one.
+    prediction: >
+      Pre-registered before the sprint, on 2.3's rule. The gap must STOP DECAYING with the horizon
+      against a mirror; if it still decays 19x from turn 4 to turn 12, the tempo explanation is
+      wrong. Thresholds unchanged: 5 sigma and 2x.
+  - id: G4
+    sprint: "3.3.1"               # measured in 3.3 and deferred; see sprint_history
+    sprint_history: ["3.3"]
+    name: precon_rank_correlation
+    question: Does the objective rank real decks in the right order?
+    method: spearman on precons with n >= 100
+    threshold: "rho >= 0.35 AND rho * sqrt(N-1) >= 2, at 2048 games per deck"
+    threshold_fixed: >
+      Committed in 0edff34, BEFORE the win-rate table landed in the tree in 91f1988 - the only form
+      of "fixed in advance" a repository can show rather than assert.
+    spec_ref: "13.2"
+    on_failure: the objective is wrong; redesign section 3
+    result: >
+      FAIL (3.3.1). Corpus 48, scored 48, rho -0.0357, z -0.24, against a bar of rho >= 0.35 and
+      z >= 2 fixed before the data. Deferred first in 3.3 on an EMPTY corpus - not one of the 190
+      precons resolved - and the stand-in semantics made it measurable without moving a threshold.
+      Not noise: rho is -0.036/-0.021/-0.033/-0.022/-0.027 across five seeds, with 43.3 points of
+      simulated spread against 27.0 of win-rate spread. A precise measurement of no signal.
+    result_diagnostics: >
+      feasible 15 of 48 - the model does not merely rank real decks badly, it cannot PLAY two
+      thirds of them - and best_rung {greedy 38, curve-out 8, role-aware 2, sequencing-aware 0},
+      which is the third pre-registered blind spot confirmed on real decks: the objective ranks
+      decks and does not rank strategies.
+    failure_branch_engaged: true
+    failure_branch_note: >
+      "Redesign section 3", as written before the measurement. NOT lambda tuning; 3.2 left lambda
+      untuned precisely so it could not become the knob reached for here. current_sprint is NOT
+      advanced and no next sprint is task-split - that decision belongs to the branch.
+  - id: G5
+    sprint: "4.3"
+    name: ga_beats_greedy
+    question: Is the landscape optimisable by population methods?
+    threshold: margin exceeding the GA's own noise
+    spec_ref: "12"
+    on_failure: ship greedy; drop the GA
+
+# ---------------------------------------------------------------------------
+# Epics. Fixed. Sprint-split, not task-split.
+# ---------------------------------------------------------------------------
+epics:
+  - id: E0
+    name: Foundations
+    status: done
+    note: >
+      Determinism is built before there is anything to be deterministic about, deliberately.
+      Retrofitting means auditing every accumulator written in the meantime.
+    sprints:
+      - id: "0.1"
+        name: Greenfield skeleton
+        status: done
+        retro: docs/plan/retros/0.1-greenfield-skeleton.md
+        result:
+          checks: 1409
+          line_coverage: 100.00
+          branch_coverage: 97.14
+          function_coverage: 100.00
+        exit_criteria:
+          - repo reset to greenfield
+          - make builds a binary
+          - subcommand shell dispatches
+          - config loads
+          - JSONL artifact writes
+          - one test passes under make test
+      - id: "0.2"
+        name: Memory & process model
+        status: done
+        retro: docs/plan/retros/0.2-memory-process-model.md
+        result:
+          checks: 1661
+          line_coverage: 100.00
+          branch_coverage: 97.16
+          function_coverage: 100.00
+        tasks_doc: docs/plan/sprints/0.2-memory-process-model.md
+        inserted_after: "0.1"
+        why_inserted: >
+          The memory model changes what every later module allocates from, and 0.3 pins output with
+          golden files. Memory after determinism would mean regenerating every golden file the
+          moment it was written.
+        exit_criteria:
+          - no libc allocation outside the memory layer
+          - every module allocates from a caller-supplied arena
+          - environmental failure exits with a distinct code and a machine-readable report
+          - arena stack frames release in O(1) and restore the zero guarantee
+          - orchestrator relaunches the worker at a larger arena size and persists it
+      - id: "0.2.1"
+        name: Pool discipline & alignment
+        status: done
+        retro: docs/plan/retros/0.2.1-pool-discipline.md
+        result:
+          checks: 1754
+          line_coverage: 100.00
+          branch_coverage: 97.00
+          function_coverage: 100.00
+        tasks_doc: docs/plan/sprints/0.2.1-pool-discipline.md
+        inserted_after: "0.2"
+        why_inserted: >
+          A follow-on to 0.2, not a reopening of it: 0.2 is done and its retro is written, and
+          correcting that record in place would destroy it. The pool's contract inverted, so the
+          same ordering argument applies — changing it under a golden file would mean regenerating
+          the golden file.
+        exit_criteria:
+          - a pool holds exactly depth arenas and never creates another
+          - exhausting a pool exits 73 with a report naming the pool, its depth and its kind
+          - stack pools reject an out-of-order release; heap pools accept one
+          - the orchestrator grows the depth the report names, and persists it
+          - mf_arena_alloc_aligned rejects an alignment it cannot honour
+      - id: "0.3"
+        name: Determinism harness
+        status: done
+        retro: docs/plan/retros/0.3-determinism-harness.md
+        result:
+          checks: 2653
+          line_coverage: 100.00
+          branch_coverage: 97.25
+          function_coverage: 100.00
+        tasks_doc: docs/plan/sprints/0.3-determinism-harness.md
+        exit_criteria:
+          - counter-based RNG
+          - layered digest emission
+          - golden-file comparison
+          - 6-way matrix (threads x fresh/resumed) passes on a trivial workload
+
+  - id: E1
+    name: Card pipeline
+    status: active
+    subcommand: preprocess
+    sprints:
+      - id: "1.1"
+        name: Acquisition & oracle normalisation
+        status: done
+        retro: docs/plan/retros/1.1-acquisition.md
+        tasks_doc: docs/plan/sprints/1.1-acquisition.md
+        result:
+          checks: 3119
+          line_coverage: 100.00
+          branch_coverage: 96.84
+          function_coverage: 100.00
+        exit_criteria:
+          - Scryfall bulk ingested
+          - grouped by oracle_id
+          - min price across paper non-foil printings
+          - legality and colour identity resolved
+      - id: "1.2"
+        name: Opcode model
+        status: done
+        gate: G1
+        retro: docs/plan/retros/1.2-opcode-model.md
+        tasks_doc: docs/plan/sprints/1.2-opcode-model.md
+        result:
+          checks: 3245
+          line_coverage: 100.00
+          branch_coverage: 96.44
+          g1_coverage: 0.9357
+          g1_verdict: pass_conditional
+          g1_superseded_by: "1.2.1"
+        gate: G1
+        exit_criteria:
+          - card struct <= 32 bytes
+          - oracle text mapped to opcodes for the modelled subset
+          - coverage measured on a real commander's pool
+      - id: "1.2.1"
+        name: Clause reachability
+        status: done
+        retro: docs/plan/retros/1.2.1-clause-reachability.md
+        tasks_doc: docs/plan/sprints/1.2.1-clause-reachability.md
+        inserted_after: "1.2"
+        why_inserted: >
+          A follow-on to 1.2, not a reopening of it, on the 0.2.1 precedent — and for a sharper
+          reason: G1's number is published, and a published measurement that quietly changes is
+          worse than one superseded in the open. The classifier decided a clause from the first
+          effect keyword it recognised and applied its expressibility check to one branch out of
+          five, so 1.2's figure was overstated and its reasoning wrong in five places.
+        result:
+          checks: 3281
+          line_coverage: 100.00
+          branch_coverage: 96.31
+          g1_coverage: 0.9325
+          g1_verdict: pass_conditional
+          clauses_reclassified: 1454
+          mutations_caught: "14/15"
+        exit_criteria:
+          - reachability, shape and expressibility separable and individually tested
+          - every branch subject to the expressibility gate
+          - land fetch recognised by land type rather than the substring "land"
+          - G1 re-measured and recorded beside 0.9357 rather than over it
+          - every changed 1.2 assertion listed with its argument
+      - id: "1.3"
+        name: Classes, dominance, enrichment
+        status: done
+        retro: docs/plan/retros/1.3-classes-dominance.md
+        tasks_doc: docs/plan/sprints/1.3-classes-dominance.md
+        result:
+          checks: 7449
+          line_coverage: 100.00
+          branch_coverage: 95.34
+          card_struct_bytes: 20
+          pool: 29681
+          equivalence_classes: 8524
+          classes_after_dominance: 2698
+          card_table_bytes: 2923619
+        exit_criteria:
+          - equivalence classes
+          - dominance chains merged into tiered classes
+          - skill floors assigned
+          - precon membership bitmask
+          - price imputation via dominance
+          - binary card table emitted with content hash
+
+  - id: E2
+    name: Opening phase
+    status: done
+    sprints:
+      - id: "2.1"
+        name: Shuffle, draw, mulligan
+        status: done
+        gate: G2
+        retro: docs/plan/retros/2.1-shuffle-draw-mulligan.md
+        tasks_doc: docs/plan/sprints/2.1-shuffle-draw-mulligan.md
+        result:
+          checks: 9191
+          line_coverage: 100.00
+          branch_coverage: 95.41
+          g2_worst_sigma: 2.43
+          g2_tolerance_sigma: 5.0
+          g2_verdict: pass
+        exit_criteria:
+          - unbiased Fisher-Yates
+          - London mulligan with per-policy keep and bottom rules
+          - Monte Carlo agrees with hypergeometric closed forms
+      - id: "2.2"
+        name: Exact turns 1-4
+        status: done
+        retro: docs/plan/retros/2.2-exact-turns.md
+        tasks_doc: docs/plan/sprints/2.2-exact-turns.md
+        result:
+          checks: 10143
+          line_coverage: 100.00
+          branch_coverage: 95.70
+          land_drop_worst_sigma: 1.74
+          land_drop_tolerance_sigma: 5.0
+          land_drop_verdict: pass
+          state_vector_bytes: 13
+          mutations: "35/35"
+          modules_added: [turn, evaluate]
+          modules_deleted: [trial]
+        exit_criteria:
+          - land drops, mana availability, castability, sequencing
+          - end-of-phase state vector produced
+      - id: "2.3"
+        name: Policies & policy gap
+        status: done
+        gate: G3
+        retro: docs/plan/retros/2.3-policies-policy-gap.md
+        tasks_doc: docs/plan/sprints/2.3-policies-policy-gap.md
+        result:
+          checks: 10535
+          line_coverage: 100.00
+          branch_coverage: 95.61
+          g3_sigma: 2.24
+          g3_ratio: 1.14
+          g3_tolerance_sigma: 5.0
+          g3_tolerance_ratio: 2.0
+          g3_secondary_sigma: 17.72
+          g3_verdict: defer
+          g3_defer_reason: >
+            The primary metric is the section 3 pass rate, whose bar section 3 deliberately sets LOW
+            - so it has almost no room to move and separates the decks by only 1.14x while the finer
+            counters separate them at 17.72 sigma. The signal is real; the instrument is too coarse.
+            Re-measure in E3 against a continuous objective.
+          gap_decomposition:
+            mulligan_only: {forgiving: 0.0761, demanding: 0.0745}
+            land_rule_only: {forgiving: 0.0000, demanding: 0.0123}
+          mutations: "23/23"
+          modules_added: [gap]
+        exit_criteria:
+          - greedy and careful policies implemented
+          - gap measured
+          - known-forgiving and known-demanding decks separate
+
+  - id: E3
+    name: Solo evaluation
+    status: active
+    sprints:
+      - id: "3.1"
+        name: Aggregate phases 5+
+        status: done
+        retro: docs/plan/retros/3.1-aggregate-phases.md
+        tasks_doc: docs/plan/sprints/3.1-aggregate-phases.md
+        result:
+          checks: 12584
+          line_coverage: 100.00
+          branch_coverage: 95.34
+          g3_score_sigma: -2.28
+          g3_score_ratio: 0.0
+          g3_score_verdict: fail
+          g3_score_note: >
+            Recorded BESIDE the 2.3 defer, not over it. Both thresholds unchanged; only the
+            instrument changed. The gap is NEGATIVE - careful play deploys less.
+          g3_finding: >
+            A longer horizon makes the policy gap SMALLER. On the land rule alone the gap runs
+            1.308 -> 0.825 -> 0.127 -> 0.001 at turns 4 -> 8 -> 12 -> 20, forgiving deck at exactly
+            0.000 throughout, consistent across six seeds. The careful policy's advantage is TEMPO
+            and a null-opponent model has NO CLOCK. The mulligan component reverses sign for the
+            same reason. Section 5 is not unfounded; a solo objective cannot measure it.
+          g1_coverage: 0.9301
+          g1_inert_share: 0.9033
+          g1_verdict: pass_conditional
+          g1_note: >
+            Three retros predicted this fall and all three predicted it for the wrong reason.
+            Aggregate phases with a null opponent observe more TURNS, not more kinds of event; no
+            reachability rule changed and the inert share went marginally UP. What moved it was a
+            defect the widening exposed - a recurring trigger classified as a one-shot opcode.
+          aggregation_error_relative: {low_curve: 0.001, high_curve: 0.224, taplands: 0.124, artifact_ramp: -0.104}
+          solo_state_bytes: 26
+          mutations: "20/22, 1 dead call removed, 6 tests rewritten"
+          modules_added: [solo]
+        exit_criteria:
+          - development and execution phases in aggregate
+          - full solo run produces a phase-end state
+      - id: "3.2"
+        name: Objective & sampling
+        status: done
+        retro: docs/plan/retros/3.2-objective-sampling.md
+        tasks_doc: docs/plan/sprints/3.2-objective-sampling.md
+        result:
+          checks: 44974
+          line_coverage: 100.00
+          branch_coverage: 95.58
+          modules_added: [objective, strata]
+          mutations: "15 applied, 13 caught, 2 recorded survivors"
+          objective: >
+            Total mana value cast in the AGGREGATE phases, commander included, printed cost, lands
+            zero. Pre-registered before measurement. The fourth clause corrects 3.1: section 3 says
+            the opening contributes zero to fitness beyond pass/fail and 3.1's score summed the
+            whole run.
+          degeneracy_check:
+            ranks_decks: pass          # 4.6x separation against a 0.20 bar
+            ranks_strategies: fail     # greedy is the argmax on all four decks
+            finding: >
+              The carried-in instruction could not be satisfied as written: every observable is
+              some rung's greedy target, because the rungs and the state vector came from the same
+              model of a turn. Decomposed, the mulligan is worth +0.93 to +4.39 and the cast rule
+              -0.17 to -0.83 - OPPOSITE SIGNS, and the worst rung wins DESPITE its cast rule. It
+              also corrects 3.1's disclosure, which named the wrong rung.
+          stratification:
+            verdict: measured_a_loss
+            between_stratum_share: 0.048
+            best_possible_gain: 1.06
+            measured_gain: "0.5-0.8"
+            finding: >
+              Section 7.3's premise is false: the opening-hand land count is not the dominant
+              variance source. The reason is the mulligan, which 7.3 half saw - it discards and
+              redraws exactly the hands the conditioning made unusual.
+          known_bad_decks: "2 of 4 caught; 20-land at 0.81x and 60-land at 0.94x are not"
+          headline: >
+            Three independent measurements landed on one sentence 3.1 wrote: a null-opponent model
+            with a fixed horizon prices position at zero. Nothing was patched to make any of them
+            pass.
+        exit_criteria:
+          - per-strategy scalarisation
+          - "mean + lambda * CVaR_10"
+          - stratified openers under Neyman allocation
+          - solo gate wired as pass/fail
+      - id: "3.3"
+        name: Fixture validation
+        status: done
+        gate: G4
+        retro: docs/plan/retros/3.3-fixture-validation.md
+        tasks_doc: docs/plan/sprints/3.3-fixture-validation.md
+        result:
+          checks: 45216
+          line_coverage: 100.00
+          branch_coverage: 95.60
+          modules_added: [spearman, fixture]
+          corpus: "67 rows, 11855 games, fetched 2026-08-10, 2 checksums asserted"
+          g4_verdict: defer
+          g4_finding: >
+            Not one of the 190 precons can be built. G1 measures CLAUSE coverage and reads 0.9301;
+            per-DECK completeness at that coverage is 0 of 190, because a hundred cards against a
+            per-card miss rate of a few percent leaves essentially no chance all hundred resolve.
+            The two numbers were being read as though one implied the other. That is a second
+            hazard in G1's metric, beside the known one that it rises when less is simulated.
+          defect_found: >
+            The first resolver filled each hole by repeating a card so every deck came out at a
+            hundred, and the gate ran happily on decks that were 11% invented, producing
+            rho = -0.0137 over 35 of them. Recorded as a diagnostic, never as the gate. Refusing to
+            patch is what made the real state visible.
+          harness_fix: >
+            MF_EQ_DBL compared fabs(a-b) > 1e-9, which is FALSE for a NaN, so a test asserting a
+            number passed on 0.0/0.0. Negated for the whole suite; nothing else moved, so nothing
+            else was passing on one.
+        exit_criteria:
+          - precon tables transcribed
+          - Spearman rank correlation above threshold on n>=100 precons
+          - synthetic known-bad decks ranked correctly
+      - id: "3.3.1"
+        name: Fixture resolution
+        status: not_started
+        gate: G4
+        inserted_after: "3.3"
+        why_inserted: >
+          On the 0.2.1, 1.2.1 and 5.0 precedent - an insertion with its reason recorded. G4 did not
+          fail; it could not be measured, because not one precon resolves against the card table. A
+          gate that has not answered is not a gate that has been passed, and E4 does not start
+          first: building the search against an unvalidated objective is exactly what G4 exists to
+          prevent.
+        exit_criteria:
+          - >
+            A substitution semantics, PRE-REGISTERED before it is measured - an unrepresentable card
+            still has a mana cost and a type, and a same-cost vanilla preserves the curve while
+            losing only what the model already cannot see. Choosing it after seeing a correlation is
+            the move pre-registration forbids.
+          - or a wider opcode set, which is G1's own failure branch
+          - per-deck completeness reported beside G1's fraction, everywhere G1 is quoted (done, T4)
+          - G4 re-run with the 3.3 thresholds UNCHANGED, and its verdict recorded
+          - G4 written to the run artifact by mfsim validate, as G1's and G2's are
+
+  - id: E4
+    name: Search
+    status: not_started
+    note: >
+      Built against SOLO fitness deliberately — it is 10-100x faster than gauntlet fitness, so
+      the search machinery is derisked on a cheap objective. Swapping in gauntlet fitness later
+      is a fitness change, not a search rewrite.
+    sprints:
+      - id: "4.1"
+        name: Genome, constraints, mana solver
+        status: not_started
+        exit_criteria:
+          - integer vector over metacard classes
+          - singleton/multiplicity/cost constraints enforced
+          - Karsten-based mana base solver replaces land search
+      - id: "4.2"
+        name: Greedy baseline
+        status: not_started
+        exit_criteria:
+          - marginal-contribution forward selection
+          - backward elimination
+          - produces a legal, scored deck
+      - id: "4.3"
+        name: Genetic algorithm
+        status: not_started
+        gate: G5
+        exit_criteria:
+          - package-aware crossover over synergy-graph components
+          - elite re-evaluation with fresh seeds
+          - diversity niching by strategy
+          - racing and adaptive sampling
+          - GA beats greedy by a margin exceeding its own noise
+
+  - id: E5
+    name: Two-player
+    status: not_started
+    sprints:
+      - id: "5.0"
+        name: Mirror match
+        status: not_started
+        gate: G3
+        inserted_before: "5.1"
+        inserted_after_sprint: "3.1"
+        why_inserted: >
+          On the 0.2.1 and 1.2.1 precedent - an insertion with its reason recorded, not a rewrite of
+          a fixed epic. 3.1's amendment moved G3 to E5 because "an opponent supplies the clock" and
+          did not say WHICH opponent; E5 as split had nowhere to put it, since 5.1's gauntlet needs
+          E4's generator. That put a gate about section 5 behind the entire search epic, against the
+          rule that gates go as early as the dependency graph allows. Numbered 5.0 rather than
+          renumbering 5.1 and 5.2, which are referenced elsewhere.
+        depends_on: interaction layer only    # NOT E4; no generator, taxonomy or bracket banding
+        note: >
+          The mirror is the two-player model's analytic ground truth (13.6): a deck beats a copy of
+          itself exactly half the time, by symmetry. It is NOT a fitness axis - a statistic constant
+          on every deck ranks nothing - and the sprint exists for what follows from the two sides
+          being identical, not from comparing them.
+        exit_criteria:
+          - interaction layer - combat, life totals, removal resolution - sufficient for a game to end
+          - bit-exact seat-swap symmetry - swapping the seats' RNG streams relabels the game log
+          - liveness asserted before symmetry, so the check cannot pass vacuously (the G2 lesson)
+          - G3 re-run against a mirror, both thresholds unchanged, verdict recorded
+          - play/draw skew and self-clock recorded as observables, scored by nothing
+          - G1 re-measured; 3.1 established it falls on reachability when an opponent arrives
+        does_not_settle: >
+          A mirror's clock is self-scaled - a slow deck races a slow deck - so it is a policy
+          instrument and not a metagame. Whether section 5's ladder separates against opponents of
+          UNRELATED speed is 5.1's question. Reading a narrow instrument as a wide result is 2.3's
+          mistake and the retro must not repeat it.
+      - id: "5.1"
+        name: Gauntlet & matchups
+        status: not_started
+        exit_criteria:
+          - opponent decks generated per archetype
+          - matchups banded to same-bracket +/- 1
+          - common random numbers applied across the gauntlet
+      - id: "5.2"
+        name: Bracket-relative fitness & holdout
+        status: not_started
+        exit_criteria:
+          - train/test gauntlet split
+          - overfitting visible as train-test divergence
+          - fitness marked bracket-scoped so nothing averages across brackets
+
+  - id: E6
+    name: Operations & scale
+    status: not_started
+    note: Deferred until runs are long enough to need it.
+    sprints:
+      - id: "6.1"
+        name: Threading
+        status: not_started
+        exit_criteria:
+          - thread pool with configurable count
+          - QoS set to USER_INITIATED
+          - per-thread arenas
+          - lock-free per-game path verified
+          - determinism matrix passes at 1/4/8 threads
+      - id: "6.2"
+        name: Checkpoint & resume
+        status: not_started
+        exit_criteria:
+          - atomic write/retain/restore
+          - card-table hash validated on resume
+          - SIGINT/SIGTERM checkpoint cleanly
+          - resumed run bit-identical to uninterrupted
+      - id: "6.3"
+        name: Power & performance
+        status: not_started
+        exit_criteria:
+          - sleep assertion held for run duration
+          - LPM detect/pause/backoff
+          - SoA layout for per-game mutable state
+          - hot working set measured L1-resident
+          - syscalls per generation confirmed O(1)
+
+  - id: E7
+    name: Brackets & close
+    status: not_started
+    sprints:
+      - id: "7.1"
+        name: Skill brackets end-to-end
+        status: not_started
+        exit_criteria:
+          - all five policy sets
+          - per-bracket colour, radius, budget bounds
+          - precon seeding for low brackets
+          - per-bracket output selection and cardinality
+      - id: "7.2"
+        name: Forge validation & docs
+        status: not_started
+        exit_criteria:
+          - top-K decks validated against Forge (optional)
+          - full validation suite consolidated
+          - docs current
+
+# ---------------------------------------------------------------------------
+# CURRENT SPRINT TASK SPLIT. Replaced wholesale at each sprint planning.
+# ---------------------------------------------------------------------------
+
+tasks:
+  sprint: "5.0"
+  goal: give the model an opponent, and re-run G3 against a mirror with thresholds unchanged
+  why_now: >
+    The escalation from 3.3.1 was answered with (b). Six independent sightings of the same thing -
+    G3's gap decaying 19x (3.1); the strategy axis collapsing via the mulligan (3.2 T1); section
+    7.3's stratification premise false (3.2 T4); flood and screw escaping as tempo failures (3.2
+    T6); greedy winning 38 of 48 real decks and sequencing-aware winning none (3.3.1); and 3.3.2
+    showing it is NOT that the decks cannot be played.
+  may_not_conclude:
+    - >
+      A mirror's clock is SELF-SCALED - a slow deck races a slow deck. It is a policy instrument and
+      not a metagame; whether section 5's ladder separates against opponents of unrelated speed is
+      5.1's question. Reading a narrow instrument as a wide result is 2.3's mistake.
+    - >
+      It is not a fitness axis. A deck beats a copy of itself exactly half the time by symmetry
+      (13.6), so the mirror ranks nothing. Everything follows from the two sides being IDENTICAL.
+  scope_problem_stated_up_front:
+    combat: free of the opcode set - mf_metacard already carries power and toughness
+    removal: >
+      NOT free. There is no MF_OP_DESTROY, no damage, no bounce; the set is TAP_FOR_MANA, ADD_MANA,
+      ENTERS_TAPPED, DRAW, FETCH_LAND, COST_LESS, INERT, UNMATCHED. Removal means GROWING the opcode
+      set, which is G1's own written failure branch, and it will move G1's number.
+    resolution: >
+      Both in scope, neither dropped, sequenced combat-first - a game that ends is what every other
+      exit criterion depends on, and a sprint that spends its first week on opcodes has nothing to
+      test them with.
+  prereg:
+    g3: >
+      Already committed in gates.md before this sprint: the gap must STOP DECAYING against a mirror.
+      If it still decays 19x from turn 4 to turn 12, the tempo explanation is wrong. Thresholds
+      unchanged - 5 sigma and 2x. Components reported separately.
+    best_rung:
+      committed: sprint 5.0 T1, before any interaction code exists
+      claim: >
+        If the absent opponent is what collapsed the strategy axis, then with a mirror in place
+        sequencing-aware must win on MORE THAN ZERO decks and greedy's share must fall below the 79%
+        it holds now (3.3.1: greedy 38, curve-out 8, role-aware 2, sequencing-aware 0, of 48).
+      is_a_gate: false
+      why_written_down: >
+        So that "the opponent fixed it" cannot be asserted after the fact from a number that would
+        have moved anyway. If the collapse SURVIVES an opponent, the clock explanation is wrong
+        after six sightings - a far more important finding than a gate result.
+    liveness_before_symmetry: >
+      Not an ordering preference. A mirror in which no game ever ends is perfectly symmetric and a
+      seat-swap check passes on it - the 2.1 defect, a check reporting agreement it never observed.
+      Liveness is a separate, earlier assertion with its own test, and the rate is a number.
+  split:
+    - id: T1
+      name: pre-register the best_rung prediction, before any interaction code
+      status: done
+      commit: 84b1e60
+    - id: T2
+      name: "mf/duel - two seats and a life total, integers with no padding"
+      status: done
+      named_duel_not_game: mf_game is already the card set - paper, Arena, Magic Online
+      not_a_new_board: >
+        mf_board is one seat's battlefield and mf_live is one seat's whole live game, so two
+        players is a pair of those plus life, a turn and a winner.
+      one_stream_per_seat: >
+        Derived in the module, not at the call site. Sharing one stream would deal both sides
+        identical hands and the mirror would play itself in lockstep - perfectly symmetric,
+        perfectly deterministic, and not a game. That failure is INVISIBLE to a seat-swap check
+        because a lockstep is symmetric, so the streams are tested for pairwise distinctness over
+        a grid AND for actually dealing different cards.
+      frozen_not_sticky: >
+        A finished duel absorbs nothing further. The first draft of the test expected damage to
+        keep landing with the winner pinned, which leaves a final state depending on how much
+        damage was in flight after the game ended.
+      known_omission: >
+        The 21-point commander-damage rule is not modelled - it needs to know which creature dealt
+        which damage and combat here is aggregate. It shortens some real games.
+      mutations: 3, all caught
+    - id: T3
+      name: combat from the power/toughness already in mf_metacard, no new opcodes
+      status: done
+      module: mf/combat
+      not_modelled: [vigilance, trample, flying, evasion, first_strike, deathtouch,
+                     combat_tricks, commander_damage]
+      attack_rule: >
+        Everything that can attack, does. A held-back blocker is a policy dimension section 5's
+        ladder should own; inventing a rung mid-sprint would mean grading the ladder against a rung
+        this sprint made up. It overstates aggressive decks and the mirror cancels that only
+        because both sides do it.
+      block_rule: >
+        A good block, or a chump block only against lethal. A PLACEHOLDER - defensible, not
+        measured - and one fixed rule for both seats, which is what a mirror needs. Blocking is
+        exactly the kind of decision section 5's rungs should eventually differ on.
+      defect_found_by_mutation: >
+        The comment claimed the SMALLEST good blocker takes the job and the loop took the BIGGEST,
+        with every test green either way. It matters because attackers descend by POWER while a
+        blocker needs POWER to beat TOUGHNESS: a 5/1 alongside a 3/9, against a 9/6 and a 2/6 -
+        spend the 9/6 on the 5/1 and the 3/9 walks in. Loop fixed, and that case is now the test.
+      mutations: >
+        6, all caught. Two of the first four died at compile on -Werror (an unused parameter), so
+        build-safe variants were run to confirm the TESTS catch them and not just the compiler.
+      board_api_added: mf_board_leaves - the first thing in this model that leaves the battlefield
+    - id: T4
+      name: the game loop, and a game that ends
+    - id: T5
+      name: liveness asserted first, as a rate rather than a yes
+    - id: T6
+      name: seat-swap symmetry bit-exact, and 13.6's half-the-time identity
+    - id: T7
+      name: removal, and the opcode set grows - G1's failure branch taken deliberately
+    - id: T8
+      name: G3 re-run against the mirror, thresholds unchanged, components separately
+    - id: T9
+      name: play/draw skew and self-clock as observables, scored by nothing
+    - id: T10
+      name: G1 re-measured, and the best_rung prediction adjudicated
+    - id: T11
+      name: retro and amendments
+retros:
+  - sprint: "3.3.2"
+    doc: docs/plan/retros/3.3.2-feasibility-diagnosis.md
+    gates: []
+    design_amendments: 6
+    headline: >
+      H1 SUPPORTED, H2 and H3 REFUTED, against signatures committed before the instrument existed.
+      The 0.5 solo gate rate was calibrated on g3_forgiving and g3_demanding - hand-built fixtures
+      that produce 0.85 - and generalised to a population it had never met. 48 published precons
+      produce a median pass rate of 0.400, unimodal, with 27 of 48 between 0.30 and 0.50, so the bar
+      sits on the UPPER SHOULDER of the distribution rather than below its mass; 20 of the 33
+      infeasible decks are near-misses in [0.35, 0.50). H2 is refuted with its SIGN REVERSED, which
+      is a finding rather than a null: rho(pass_rate, substituted) = +0.23 and all of it is carried
+      by substituted_lands at +0.2335, which is 3.3.1's own pre-registered "a substituted land taps
+      unconditionally, so it OVERSTATES" arriving as a measurement instead of a caveat. Not the mana
+      base either - rho(pass_rate, lands) = -0.04 and feasible and infeasible decks share a median
+      of 38 lands. NONE OF IT RESCUES G4: rho is over fitness, which every scored deck carries
+      whether feasible or not, and recomputing from the per-deck rows gives -0.0357 exactly. The bar
+      was NOT moved - 3.1's rule, and H1 being supported is a finding rather than a licence. What it
+      changes is the live explanation: the model plays real decks fine, so "redesign section 3" is
+      about the objective and not about playability. Also found: rho(pass_rate, fitness) = 0.83, so
+      section 9's "two numbers doing two jobs" are substantially one number.
+    carry_over: [where_the_feasibility_bar_belongs, whether_the_gate_is_worth_keeping,
+                 g4_still_failed, precon_prices, price_fixture, lambda_untuned]
+  - sprint: "3.3.1"
+    doc: docs/plan/retros/3.3.1-fixture-resolution.md
+    gates: [G4]
+    design_amendments: 8
+    headline: >
+      G4 FAILED. rho = -0.036 over 48 real precons, and the objective's ranking of real decks is
+      indistinguishable from chance. 3.3 deferred the gate on an empty corpus; the pre-registered
+      stand-in semantics made it measurable - 188 of 190 precons resolve, 48 of 48 corpus rows
+      score - with the thresholds untouched, which is 3.1's rule about never improving an
+      instrument and loosening a bar at once. Not a noisy weak signal: rho clusters tightly about
+      zero across five seeds, with 43.3 points of simulated spread against 27.0 of win-rate spread.
+      Of the three blind spots pre-registered in advance, the THIRD is the one that bit - "the
+      objective ranks decks and does not rank strategies" - and it is now confirmed against real
+      decks: greedy wins 38 of 48 and sequencing-aware, the top of section 5's ladder, wins NONE.
+      Two diagnostics were added because a failing rho cannot distinguish "ordered no better than
+      chance" from "cannot be played at all", and both were already being computed and discarded:
+      feasible is 15 of 48, so the model cannot play two thirds of real, published, playable decks.
+      rho over that feasible subset is deliberately NOT computed - a subgroup chosen after seeing a
+      failure is the move pre-registration forbids, and if it becomes a gate it is pre-registered
+      first. Also delivered: per-deck completeness beside G1 in the preprocess artifact, G4 emitted
+      by mfsim validate (silent when no corpus is configured, because a defer nobody asked for
+      reads like a gate that ran), and a correction - G1 is a fraction over CARDS, not clauses, as
+      3.3 mislabelled it in design, spec and its own retro.
+    carry_over: [what_to_do_about_a_failed_g4, precon_prices, price_fixture, lambda_untuned,
+                 stratify_on_the_kept_hand]
+  - sprint: "3.3"
+    doc: docs/plan/retros/3.3-fixture-validation.md
+    gates: [G4]
+    design_amendments: 8
+    headline: >
+      G4 COULD NOT BE MEASURED, because not one of the 190 precons can be built. The sprint did
+      everything the gate needs - the 67-row corpus transcribed, tracked and checksummed against the
+      11,855-game total the source states for itself; a rank correlation with midranks for ties,
+      checked against hand-computed cases; precon lists resolving through the card table; and the
+      thresholds committed BEFORE the data existed in the tree, which is the only form of "fixed in
+      advance" a repository can show rather than assert. Then the corpus came out empty: best case
+      one missing card, mean 9.3, worst 22, and 19% of precons have an unrepresentable COMMANDER.
+      Corpus 48, scored 0, VERDICT DEFER - not fail, because FAIL is a claim about the objective and
+      an empty corpus supports none. The finding is about G1's metric rather than G4's: G1 measures
+      CLAUSE coverage and reads 0.9301, and per-DECK completeness at that coverage is 0 of 190,
+      because a hundred cards against a per-card miss rate of a few percent leaves essentially no
+      chance all hundred resolve. The two numbers were being read as though one implied the other.
+      That is a second hazard in G1, beside the known one that it rises when less is simulated. The
+      defect that hid it was ours and is the more instructive half: the first resolver filled each
+      hole by repeating a card, so every deck came out at a hundred and the gate ran happily on
+      decks that were 11% invented, producing rho = -0.0137 over 35 of them - recorded as a
+      diagnostic and never as the gate. Refusing to patch is what made the real state visible. Also
+      found: MF_EQ_DBL compared fabs(a-b) > 1e-9, which is FALSE for a NaN, so a test asserting a
+      number passed on 0.0/0.0; negated for the whole suite. Pre-registration named three ways the
+      number could be ambiguous and missed the way it could fail to exist.
+    carry_over: [g4_itself, substitution_semantics, g4_in_validate, precon_prices]
+  - sprint: "3.2"
+    doc: docs/plan/retros/3.2-objective-sampling.md
+    gates: []
+    design_amendments: 12
+    headline: >
+      The sprint set out to fix a metric and found that three of its four measurements point at the
+      same thing, which is not the metric. The objective was chosen and pre-registered - total mana
+      value cast in the AGGREGATE phases - and the fourth clause is a correction to 3.1, since
+      section 3 says the opening contributes zero to fitness beyond pass/fail and 3.1's score summed
+      the whole run. The carried-in instruction, "choose an objective that is not any policy's own
+      objective", CANNOT BE SATISFIED AS WRITTEN: every quantity the state vector records is some
+      rung's greedy target, because the rungs and the vector came from the same model of a turn, so
+      looking for an objective no rung optimises is looking for a quantity the model cannot see.
+      What replaces it is two checkable conditions - does it rank DECKS, does it rank STRATEGIES.
+      The first passes at 4.6x against a 0.20 bar. The second FAILS: greedy is the argmax on all
+      four decks, and decomposed one parameter at a time the mulligan is worth +0.93 to +4.39 while
+      the cast rule is worth -0.17 to -0.83. OPPOSITE SIGNS - the worst rung wins DESPITE its cast
+      rule - which also corrects 3.1's disclosure, since expensive-first loses everywhere and the
+      score is nearer cheapest-first's rule. Then the same root cause turned up twice more in
+      unrelated tasks. Section 7.3's premise is FALSE: the opening-hand land count is not the
+      dominant variance source but 3-7% of it, the ceiling on stratifying is 1.06x against a
+      predicted 3-5x, and end to end it is a LOSS - because the mulligan discards and redraws
+      exactly the hands the conditioning made unusual, which 7.3 half saw and drew the opposite
+      conclusion from. And two of section 13.3's four known-bad decks are not caught: sixty lands
+      scores 0.94 of a real deck and clears the feasibility gate MORE OFTEN than the deck it should
+      lose to. All three are one sentence 3.1 wrote - a null-opponent model with a fixed horizon
+      prices position at zero. Nothing was patched to make any of it pass. Two defects the work
+      found: a conditional shuffle that biased the library UNDER the hand by 0.4 mana and slipped
+      past an agreement test whose bar was wide enough to hold a bias, and a clean, plausible,
+      WRONG subset-sum explanation refuted by a hand of {2,3} against a budget of 3 - now a test so
+      it cannot come back.
+    carry_over: [the_clock, price_pair_fixture, stratify_the_kept_hand, lambda]
+  - sprint: "3.1"
+    doc: docs/plan/retros/3.1-aggregate-phases.md
+    gates: [G3, G1]
+    design_amendments: 5
+    headline: >
+      The sprint existed because 2.3 deferred G3 with an instruction - re-measure against a
+      continuous objective - and the measurement says the instruction rested on a false premise. A
+      LONGER HORIZON MAKES THE POLICY GAP SMALLER. On the land rule alone the gap runs 1.308 at turn
+      4, 0.127 at turn 12 and 0.001 at turn 20, with the forgiving deck at exactly 0.000 throughout
+      and the same shape on all six seeds tried - a 19x decay. The careful policy's whole advantage
+      is TEMPO and a null-opponent model has NO CLOCK, so being a turn behind costs nothing given
+      enough turns. It generalises past sequencing: the mulligan component REVERSES SIGN against a
+      12-turn score, because a mulligan costs cards and the early game it buys is priced at zero.
+      Every skilled decision in section 5's ladder trades long-run resources for short-run position,
+      and this model prices position at zero. So G3 FAILED at -2.28 sigma - and its written failure
+      branch, "section 5 is unfounded", was engaged and NOT taken, because section 5 separates the
+      decks perfectly at every horizon. What cannot be done is measuring it solo; G3 moves to E5.
+      Also disclosed rather than patched: the score it was measured against is close to
+      expensive-first's own objective, so pre-registration protected against fitting the metric to
+      the answer and not against picking a degenerate one. G1 fell to 0.9301 as three retros
+      predicted and for a reason none of them gave - aggregate phases with a null opponent observe
+      more TURNS, not more kinds of event, so no reachability rule changed and the inert share went
+      marginally UP; what moved it was a recurring trigger classified as a one-shot opcode. Section
+      3's exact/aggregate boundary was measured for the first time and HOLDS, once the statistic is
+      the relative error rather than the absolute one - but the error is deck-differential at 10-20%,
+      which is a bias G4 cannot see. Mutation testing removed a dead untap call that looked like
+      diligence and stated a rule the code did not follow.
+    carry_over: [objective_choice, what_the_solo_objective_is_for]
+  - sprint: "2.3"
+    doc: docs/plan/retros/2.3-policies-policy-gap.md
+    gates: [G3]
+    design_amendments: 5
+    headline: >
+      G3 DEFERRED, and the reason is a bigger finding than the verdict. The policy gap was decomposed
+      because design section 4 asserts the mulligan is "a large part" of it and nothing had tested
+      that: it is right, and that turns out to be a problem for section 5. The mulligan is ~88% of
+      the gap and is the SAME SIZE on both decks, so it discriminates nothing and nearly cancels in a
+      difference of differences; the sequencing component is exactly 0.0000 on the deck with nothing
+      to sequence and +0.0123 on the deck built to punish it - a perfect qualitative separation, and
+      small. Averaging them dilutes a clean signal with a large constant. The primary metric moved
+      0.86 to 0.94 on BOTH decks because section 3 deliberately sets the opening bar low, so the
+      right gate for fitness is a poor instrument for a policy gap - the three-way pass/defer/fail
+      branch was written down beforehand precisely so this could not be recorded as "no skill signal
+      exists". The threshold rule itself was also wrong and is disclosed rather than patched: "5x a
+      measured noise floor" is a significance test, a noise floor shrinks as 1/sqrt(N), and the same
+      comparison read 1.26 sigma at 500 games a block and 5.32 at 8000. Gates now need an effect size
+      too, which no sample size can inflate - and under both criteria the verdict is unchanged at
+      every sample size and all eight seeds. Mutation testing found a survivor that was not an
+      equivalent mutant but a BETTER policy: taking the expensive ramp first beats curving out,
+      because a mana creature is summoning sick and a fetched land is not.
+    carry_over: []
+  - sprint: "2.2"
+    doc: docs/plan/retros/2.2-exact-turns.md
+    gates: []
+    design_amendments: 5
+    headline: >
+      The opening phase is real: turns 1-4 exactly, mana as a bipartite matching rather than a count
+      per colour, castability decided pip by pip by Hall's condition, and a 13-byte state vector with
+      no padding and no float. mf/trial is deleted after carrying the determinism matrix since 0.3,
+      and the six-way matrix now runs on the thing that will actually be optimised - with the kept
+      hand as the resume state, which is genuinely all a half-finished game carries where the
+      stand-in's two integers were chosen to look plausible. The design's named oracle for land drops
+      LOOKED wrong - its comment claims a conjunction over turns and its body computes one term - and
+      exact rational arithmetic against brute-force enumeration showed it right: exactly one card is
+      seen per turn and the requirement rises by one per turn, so the events are nested and the
+      conjunction collapses. Checking before accusing is the only reason a plausible complaint did
+      not become a wrong fix. Mutation testing did the real work again: 35 mutations, 4 tests
+      rewritten for pinning nothing, and two defects - a fetched-land flag that turned out to have no
+      observable effect at all, which is only possible if entering the battlefield changes no mana,
+      and it did not, so a turn-one Sol Ring paid for nothing behind it. The coverage floor found a
+      process defect rather than a code one: run_turn_tests was never registered in the suite, so a
+      module whose own tests all passed contributed nothing to make check.
+    carry_over: []
+  - sprint: "2.1"
+    doc: docs/plan/retros/2.1-shuffle-draw-mulligan.md
+    gates: [G2]
+    design_amendments: 3
+    headline: >
+      G2 PASSED — worst cell 2.43 sigma against a 5 sigma tolerance that was written down before any
+      code ran, because a threshold chosen after seeing the result is not a gate. Two things were
+      decided in advance and both mattered: the tolerance, and the fact that G2 covers the shuffle
+      and the draw but NOT the mulligan, which is a decision procedure with no closed form. Saying
+      so up front avoided the overclaim 1.2.1 spent a sprint unwinding on G1. A 3.19 sigma worst
+      cell on a larger sweep was chased across eight seeds rather than accepted — it wandered both
+      directions and averaged -0.48 sigma, so noise, and the check was worth it because a
+      systematic bias in a shuffler never fails, it just makes every later number wrong the same
+      way. The unit suite caught a real defect: with zero samples the standard error is infinite,
+      every deviation divides down to zero sigma, and the gate reported agreement it had never
+      observed — a gate that passes without measuring anything, two lines from shipping. Also
+      recorded: what Tagger was for, since reference/legacy-ts is now one sprint from deletion.
+    carry_over: []
+  - sprint: "1.3"
+    doc: docs/plan/retros/1.3-classes-dominance.md
+    gates: []
+    design_amendments: 4
+    headline: >
+      The measurement the sprint existed to take: 29,681 commander-legal representable cards collapse
+      to 8,524 equivalence classes and then to 2,698 after dominance chaining — 11x, against a design
+      estimate of 2.7x that described a single commander's candidate pool rather than the legal set.
+      The same condition G1 carries applies: 90.3% of clauses are inert, so much of the collapse is
+      cards becoming "a 2/2 that does nothing observable", and the count will RISE when E3 widens the
+      phases. The 32-byte struct carried out of 1.2 turned out to be the prerequisite for everything
+      rather than an afterthought, because §7.1 does not class cards BY the struct — the struct IS
+      the class; it lands at 20 bytes. Three defects, none found by a test written in advance: a
+      dominance roster built in class order rather than preference order, which would have put the
+      WORSE card first on expansion; a distinct-count that was 361 million strcmp calls behind a
+      comment claiming it was linear; and two wire-format constants that were simply miscounted.
+      Mutation testing did the real work — the first dominance pass caught 7 of 11, and every
+      survivor was a rule that another rule happened to shadow. The design also described two structs
+      as one: it listed oracle_id and name inside a 32-byte budget, which an oracle id alone exceeds.
+    carry_over: []
+  - sprint: "1.2.1"
+    doc: docs/plan/retros/1.2.1-clause-reachability.md
+    gates: [G1]
+    design_amendments: 3
+    headline: >
+      An offhand remark that dual lands often enter tapped found the same defect five times: the
+      classifier decided a clause from the first effect keyword it recognised and asked whether the
+      model could express what it found in one branch out of five. 162 lands entering tapped only
+      under a condition were recorded as entering tapped outright; 257 variable cost reductions as
+      fixed; and a land fetch was recognised as ramp only when it happened to contain the letters
+      l-a-n-d, so "Plains or Island" was ramp and "Mountain or Forest" was a spell tutor. G1
+      re-measured at 0.9325, superseding 0.9357 — but 1,454 clauses (2.0%) changed classification
+      for that 0.0032 move, a near-cancellation of two large opposite corrections rather than
+      evidence the first answer was nearly right. The finding that outlasts the sprint is a hazard
+      in the metric itself: G1 rises when LESS is simulated, so the inert share is now quoted beside
+      the fraction everywhere. Mutation testing found the Island accident had reappeared as a dead
+      || alternative, and three tests that pinned nothing.
+    carry_over: []
+    addendum:
+      what: precon decklists acquired, and two design assumptions corrected
+      why: >
+        1.3 T6 had been recorded as blocked on precon contents, on the belief that only Moxfield,
+        MTGGoldfish and EDHREC held them and all behind HTML meant for humans. MTGJSON publishes
+        them as CC0 bulk JSON keyed by scryfallOracleId — the key 1.1 already builds the card set
+        around — joining at 16,624 of 16,624 entries. The blocker was an unchecked assumption, not
+        a fact, and it was recorded as a blocker without anyone going to look.
+      corrections:
+        - >
+          190 Commander precons exist, not ~68. The ~68 was the count with WIN RATES (67), a
+          different and much smaller set; the design carried it as though it were both.
+        - >
+          The membership bitmask cannot be a per-card field: 190 bits is 24 bytes against a
+          32-byte struct budget, the set grows every release, and 83% of cards are in no precon at
+          all. It becomes a side table, and T1 gets those bytes back.
+        - >
+          A precon has one OR TWO commanders — five of the 190 are partner pairs.
+      also: >
+        spec meta.current_sprint had been stale at "0.2" for five sprints. Corrected, and pointed
+        at status.yaml as the authority so it cannot drift again.
+  - sprint: "0.1"
+    doc: docs/plan/retros/0.1-greenfield-skeleton.md
+    gates: []
+    design_amendments: 4
+    headline: >
+      The coverage floor changed the design rather than merely measuring it: OOM branches no test
+      could reach forced an allocation seam, which turned into a standing OOM sweep. Branch
+      coverage 84% -> 92% from that alone.
+    carry_over: [ci_decision]
+  - sprint: "0.2"
+    doc: docs/plan/retros/0.2-memory-process-model.md
+    gates: []
+    design_amendments: 6
+    headline: >
+      The 0.1 allocation seam was superseded by its own logic: the seam made out-of-memory branches
+      testable, arenas made them nonexistent. A testable failure path beats an untested one, and no
+      failure path beats either. The coverage floor also caught two real defects — cache-line
+      alignment computed from an offset rather than an address, and a reader over-reserving arena
+      that the high-water mark would have made permanent.
+    carry_over: [ci_decision]
+  - sprint: "0.2.1"
+    doc: docs/plan/retros/0.2.1-pool-discipline.md
+    gates: []
+    design_amendments: 5
+    headline: >
+      The pool was the one place the design argued against itself: 0.2 spent its length removing
+      recoverable environmental failure, then built a pool that ran dry, quietly made another arena
+      and incremented a counter nobody read. It now dies like everything else and the orchestrator
+      grows the depth. Two 0.2 comments were also wrong and are now proved by static assertion:
+      alignof(max_align_t) is 8 here, not 16, and the documented alignment contract was never
+      enforced. No defect was found by a failing test this sprint — the floor found dead weight and
+      one untestable branch — but a surviving mutation found a weak assertion the branch count could
+      not see.
+    carry_over: []
+  - sprint: "0.3"
+    doc: docs/plan/retros/0.3-determinism-harness.md
+    gates: []
+    design_amendments: 4
+    headline: >
+      The coverage floor found nothing — a hash and a bump counter barely branch — and mutation
+      testing found four tests that passed for the wrong reason, including a shift test that only
+      looked in one direction and a fold-order test that changed both sides at once. The CI
+      question, deferred twice, is closed: local only, because the build is pinned to one machine
+      and a hosted runner would compile a different program. Two mutations survive and are recorded:
+      both weaken the digest's internal mixing without changing anything its contract exposes, which
+      is the nature of a hash.
+    carry_over: []
+  - sprint: "1.2"
+    doc: docs/plan/retros/1.2-opcode-model.md
+    gates: [G1]
+    design_amendments: 3
+    headline: >
+      G1 passed at 0.9357 against the real pool — and the condition matters more than the number.
+      89.4% of clauses are INERT rather than modelled, because the simulated phases are only the
+      turn-1-4 feasibility gate; the figure must be re-measured when E3 widens what is observed, and
+      it will fall. The first measurement read 0.9249 and was wrong in a way review would have
+      missed: 481 dual-land clauses, "{T}: Add {W} or {U}", were being read as fixed {W} — colour
+      flexibility on turn two being close to the entire thing the opening phase measures. Found by
+      interrogating the data rather than the code, which is the same lesson 1.1 learned about JSONL
+      arriving in a different disguise.
+    carry_over: [card_struct_32_bytes, unmatched_report]
+  - sprint: "1.1"
+    doc: docs/plan/retros/1.1-acquisition.md
+    gates: []
+    design_amendments: 3
+    headline: >
+      The first sprint that produces something real. Two blocking decisions were
+      answered — preprocessing runs in C, and it consumes a bulk file rather than
+      fetching one — and design §8 was amended with the superseded paragraph quoted
+      rather than rewritten. The coverage floor found two branches a refactor had
+      just made unreachable; mutation testing found a rule with no test, which no
+      printed card can currently distinguish, so the test that pins it is
+      deliberately synthetic. The most useful failure was in a test: a hand-counted
+      literal length turned valid input into malformed input and the scanner was
+      suspected for a long time first.
+    carry_over: []
