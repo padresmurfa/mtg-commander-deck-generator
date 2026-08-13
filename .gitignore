@@ -20,6 +20,11 @@ coverage/
 # Run artifacts
 runs/
 *.jsonl
+# ...but test fixtures are not run artifacts. `*.jsonl` silently swallowed three
+# of them for eleven sprints: the suite stayed green because the files existed
+# untracked on every machine that had created them, and a fresh clone failed.
+# Found when main first built this tree from git alone.
+!tests/fixtures/*.jsonl
 
 # Card data (produced by `mfsim preprocess`)
 data/
