@@ -873,6 +873,53 @@ tasks:
         of 0.0 both exercise a rate as a flag.
     - id: T6
       name: seat-swap symmetry bit-exact, and 13.6's half-the-time identity
+      status: done
+      a_relabelling_moves_three_things: >
+        13.6 states the check as THE SAME GAME WITH THE TWO PLAYERS' NAMES EXCHANGED, and a player
+        is a stream, a policy AND whether it is on the play. Swapping only the streams gives a
+        different game rather than the same one renamed. So the seating is one struct the module
+        can flip whole (mf_seating / mf_seating_mirror, an involution asserted rather than assumed)
+        instead of two booleans a caller can flip half of.
+      check: >
+        mf_duel_symmetric runs the game and its relabelling and requires equal length, permuted
+        winner and active seat, and both seats byte-for-byte identical the other way round. Two
+        games, not 1e5 - the statistical form sees only asymmetries that survive averaging.
+      liveness_first_with_a_test_that_says_why: >
+        The stall fixture is perfectly symmetric and perfectly dead. One test passes the symmetry
+        check on it and then fails mf_duel_sample_live on the next line, so "symmetry passes" can
+        never be read as "the engine works".
+      identity_is_exact: >
+        mf_duel_paired_sample runs each game with its relabelling. The halves have the same length
+        and opposite winners, so each seat wins PRECISELY half of what ended and the ended count is
+        even. Holds for a lopsided matchup too (greedy vs sequencing-aware), because it is a
+        statement about SEATS - which is what makes a paired sample the right shape for T8. The
+        test contrasts it against an unpaired sample of the same size, where the seats do not split
+        evenly, so what pairing bought is visible rather than asserted.
+      process_note: >
+        T6's tests were written before the code but never OBSERVED failing - the functions did not
+        exist, so the suite was a compile error rather than a red assertion. Mutation testing is
+        the substitute CLAUDE.md section 1 names for exactly this case, and the confidence here
+        rests on it.
+      mutations: >
+        19, all caught - but FIVE SURVIVED THE FIRST PASS, and they were every mutation that made
+        the check WEAKER, including replacing the whole comparison with `return true`. Mutations
+        that made it stricter were all caught and mutations that made it laxer were not, which is
+        the wrong way round and is 2.1's defect again: a checker with no failing case reports
+        agreement it never observed. Cause: every test asserted only that symmetry HELD, so
+        nothing could tell a working comparison from a constant. Fixed by splitting the pure
+        predicate mf_duel_relabels(a, b) out of the runner so it can be fed pairs that are NOT
+        relabellings and required to say no - a game against itself, a different game, and one
+        perturbation per branch.
+      lesson: >
+        A symmetry check needs a case where it FAILS, and this one shipped without one. The
+        general form: any predicate only ever asserted true is indistinguishable from a constant,
+        and mutation testing is what makes that visible.
+      suite_speed: >
+        The first version sampled 512 games in several tests and pushed `make check` past twenty
+        minutes, almost all of it the ASan build (whole suite, -O0, two sanitizers). Measured at
+        64, 128 and 192 games every assertion holds identically - the identity is exact at any
+        size - so the samples were cut about fourfold and re-pinned. A suite nobody will wait for
+        is a suite that stops being run.
     - id: T7
       name: removal, and the opcode set grows - G1's failure branch taken deliberately
     - id: T8

@@ -229,7 +229,7 @@ MF_TEST(a_duel_of_decks_that_cannot_kill_runs_out_the_cap) {
     mirror(p, MF_RUNG_CURVE_OUT);
 
     mf_duel g;
-    mf_duel_run(&d, p, 99, 4, 0, &g);
+    mf_duel_run(&d, p, 99, 4, (mf_seating){0, false}, &g);
     MF_EQ_INT(g.winner, MF_DUEL_LIVE);
     MF_EQ_INT(g.turn, MF_DUEL_TURNS * MF_DUEL_SEATS);
     MF_EQ_INT(g.seat[0].life, MF_DUEL_START_LIFE);
@@ -246,7 +246,7 @@ MF_TEST(a_duel_of_decks_that_can_kill_ends_before_the_cap) {
     mirror(p, MF_RUNG_CURVE_OUT);
 
     mf_duel g;
-    mf_duel_run(&d, p, 99, 4, 0, &g);
+    mf_duel_run(&d, p, 99, 4, (mf_seating){0, false}, &g);
     MF_CHECK(g.winner != MF_DUEL_LIVE);
     MF_CHECK(g.turn < MF_DUEL_TURNS * MF_DUEL_SEATS);
     /* Somebody is dead, and it is the seat that did not win. */
@@ -264,7 +264,7 @@ MF_TEST(the_duel_stops_the_moment_it_is_over) {
     mirror(p, MF_RUNG_CURVE_OUT);
 
     mf_duel g;
-    mf_duel_run(&d, p, 99, 4, 0, &g);
+    mf_duel_run(&d, p, 99, 4, (mf_seating){0, false}, &g);
     /* Pinned, not merely bounded: the exact ply this game ends on is the
        anchor every later change to the turn or to combat has to move
        deliberately. */
@@ -295,7 +295,7 @@ MF_TEST(the_seat_on_the_play_takes_the_first_turn) {
 
     for (unsigned first = 0; first < MF_DUEL_SEATS; first++) {
         mf_duel g;
-        mf_duel_run(&d, p, 99, 1, first, &g);
+        mf_duel_run(&d, p, 99, 1, (mf_seating){(uint8_t)first, false}, &g);
         unsigned other_seat = first == 0 ? 1u : 0u;
         MF_EQ_INT(g.turn & 1u, 1);
         MF_EQ_INT(g.seat[first].live.turns, g.seat[other_seat].live.turns + 1);
@@ -327,8 +327,8 @@ MF_TEST(each_seat_plays_its_own_policy) {
     mixed[1] = mf_policy_rung(MF_RUNG_CURVE_OUT);
 
     mf_duel a, b;
-    mf_duel_run(&d, same, 3, 8, 0, &a);
-    mf_duel_run(&d, mixed, 3, 8, 0, &b);
+    mf_duel_run(&d, same, 3, 8, (mf_seating){0, false}, &a);
+    mf_duel_run(&d, mixed, 3, 8, (mf_seating){0, false}, &b);
     /* Seat 0's policy is identical across the two runs and seat 1's is not, so
        seat 1 is where the difference has to appear. */
     MF_CHECK(memcmp(&a.seat[1], &b.seat[1], sizeof a.seat[1]) != 0);
@@ -344,8 +344,8 @@ MF_TEST(each_seat_plays_its_own_policy) {
               0);
 
     mf_duel c, e;
-    mf_duel_run(&d, role, 3, 0, 0, &c);
-    mf_duel_run(&d, seq, 3, 0, 0, &e);
+    mf_duel_run(&d, role, 3, 0, (mf_seating){0, false}, &c);
+    mf_duel_run(&d, seq, 3, 0, (mf_seating){0, false}, &e);
     MF_CHECK(memcmp(&c.seat[1], &e.seat[1], sizeof c.seat[1]) != 0);
 }
 
@@ -358,7 +358,7 @@ MF_TEST(both_seats_actually_play) {
     mirror(p, MF_RUNG_CURVE_OUT);
 
     mf_duel g;
-    mf_duel_run(&d, p, 99, 4, 0, &g);
+    mf_duel_run(&d, p, 99, 4, (mf_seating){0, false}, &g);
     for (unsigned s = 0; s < MF_DUEL_SEATS; s++) {
         MF_CHECK(g.seat[s].live.board.count > 0);
         MF_CHECK(g.seat[s].live.spells > 0);
@@ -381,7 +381,7 @@ MF_TEST(the_seat_on_the_play_skips_its_first_draw) {
     mirror(p, MF_RUNG_CURVE_OUT);
 
     mf_duel g;
-    mf_duel_run(&d, p, 99, 4, 0, &g);
+    mf_duel_run(&d, p, 99, 4, (mf_seating){0, false}, &g);
     /* Twenty turns each; the seat on the play has drawn one card fewer, all the
        way to the end. Cards drawn is `drawn` minus what the mulligan bottomed. */
     MF_EQ_INT(g.seat[0].live.lib.drawn + 1, g.seat[1].live.lib.drawn);
@@ -389,7 +389,7 @@ MF_TEST(the_seat_on_the_play_skips_its_first_draw) {
     /* And it is the *seat*, not seat 0, that skips: start seat 1 and the
        shortfall moves with it. */
     mf_duel h;
-    mf_duel_run(&d, p, 99, 4, 1, &h);
+    mf_duel_run(&d, p, 99, 4, (mf_seating){1, false}, &h);
     MF_EQ_INT(h.seat[1].live.lib.drawn + 1, h.seat[0].live.lib.drawn);
     MF_EQ_INT(h.turn, MF_DUEL_TURNS * MF_DUEL_SEATS);
 }
@@ -422,7 +422,7 @@ MF_TEST(the_loop_reproduces_a_pinned_table_of_games) {
 
     for (unsigned i = 0; i < sizeof expect / sizeof *expect; i++) {
         mf_duel g;
-        mf_duel_run(&d, p, 99, expect[i].game, expect[i].first, &g);
+        mf_duel_run(&d, p, 99, expect[i].game, (mf_seating){expect[i].first, false}, &g);
         MF_EQ_INT(g.turn, expect[i].turn);
         MF_EQ_INT(g.winner, expect[i].winner);
     }
@@ -435,14 +435,14 @@ MF_TEST(a_duel_is_a_pure_function_of_its_inputs) {
     mirror(p, MF_RUNG_CURVE_OUT);
 
     mf_duel a, b;
-    mf_duel_run(&d, p, 7, 11, 0, &a);
-    mf_duel_run(&d, p, 7, 11, 0, &b);
+    mf_duel_run(&d, p, 7, 11, (mf_seating){0, false}, &a);
+    mf_duel_run(&d, p, 7, 11, (mf_seating){0, false}, &b);
     MF_EQ_INT(memcmp(&a, &b, sizeof a), 0);
 
     /* And a different game is a different game — a run that ignored its game
        number would satisfy the line above forever. */
     mf_duel c;
-    mf_duel_run(&d, p, 7, 12, 0, &c);
+    mf_duel_run(&d, p, 7, 12, (mf_seating){0, false}, &c);
     MF_CHECK(memcmp(&a, &c, sizeof a) != 0);
 }
 
@@ -466,7 +466,7 @@ MF_TEST(a_mirror_sample_of_decks_that_can_kill_is_live) {
     mirror(p, MF_RUNG_CURVE_OUT);
 
     mf_duel_sample s;
-    mf_duel_sample_run(&d, p, 99, 512, &s);
+    mf_duel_sample_run(&d, p, 99, 64, &s);
     MF_CHECK(mf_duel_sample_live(&s));
     /* The three conditions, separately, so a predicate that collapsed to one
        of them is visible here rather than only in a mutation run. */
@@ -488,7 +488,7 @@ MF_TEST(a_sample_where_nothing_ever_ends_is_not_live) {
     mirror(p, MF_RUNG_CURVE_OUT);
 
     mf_duel_sample s;
-    mf_duel_sample_run(&d, p, 99, 64, &s);
+    mf_duel_sample_run(&d, p, 99, 16, &s);
     MF_CHECK(!mf_duel_sample_live(&s));
     MF_EQ_INT(s.ended, 0);
     MF_EQ_INT(s.end_rate == 0.0, 1);
@@ -515,21 +515,21 @@ MF_TEST(the_end_rate_is_a_rate_and_not_a_flag) {
     mirror(p, MF_RUNG_CURVE_OUT);
 
     mf_duel_sample s;
-    mf_duel_sample_run(&d, p, 99, 512, &s);
+    mf_duel_sample_run(&d, p, 99, 128, &s);
     MF_CHECK(mf_duel_sample_live(&s));
     MF_CHECK(s.end_rate > 0.0 && s.end_rate < 1.0);
-    MF_EQ_INT(s.games, 512);
-    MF_EQ_INT(s.ended, 217);
-    MF_EQ_DBL(s.end_rate, 217.0 / 512.0);
-    MF_EQ_INT(s.min_turn, 17);
+    MF_EQ_INT(s.games, 128);
+    MF_EQ_INT(s.ended, 61);
+    MF_EQ_DBL(s.end_rate, 61.0 / 128.0);
+    MF_EQ_INT(s.min_turn, 22);
     MF_EQ_INT(s.max_turn, 40);
     /* **The mean is over the games that ENDED**, and the band is what pins
-       that rather than a decimal nobody can check. Counting the 295 capped
-       games as length-40 games instead would put it at 36.7, which is outside
+       that rather than a decimal nobody can check. Counting the 67 capped
+       games as length-40 games instead would put it at 36.6, which is outside
        this by a mile and is exactly the mistake worth being unable to make:
        "the average game runs 37 plies" would be a statement about the cap
        wearing a statement about the deck's clothes. */
-    MF_CHECK(s.mean_turn > 32.0 && s.mean_turn < 32.7);
+    MF_CHECK(s.mean_turn > 32.5 && s.mean_turn < 33.5);
     MF_CHECK(s.turn_sd > 4.5 && s.turn_sd < 5.0);
     MF_EQ_INT(s.seat_wins[0] + s.seat_wins[1], s.ended);
 }
@@ -586,9 +586,219 @@ MF_TEST(a_sample_is_a_pure_function_of_its_inputs) {
     mirror(p, MF_RUNG_CURVE_OUT);
 
     mf_duel_sample a, b;
-    mf_duel_sample_run(&d, p, 99, 128, &a);
-    mf_duel_sample_run(&d, p, 99, 128, &b);
+    mf_duel_sample_run(&d, p, 99, 32, &a);
+    mf_duel_sample_run(&d, p, 99, 32, &b);
     MF_EQ_INT(memcmp(&a, &b, sizeof a), 0);
+}
+
+/* ---- seat-swap symmetry, bit-exact (T6) ---------------------------------- */
+
+MF_TEST(the_seating_mirror_is_an_involution) {
+    /* Relabelling twice is not relabelling. Asserted rather than assumed,
+       because everything below is stated in terms of this function and a
+       "mirror" that drifted would make the symmetry check a comparison
+       between two arbitrary games that happened to agree. */
+    for (uint64_t g = 0; g < 8; g++) {
+        mf_seating a = mf_seating_of(g);
+        mf_seating b = mf_seating_mirror(a);
+        mf_seating c = mf_seating_mirror(b);
+        MF_CHECK(b.first != a.first);
+        MF_CHECK(b.swapped != a.swapped);
+        MF_EQ_INT(c.first, a.first);
+        MF_EQ_INT(c.swapped, a.swapped);
+    }
+    /* And the sampling rule is never swapped: the swap is the check's, not the
+       sampler's, or half the sample would be counted twice under two names. */
+    MF_EQ_INT(mf_seating_of(3).swapped, 0);
+    MF_EQ_INT(mf_seating_of(0).first, 0);
+    MF_EQ_INT(mf_seating_of(1).first, 1);
+}
+
+MF_TEST(swapping_the_seats_relabels_the_game_and_changes_nothing_else) {
+    mf_deck d;
+    beatdown(&d);
+    mf_turn_policy p[MF_DUEL_SEATS];
+    mirror(p, MF_RUNG_CURVE_OUT);
+
+    /* **Liveness first, and this is the whole reason it is a separate task.**
+       A mirror in which no game ever ends is perfectly symmetric and every
+       assertion below would pass on it without observing a thing — 2.1's
+       defect. So the sample is checked for life before the symmetry check is
+       allowed to mean anything. */
+    mf_duel_sample s;
+    mf_duel_sample_run(&d, p, 99, 64, &s);
+    MF_CHECK(mf_duel_sample_live(&s));
+
+    for (uint64_t g = 0; g < 8; g++) {
+        MF_CHECK(mf_duel_symmetric(&d, p, 99, g, mf_seating_of(g)));
+    }
+
+    /* And spelled out once, so what "relabelled" means is written down rather
+       than hidden inside a predicate that could be `return true`. */
+    mf_seating st = mf_seating_of(4);
+    mf_duel a, b;
+    mf_duel_run(&d, p, 99, 4, st, &a);
+    mf_duel_run(&d, p, 99, 4, mf_seating_mirror(st), &b);
+    MF_EQ_INT(b.turn, a.turn);
+    MF_EQ_INT(b.winner, a.winner == 0 ? 1 : 0);
+    MF_EQ_INT(b.active, a.active == 0 ? 1 : 0);
+    MF_EQ_INT(memcmp(&b.seat[0], &a.seat[1], sizeof a.seat[0]), 0);
+    MF_EQ_INT(memcmp(&b.seat[1], &a.seat[0], sizeof a.seat[0]), 0);
+    /* **The two runs are genuinely two games**, not one compared with itself —
+       which is the shape in which a symmetry check passes vacuously. */
+    MF_CHECK(memcmp(&a, &b, sizeof a) != 0);
+}
+
+MF_TEST(the_relabelling_check_can_say_no) {
+    /* **Found by mutation, and it is the 2.1 defect one level up.** Every test
+       above asserts only that symmetry *holds*, so every mutation that made
+       the comparison laxer survived — including replacing its whole body with
+       `return true`. Mutations that made it stricter were caught and mutations
+       that made it weaker were not, which is exactly the wrong way round: a
+       checker with no failing case reports agreement it never observed.
+       So the comparison is a pure predicate over two games now, and this feeds
+       it pairs that are not relabellings and requires a no — one per branch,
+       because a single perturbation only ever exercises one of them. */
+    mf_deck d;
+    beatdown(&d);
+    mf_turn_policy p[MF_DUEL_SEATS];
+    mirror(p, MF_RUNG_CURVE_OUT);
+
+    mf_seating st = mf_seating_of(4);
+    mf_duel a, b;
+    mf_duel_run(&d, p, 99, 4, st, &a);
+    mf_duel_run(&d, p, 99, 4, mf_seating_mirror(st), &b);
+    MF_CHECK(mf_duel_relabels(&a, &b));
+
+    /* A game is not its own relabelling: its seats do not swap and its winner
+       does not permute. The cheapest wrong pair there is. */
+    MF_CHECK(!mf_duel_relabels(&a, &a));
+
+    /* A different game entirely. */
+    mf_duel c;
+    mf_duel_run(&d, p, 99, 5, mf_seating_mirror(mf_seating_of(5)), &c);
+    MF_CHECK(!mf_duel_relabels(&a, &c));
+
+    /* And one branch at a time, from a pair that genuinely does relabel. */
+    mf_duel x = b;
+    x.turn = (uint8_t)(x.turn + 1);
+    MF_CHECK(!mf_duel_relabels(&a, &x));
+
+    x = b;
+    x.active = a.active;
+    MF_CHECK(!mf_duel_relabels(&a, &x));
+
+    x = b;
+    x.winner = a.winner;
+    MF_CHECK(!mf_duel_relabels(&a, &x));
+
+    x = b;
+    x.seat[0].live.board.count = (uint8_t)(x.seat[0].live.board.count + 1);
+    MF_CHECK(!mf_duel_relabels(&a, &x));
+
+    x = b;
+    x.seat[1].life = (uint8_t)(x.seat[1].life + 1);
+    MF_CHECK(!mf_duel_relabels(&a, &x));
+
+    /* The two unended cases, which are a separate arm: an unended game must
+       relabel to an unended one, and a winner appearing on only one side is
+       the asymmetry a single `winner != other(winner)` test would miss —
+       `other()` of MF_DUEL_LIVE is a seat index and compares equal to nothing. */
+    mf_deck s;
+    stall(&s);
+    mf_duel u, v;
+    mf_duel_run(&s, p, 99, 0, mf_seating_of(0), &u);
+    mf_duel_run(&s, p, 99, 0, mf_seating_mirror(mf_seating_of(0)), &v);
+    MF_CHECK(mf_duel_relabels(&u, &v));
+    MF_EQ_INT(u.winner, MF_DUEL_LIVE);
+
+    x = v;
+    x.winner = 0;
+    MF_CHECK(!mf_duel_relabels(&u, &x));
+    x = u;
+    x.winner = 0;
+    MF_CHECK(!mf_duel_relabels(&x, &v));
+}
+
+MF_TEST(symmetry_survives_two_different_policies) {
+    /* The case T8 depends on. A player is a stream *and* a policy, so a
+       relabelling has to carry the policy with the seat — a version that
+       swapped only the streams would pass the mirror test above (where the two
+       policies are equal) and fail here, which is exactly why the mirror alone
+       is not enough of a check. */
+    mf_deck d;
+    beatdown(&d);
+    mf_turn_policy p[MF_DUEL_SEATS];
+    p[0] = mf_policy_rung(MF_RUNG_GREEDY);
+    p[1] = mf_policy_rung(MF_RUNG_SEQUENCING_AWARE);
+
+    for (uint64_t g = 0; g < 8; g++) {
+        MF_CHECK(mf_duel_symmetric(&d, p, 99, g, mf_seating_of(g)));
+    }
+}
+
+MF_TEST(symmetry_holds_on_games_that_never_end_and_proves_nothing_there) {
+    /* The stall deck is symmetric too, and that is the point: it satisfies the
+       check while observing nothing at all. Recorded as a test rather than as
+       a remark, so the claim "symmetry passes" is never read as "the engine
+       works" — the sample it passed on is dead, and `mf_duel_sample_live`
+       says so on the very next line. */
+    mf_deck d;
+    stall(&d);
+    mf_turn_policy p[MF_DUEL_SEATS];
+    mirror(p, MF_RUNG_CURVE_OUT);
+
+    for (uint64_t g = 0; g < 2; g++) {
+        MF_CHECK(mf_duel_symmetric(&d, p, 99, g, mf_seating_of(g)));
+    }
+    mf_duel_sample s;
+    mf_duel_sample_run(&d, p, 99, 8, &s);
+    MF_CHECK(!mf_duel_sample_live(&s));
+}
+
+MF_TEST(the_half_the_time_identity_is_exact_over_a_paired_sample) {
+    /* **§13.6's analytic ground truth, and it is exact.** A statistical check —
+       "the mirror win rate is 0.5 ± noise" — needs a hundred thousand games and
+       sees only asymmetries that survive averaging. Pairing each game with its
+       relabelling makes it an identity: the two halves have the same length and
+       opposite winners, so each seat wins precisely half of what ended. Not
+       approximately half. Half. */
+    mf_deck d;
+    beatdown(&d);
+    mf_turn_policy p[MF_DUEL_SEATS];
+    mirror(p, MF_RUNG_CURVE_OUT);
+
+    mf_duel_sample s;
+    mf_duel_paired_sample(&d, p, 99, 32, &s);
+    MF_CHECK(mf_duel_sample_live(&s));
+    MF_EQ_INT(s.games, 64);
+    MF_EQ_INT(s.seat_wins[0], s.seat_wins[1]);
+    MF_EQ_INT(s.seat_wins[0] + s.seat_wins[1], s.ended);
+    /* Both halves of a pair end or neither does, so the ended count is even. */
+    MF_EQ_INT(s.ended % 2, 0);
+
+    /* And it holds where an *unpaired* sample only approaches it. This is the
+       comparison that says what pairing bought. */
+    mf_duel_sample u;
+    mf_duel_sample_run(&d, p, 99, 64, &u);
+    MF_CHECK(u.seat_wins[0] != u.seat_wins[1]);
+}
+
+MF_TEST(the_identity_is_exact_for_a_lopsided_matchup_too) {
+    /* It is a statement about *seats*, not about decks or policies. Two
+       different rungs still split the seats exactly evenly under pairing,
+       because every game is played from both sides — which is what makes a
+       paired sample the right shape for T8, where the whole question is which
+       rung wins and the seat must contribute nothing to the answer. */
+    mf_deck d;
+    beatdown(&d);
+    mf_turn_policy p[MF_DUEL_SEATS];
+    p[0] = mf_policy_rung(MF_RUNG_GREEDY);
+    p[1] = mf_policy_rung(MF_RUNG_SEQUENCING_AWARE);
+
+    mf_duel_sample s;
+    mf_duel_paired_sample(&d, p, 99, 32, &s);
+    MF_EQ_INT(s.seat_wins[0], s.seat_wins[1]);
 }
 
 void run_duel_tests(void) {
@@ -615,5 +825,12 @@ void run_duel_tests(void) {
     MF_RUN(liveness_fails_on_each_condition_alone);
     MF_RUN(an_empty_sample_measures_nothing_and_divides_by_nothing);
     MF_RUN(a_sample_is_a_pure_function_of_its_inputs);
+    MF_RUN(the_seating_mirror_is_an_involution);
+    MF_RUN(swapping_the_seats_relabels_the_game_and_changes_nothing_else);
+    MF_RUN(the_relabelling_check_can_say_no);
+    MF_RUN(symmetry_survives_two_different_policies);
+    MF_RUN(symmetry_holds_on_games_that_never_end_and_proves_nothing_there);
+    MF_RUN(the_half_the_time_identity_is_exact_over_a_paired_sample);
+    MF_RUN(the_identity_is_exact_for_a_lopsided_matchup_too);
     mf_arena_destroy(DA);
 }

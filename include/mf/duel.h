@@ -111,19 +111,71 @@ bool mf_duel_damage(mf_duel *g, unsigned seat, unsigned amount);
  * than a yes, and the number is reported whatever it is. */
 #define MF_DUEL_TURNS 20
 
+/* ---- who sits where (sprint 5.0 T6) --------------------------------------
+ *
+ * **One struct rather than two loose flags, because the symmetry check is
+ * "flip both" and two parameters invite flipping one.** §13.6 states its check
+ * as a *relabelling*: the same game with the two players' names exchanged. A
+ * player is not just a stream — it is a stream, a policy, and whether it is on
+ * the play — so relabelling has to move all three together. Swapping only the
+ * streams gives a different game rather than the same one renamed, and it is
+ * the mistake a caller holding two booleans makes once. */
+typedef struct {
+    uint8_t first; /* the seat on the play: it starts, and skips its first draw */
+    /* Seat `s` is the player seat `other(s)` would otherwise have held — its
+       stream *and* its policy. Everything that makes a seat that seat. */
+    bool swapped;
+} mf_seating;
+
+/* The sampling rule: alternate the play by game index, never swapped. */
+mf_seating mf_seating_of(uint64_t game);
+
+/* The relabelling. Flips both, so `mf_duel_run` under this is the same game
+   with the seats renamed — and it is an involution, which is asserted rather
+   than assumed. Owned by the module because §13.6's check is stated in terms
+   of it, and a caller free to build its own could satisfy it vacuously. */
+mf_seating mf_seating_mirror(mf_seating st);
+
 /* One duel. Both seats mulligan on their own stream, then take alternating
  * turns — untap, draw, land, cast, attack — until a seat is dead or the cap is
  * reached. `out->winner` is `MF_DUEL_LIVE` in the second case, which is a real
  * outcome and not an error.
  *
- * `p` is indexed by seat, so a mirror passes the same policy twice and G3
- * passes two rungs. `first` is the seat on the play: it takes the first turn
- * and skips the draw on it, which is the only asymmetry between two identical
- * decks and therefore the one T9 has to observe rather than assume away.
+ * `p` is indexed by *player*, so a mirror passes the same policy twice and G3
+ * passes two rungs. Which seat each player occupies is `st`.
  *
  * Pure — no clock, no allocation, no I/O (`no_io_in_loop`). */
 void mf_duel_run(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS], uint64_t seed,
-                 uint64_t game, unsigned first, mf_duel *out);
+                 uint64_t game, mf_seating st, mf_duel *out);
+
+/* Is `b` the game `a` with the two seats exchanged? Same length, seats swapped
+ * byte for byte, winner and active seat permuted.
+ *
+ * **Separate from the runner, and mutation testing is why.** When this was a
+ * step inside `mf_duel_symmetric`, every test asserted only that symmetry
+ * *held* — so every mutation that weakened the comparison survived, including
+ * replacing the whole body with `return true`. Mutations that made it stricter
+ * were caught and mutations that made it laxer were not, which is the exact
+ * asymmetry that matters: a checker that cannot fail reports agreement it
+ * never observed. Pulled out as a pure predicate over two games, it can be fed
+ * pairs that are *not* relabellings and required to say no. */
+bool mf_duel_relabels(const mf_duel *a, const mf_duel *b);
+
+/* §13.6's symmetry check, **paired and bit-exact**: play the game, play its
+ * relabelling, and require `mf_duel_relabels`.
+ *
+ * **Two games, not a hundred thousand.** "Mirror win rate is 50% ± noise"
+ * needs a huge sample and sees only asymmetries that survive averaging; this
+ * is an involution test and needs one pair. §13.6 lists what it catches: a
+ * tiebreak preferring seat 0, a priority order favouring the active player
+ * beyond what the rules give, a policy reading its own board by a different
+ * path than the opponent's, and a seed derivation not symmetric in the seat.
+ *
+ * **Liveness first.** This passes trivially on an engine where nothing
+ * happens — a mirror in which no game ever ends is perfectly symmetric — so
+ * `mf_duel_sample_live` is the precondition and not a nicety. */
+bool mf_duel_symmetric(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS], uint64_t seed,
+                       uint64_t game, mf_seating st);
 
 /* ---- a sample of duels, and liveness (sprint 5.0 T5) ---------------------
  *
@@ -173,5 +225,18 @@ void mf_duel_sample_run(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS],
  * game is a live sample rather than a dead one. Scoping the predicate is
  * cheaper than weakening it. */
 bool mf_duel_sample_live(const mf_duel_sample *s);
+
+/* A sample run in relabelled pairs (sprint 5.0 T6). §13.6's half-the-time
+ * identity comes out **exact** rather than approximate: a game and its
+ * relabelling have the same length and opposite winners, so each seat wins
+ * precisely half of whatever ended, and the two halves of every pair either
+ * both end or both do not.
+ *
+ * Worth having as a sampling shape rather than only as a test — antithetic
+ * pairing removes the play/draw advantage from a sample by construction
+ * instead of by luck, which is what T5's `end_rate` alternation only achieves
+ * on average. `pairs` is the number of *pairs*; `out->games` is twice it. */
+void mf_duel_paired_sample(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS], uint64_t seed,
+                           unsigned pairs, mf_duel_sample *out);
 
 #endif

@@ -1960,6 +1960,46 @@ validation:
       why_not_statistical: >
         "Mirror win rate is 50% +/- noise" needs a hundred thousand games and sees only asymmetries
         that survive averaging. The paired form is an involution test and needs two.
+      # --- built in sprint 5.0 T6 ------------------------------------------
+      implementation: mf_duel_symmetric, over mf_seating / mf_seating_mirror
+      the_comparison_is_a_separate_predicate:
+        what: mf_duel_relabels(a, b) - pure, over two finished games
+        why: >
+          Mutation testing found that when the comparison lived inside the runner, EVERY mutation
+          weakening it survived - including replacing the body with `return true`. Mutations
+          making it stricter were caught; mutations making it laxer were not. Cause: every test
+          asserted only that symmetry HELD, so nothing could tell a working comparison from a
+          constant. That is 13.1's vacuous-pass defect one level up, applied to the checker.
+        rule: >
+          A predicate only ever asserted TRUE is indistinguishable from a constant. Symmetry
+          checks need a case where they fail, fed pairs that are not relabellings.
+      a_relabelling_moves_three_things: >
+        A player is a stream, a policy AND whether it is on the play, so relabelling has to move
+        all three together. Swapping only the streams gives a DIFFERENT game rather than the same
+        one renamed - and it is the mistake a caller holding two loose booleans makes once. The
+        seating is therefore one struct the module flips whole, and mf_seating_mirror is an
+        involution that is asserted rather than assumed.
+      compared: >
+        Equal length, permuted winner and active seat, and both seats byte-for-byte identical the
+        other way round - the whole live game, board and library cursor and hand and totals, not
+        just the scalars.
+      holds_for_unequal_policies: >
+        Asserted separately, because a mirror cannot see it: with p[0] == p[1] a version that
+        swapped only the streams would pass. That case is the one T8 depends on.
+      half_the_time_identity:
+        form: exact
+        implementation: mf_duel_paired_sample
+        why_exact: >
+          Each game is run with its relabelling. The two halves have the same length and opposite
+          winners, so each seat wins PRECISELY half of what ended and the ended count is even. Not
+          0.5 plus noise.
+        holds_for_a_lopsided_matchup: >
+          It is a statement about SEATS, not about decks or policies, so two different rungs still
+          split the seats exactly evenly. That is what makes a paired sample the right shape for
+          T8, where the question is which rung wins and the seat must contribute nothing.
+        also_a_sampling_shape: >
+          Antithetic pairing removes the play/draw advantage from a sample by construction rather
+          than on average, which is all the game-index alternation achieves on its own.
       seat_streams_must_be_independent:
         assert: true
         hazard: >
