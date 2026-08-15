@@ -62,6 +62,36 @@ static unsigned player_in(mf_seating st, unsigned seat) {
     return st.swapped ? other(seat) : seat;
 }
 
+/* What the removal cast this turn takes off the defending board, and what is
+ * left over goes at the defending seat.
+ *
+ * **Damage kills the biggest creature it can kill, or goes to the face** — one
+ * fixed rule for both seats, which is what a mirror needs. It is a placeholder
+ * and says so, on the T3 precedent: which target a burn spell takes is a
+ * decision §5's rungs should eventually differ on, and inventing a rung
+ * mid-sprint would mean grading the ladder against a rung this sprint invented.
+ *
+ * Returns true when the duel ended here — removal can win a game, and a burn
+ * spell that goes to the face on an empty board is exactly how. */
+static bool resolve_removal(const mf_deck *d, const mf_turn_result *r, mf_board *board,
+                            mf_duel *g, unsigned def) {
+    for (uint8_t i = 0; i < r->destroys; i++) {
+        uint8_t at;
+        /* A removal spell cast into an empty board resolves and does nothing,
+           which is a real outcome rather than a case to skip. */
+        if (!mf_combat_best_target(d, board, MF_REMOVAL_ANY, &at)) break;
+        mf_board_leaves(board, at);
+    }
+    if (!r->damage) return false;
+
+    uint8_t at;
+    if (mf_combat_best_target(d, board, r->damage, &at)) {
+        mf_board_leaves(board, at);
+        return false;
+    }
+    return mf_duel_damage(g, def, r->damage);
+}
+
 void mf_duel_run(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS], uint64_t seed,
                  uint64_t game, mf_seating st, mf_duel *out) {
     mf_duel_init(out);
@@ -86,6 +116,12 @@ void mf_duel_run(const mf_deck *d, const mf_turn_policy p[MF_DUEL_SEATS], uint64
         bool draw = !(a == st.first && out->seat[a].live.turns == 0);
         mf_turn_result r;
         mf_turn_play(d, &p[player_in(st, a)], draw, &out->seat[a].live, &r);
+
+        /* Removal, before combat, because that is the phase it is cast in and
+           a creature removed now does not block. `mf_turn_play` reports what
+           was cast and this decides what it hits — the turn has no opponent,
+           which is exactly what lets the solo phase share it. */
+        if (resolve_removal(d, &r, &out->seat[def].live.board, out, def)) return;
 
         /* Combat is the whole of the interaction so far, so this is also where
            the game can end. `mf_combat` hands back what the defender takes

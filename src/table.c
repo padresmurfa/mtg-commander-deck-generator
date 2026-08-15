@@ -21,7 +21,11 @@
    format rather than of any struct — so the writer emits exactly this many
    bytes and the reader's length check is what proves it. */
 #define MF_TABLE_HEADER 36
-#define MF_TABLE_RECORD 44
+/* 45 from sprint 5.0 T7 (was 44): the key grew a `removal` byte. This constant
+   and MF_TABLE_KEY_BYTES are the two the reader validates against, and the
+   static assert below ties the second to the struct — this one is tied to it by
+   the assert at the end of the record layout. */
+#define MF_TABLE_RECORD 45
 
 struct mf_table {
     mf_game game;
@@ -52,7 +56,7 @@ static uint64_t get_u64(const unsigned char *p) {
     return v;
 }
 
-/* The identity is 20 bytes of small integers. Written field by field rather
+/* The identity is 24 bytes of small integers. Written field by field rather
    than as a memcpy of the struct: this file is read by other builds, and a
    struct's layout is this compiler's business rather than the format's. */
 static void put_key(mf_buf *b, const mf_metacard *k) {
@@ -73,6 +77,7 @@ static void put_key(mf_buf *b, const mf_metacard *k) {
     mf_buf_putc(b, (char)k->power);
     mf_buf_putc(b, (char)k->toughness);
     mf_buf_putc(b, (char)k->flags);
+    mf_buf_putc(b, (char)k->removal);
 }
 
 static void get_key(const unsigned char *p, mf_metacard *k) {
@@ -94,10 +99,33 @@ static void get_key(const unsigned char *p, mf_metacard *k) {
     k->power = p[20];
     k->toughness = p[21];
     k->flags = p[22];
+    k->removal = p[23];
 }
 
-/* 23 bytes of identity, then the fields the class key deliberately excludes. */
-#define MF_TABLE_KEY_BYTES 23
+/* 24 bytes of identity, then the fields the class key deliberately excludes.
+ *
+ * **Sprint 5.0 T7 added the 24th and the omission was invisible.** The key is
+ * written field by field, so a new one is not carried unless it is named here
+ * — `mf_metacard_of` set `removal`, `mf_metacard_eq` compared it, and the unit
+ * tests for both passed, while every deck built from a card table read it back
+ * as zero and no burn spell ever dealt damage. Found by a duel fixture whose
+ * games would not end. A struct-level round-trip assertion is what would have
+ * caught it at the boundary rather than three modules downstream. */
+#define MF_TABLE_KEY_BYTES 24
+
+/* **The guard, compile-time, so the next field cannot be forgotten.** `types`
+   and `ops` are u16 in the struct and u32 on the wire, which is the whole of
+   the four-byte difference; every other field is one byte in both. So adding a
+   byte to `mf_metacard` without naming it in `put_key` and `get_key` breaks
+   this build rather than silently reading back as zero three modules away. */
+_Static_assert(MF_TABLE_KEY_BYTES == sizeof(mf_metacard) + 4,
+               "a metacard field was added without widening the card table format");
+
+/* And the record is the key plus the fields the class key excludes. Tying both
+   constants to the struct is what turns "somebody forgot to serialise it" from
+   a silent zero three modules downstream into a build failure here. */
+_Static_assert(MF_TABLE_RECORD == MF_TABLE_KEY_BYTES + 21,
+               "the card record and the key size disagree");
 
 mf_err mf_table_write(mf_arena *a, const char *path, mf_game game, const mf_card *cards,
                       size_t count, const mf_classset *classes, const mf_skill *floors,

@@ -128,6 +128,8 @@ enum {
     D_WALL,   /* {G} 0/4 — a body that can never reduce anybody's life total */
     D_BEAR,   /* {1}{G} 2/2 */
     D_FATTY,  /* {4}{G} 5/5 — what the cast rules differ on */
+    D_BOLT,   /* {G} instant, 3 damage to any target — MF_OP_DAMAGE (T7) */
+    D_KILL,   /* {1}{G} instant, destroy target creature — MF_OP_DESTROY (T7) */
     D_COUNT
 };
 
@@ -161,6 +163,10 @@ static const mf_table *dcatalogue(void) {
           (mf_pips){.generic = 1, .g = 1}, 2, 2);
     dcard(&c[D_FATTY], "e-fatty", "Thragtusk", "", MF_TYPE_CREATURE, 5,
           (mf_pips){.generic = 4, .g = 1}, 5, 5);
+    dcard(&c[D_BOLT], "f-bolt", "Lightning Bolt", "Lightning Bolt deals 3 damage to any target.",
+          MF_TYPE_INSTANT, 1, (mf_pips){.g = 1}, 0, 0);
+    dcard(&c[D_KILL], "g-kill", "Murder", "Destroy target creature.", MF_TYPE_INSTANT, 2,
+          (mf_pips){.generic = 1, .g = 1}, 0, 0);
 
     mf_classset *cs = mf_classes_build(DA, c, D_COUNT);
     mf_skill floors[D_COUNT];
@@ -593,6 +599,91 @@ MF_TEST(a_sample_is_a_pure_function_of_its_inputs) {
 
 /* ---- seat-swap symmetry, bit-exact (T6) ---------------------------------- */
 
+/* Lands, a body worth removing, and enough removal to see it resolve. */
+static void removal_deck(mf_deck *d) {
+    uint8_t counts[D_COUNT] = {[D_FOREST] = 40, [D_BEAR] = 19, [D_BOLT] = 20, [D_KILL] = 20};
+    ddeck(d, counts, D_FATTY);
+}
+
+MF_TEST(removal_resolves_against_the_other_seat) {
+    /* **The one thing removal must not do is nothing.** A duel of a deck full
+       of burn and kill spells against itself has to look different from the
+       same deck with the removal inert, or `mf_turn_play` is reporting what it
+       cast and `mf_duel` is dropping it on the floor. */
+    mf_deck d;
+    removal_deck(&d);
+    mf_turn_policy p[MF_DUEL_SEATS];
+    mirror(p, MF_RUNG_CURVE_OUT);
+
+    mf_duel_sample s;
+    mf_duel_sample_run(&d, p, 99, 64, &s);
+    MF_CHECK(mf_duel_sample_live(&s));
+
+    /* Boards stay small: nineteen creatures in the deck and forty removal
+       spells between the two seats, so what gets cast mostly gets removed. */
+    mf_duel g;
+    mf_duel_run(&d, p, 99, 4, mf_seating_of(4), &g);
+    MF_CHECK(g.seat[0].live.board.count + g.seat[1].live.board.count < 30);
+
+    /* And symmetry still holds with removal in the loop — the resolution reads
+       the defending board, which is the newest place a seat-dependent path
+       could have crept in. */
+    for (uint64_t i = 0; i < 8; i++) {
+        MF_CHECK(mf_duel_symmetric(&d, p, 99, i, mf_seating_of(i)));
+    }
+}
+
+MF_TEST(a_burn_spell_with_nothing_to_kill_goes_to_the_face) {
+    /* Damage that cannot reach a creature is not damage that fizzles. This is
+       also the path on which removal can *win* a game, which is why
+       `resolve_removal` reports whether the duel ended. */
+    mf_deck d;
+    uint8_t counts[D_COUNT] = {[D_FOREST] = 45, [D_BOLT] = 54};
+    ddeck(&d, counts, D_BOLT); /* no creature in the deck at all */
+    mf_turn_policy p[MF_DUEL_SEATS];
+    mirror(p, MF_RUNG_CURVE_OUT);
+
+    mf_duel_sample s;
+    mf_duel_sample_run(&d, p, 99, 64, &s);
+    /* Nothing can attack, so every point of damage in this sample came from a
+       burn spell going at a life total — and the games still end. */
+    MF_CHECK(mf_duel_sample_live(&s));
+    MF_CHECK(s.end_rate > 0.0);
+
+    mf_duel g;
+    mf_duel_run(&d, p, 99, 4, mf_seating_of(4), &g);
+    /* The boards are not empty — they are full of lands, which is what a
+       battlefield mostly is. What matters is that neither holds a *creature*,
+       so nothing here ever attacked and every point of damage came from a burn
+       spell finding no target and going at a life total. */
+    for (unsigned seat = 0; seat < MF_DUEL_SEATS; seat++) {
+        const mf_board *b = &g.seat[seat].live.board;
+        for (uint8_t i = 0; i < b->count; i++) {
+            MF_CHECK((d.key[b->card[i]].types & MF_TYPE_CREATURE) == 0);
+        }
+    }
+    MF_CHECK(g.seat[0].life < MF_DUEL_START_LIFE || g.seat[1].life < MF_DUEL_START_LIFE);
+}
+
+MF_TEST(removal_cast_into_an_empty_board_resolves_and_does_nothing) {
+    /* A real outcome rather than a case to skip: the spell is gone, the mana
+       is spent, and no creature left. Nobody's life total moves either — a
+       destroy spell is not a burn spell. */
+    mf_deck d;
+    uint8_t counts[D_COUNT] = {[D_FOREST] = 45, [D_KILL] = 54};
+    ddeck(&d, counts, D_KILL);
+    mf_turn_policy p[MF_DUEL_SEATS];
+    mirror(p, MF_RUNG_CURVE_OUT);
+
+    mf_duel g;
+    mf_duel_run(&d, p, 99, 4, mf_seating_of(4), &g);
+    MF_EQ_INT(g.turn, MF_DUEL_TURNS * MF_DUEL_SEATS); /* nothing can ever end it */
+    MF_EQ_INT(g.winner, MF_DUEL_LIVE);
+    MF_EQ_INT(g.seat[0].life, MF_DUEL_START_LIFE);
+    MF_EQ_INT(g.seat[1].life, MF_DUEL_START_LIFE);
+    MF_CHECK(g.seat[0].live.spells > 0); /* they were cast, and did nothing */
+}
+
 MF_TEST(the_seating_mirror_is_an_involution) {
     /* Relabelling twice is not relabelling. Asserted rather than assumed,
        because everything below is stated in terms of this function and a
@@ -825,6 +916,9 @@ void run_duel_tests(void) {
     MF_RUN(liveness_fails_on_each_condition_alone);
     MF_RUN(an_empty_sample_measures_nothing_and_divides_by_nothing);
     MF_RUN(a_sample_is_a_pure_function_of_its_inputs);
+    MF_RUN(removal_resolves_against_the_other_seat);
+    MF_RUN(a_burn_spell_with_nothing_to_kill_goes_to_the_face);
+    MF_RUN(removal_cast_into_an_empty_board_resolves_and_does_nothing);
     MF_RUN(the_seating_mirror_is_an_involution);
     MF_RUN(swapping_the_seats_relabels_the_game_and_changes_nothing_else);
     MF_RUN(the_relabelling_check_can_say_no);

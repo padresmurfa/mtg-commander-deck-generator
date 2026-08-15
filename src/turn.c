@@ -474,6 +474,11 @@ void mf_turn_play(const mf_deck *d, const mf_turn_policy *p, bool draw, mf_live 
                `discount` above; the same gap, the same retro entry. */
             mf_opening_draw(o, 1);
         }
+        /* Removal is recorded, not resolved: there is no opponent here. A solo
+           run therefore casts removal and gets nothing for it, which is the
+           honest answer — with nobody to remove, the spell does nothing. */
+        if (mf_has_op(k, MF_OP_DESTROY)) out->destroys = mf_cap8(out->destroys + 1u);
+        if (mf_has_op(k, MF_OP_DAMAGE)) out->damage = mf_cap8(out->damage + k->removal);
         if (mf_has_op(k, MF_OP_FETCH_LAND)) {
             uint8_t land;
             if (mf_take_library_land(d, o, &land)) {

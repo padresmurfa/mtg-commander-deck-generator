@@ -57,6 +57,26 @@ static uint8_t gather(const mf_deck *d, const mf_board *b, bool attacking, mf_fi
     return n;
 }
 
+bool mf_combat_best_target(const mf_deck *d, const mf_board *b, uint8_t max_toughness,
+                           uint8_t *at) {
+    bool found = false;
+    mf_fighter best = {0, 0, 0};
+    for (uint8_t i = 0; i < b->count; i++) {
+        if (!is_creature(d, b, i)) continue;
+        const mf_metacard *k = &d->key[b->card[i]];
+        if (k->toughness > max_toughness) continue;
+        mf_fighter f = {i, k->power, k->toughness};
+        /* `bigger` is combat's total key, so this cannot tie and the answer
+           does not depend on the scan order. */
+        if (!found || bigger(&f, &best)) {
+            best = f;
+            found = true;
+        }
+    }
+    if (found) *at = best.at;
+    return found;
+}
+
 void mf_combat(const mf_deck *ad, mf_board *attack, const mf_deck *dd, mf_board *block,
                uint8_t defender_life, mf_combat_result *out) {
     memset(out, 0, sizeof *out);

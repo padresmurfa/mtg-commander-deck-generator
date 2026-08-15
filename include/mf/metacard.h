@@ -51,7 +51,16 @@ typedef struct {
     uint8_t produces_max;
     uint8_t power, toughness;
     uint8_t flags;
-    uint8_t reserved; /* explicit, so memcmp never reads compiler padding */
+    /* Printed damage, for `MF_OP_DAMAGE` (sprint 5.0 T7). Zero for `MF_OP_DESTROY`,
+       which has no magnitude, and for everything else.
+     *
+     * **This byte was `reserved`, and spending it is a real change to the
+     * equivalence classes** — two burn spells that differ only in how much
+     * damage they deal used to be one class and are now two, which is correct:
+     * a 2-damage spell and a 7-damage spell kill different creatures. The class
+     * count, the dominance chains and the card table hash all move with it, and
+     * that is the change being made rather than a side effect of it. */
+    uint8_t removal;
 } mf_metacard;
 
 _Static_assert(sizeof(mf_metacard) <= 32, "the card struct must fit the L1 budget (spec 7.9)");

@@ -31,7 +31,10 @@
  * machine's padding and alignment into a format other code has to agree with. */
 
 #define MF_TABLE_MAGIC "MFCT"
-#define MF_TABLE_VERSION 1u
+/* Bumped to 2 in sprint 5.0 T7: the metacard grew a `removal` byte, so a v1
+   table read with the v2 layout would shift every field after it and silently
+   misparse. Refusing the old file is the whole point of carrying a version. */
+#define MF_TABLE_VERSION 2u
 
 /* One card, as the table holds it. The metacard is the functional identity and
    therefore the class key; everything beside it is what the class key

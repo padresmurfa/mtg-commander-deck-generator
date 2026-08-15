@@ -187,7 +187,7 @@ ok "per-deck completeness is emitted beside the coverage fraction"
 "$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
     --bulk tests/fixtures/bulk-unmatched.jsonl --report-unmatched \
     > "$WORK/tail.txt" 2>/dev/null || fail "preprocess --report-unmatched failed"
-grep -q 'unmatched clauses: 3 in 2 distinct shapes' "$WORK/tail.txt" ||
+grep -q 'unmatched clauses: 4 in 3 distinct shapes' "$WORK/tail.txt" ||
     fail "the tail summary is wrong: $(head -1 "$WORK/tail.txt")"
 # Two cards share "If you do, draw a card"; the checkland's condition is its own
 # shape. Ranked by count, so the shared one leads.
@@ -195,8 +195,13 @@ sed -n '2p' "$WORK/tail.txt" | grep -q '^ *2  If you do, draw a card$' ||
     fail "the ranking did not put the commonest shape first: $(sed -n '2p' "$WORK/tail.txt")"
 grep -q 'This land enters tapped unless you control a Mountain or a Plains' "$WORK/tail.txt" ||
     fail "the conditional land did not reach the report"
-# And the vanilla bear contributes nothing: inert is not a failure to model.
-grep -q 'Vigilance' "$WORK/tail.txt" && fail "inert text reached the unmatched report"
+# Vigilance reaches the report from sprint 5.0 T7 on: a duel taps its attackers,
+# so vigilance changes an exchange the model resolves and cannot express.
+grep -q 'Vigilance' "$WORK/tail.txt" ||
+    fail "the combat keyword did not reach the report"
+# And inert is still not a failure to model — the example moved with the
+# boundary, from Vigilance to a discard, which spends no currency this tracks.
+grep -q 'Discard a card' "$WORK/tail.txt" && fail "inert text reached the unmatched report"
 # Off by default, so a normal run does not pay for it.
 "$BIN" --no-spawn preprocess --config "$WORK/pre.json" --game paper \
     --bulk tests/fixtures/bulk-unmatched.jsonl > "$WORK/quiet.txt" 2>/dev/null ||

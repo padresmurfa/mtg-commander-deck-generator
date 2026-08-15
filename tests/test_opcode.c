@@ -66,22 +66,28 @@ MF_TEST(a_conditional_draw_counts_against_the_gate_too) {
    The half that was missing entirely. A clause is only worth classifying if
    its trigger fires inside the phases being simulated. */
 
-MF_TEST(a_trigger_these_phases_never_run_is_inert) {
-    /* §3 does not simulate combat, so an attack trigger never fires and the
-       clause contributes nothing to what is being measured. That is the
-       definition of inert, and the same reason a vanilla 4/4 is fully
-       represented. Calling it unmatched instead would charge the opcode set for
-       a limitation belonging to the choice of phases, and the gate would count
-       the same narrowness twice. */
-    MF_EQ_INT(of("Whenever this creature attacks, draw a card"), MF_OP_INERT);
+MF_TEST(a_trigger_combat_now_reaches_is_no_longer_inert) {
+    /* **Reversed in sprint 5.0 T7, and the reversal is the point of the task.**
+       This test used to assert every clause below was INERT, on an argument
+       written into the module: "§3 does not simulate combat, so an attack
+       trigger never fires... nothing dies in a phase where nothing attacks."
+       Sprint 5.0 built a duel. Creatures attack, block and die, so every one of
+       those triggers now *fires* — and §8's own rule is that "inertia is
+       relative to what is being simulated, and that changes".
+       They land at UNMATCHED rather than at their shape, because **reachable is
+       not fired**: the duel loop runs combat and does not run triggered
+       abilities, so a death trigger that draws a card is text the model would
+       see and does not execute. Classifying by shape would say it draws.
+       This means G1 went stale in T4, when combat landed — not in T7. */
+    MF_EQ_INT(of("Whenever this creature attacks, draw a card"), MF_OP_UNMATCHED);
     MF_EQ_INT(of("Whenever this creature deals combat damage to a player, draw a card"),
-              MF_OP_INERT);
-    MF_EQ_INT(of("When this creature dies, draw a card"), MF_OP_INERT);
-    MF_EQ_INT(of("Whenever this creature blocks, draw a card"), MF_OP_INERT);
-    MF_EQ_INT(of("When this creature dies, add {C}{C}{C}"), MF_OP_INERT);
+              MF_OP_UNMATCHED);
+    MF_EQ_INT(of("When this creature dies, draw a card"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("Whenever this creature blocks, draw a card"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("When this creature dies, add {C}{C}{C}"), MF_OP_UNMATCHED);
     MF_EQ_INT(of("Whenever equipped creature attacks, you may search your library for a basic "
                  "land card, put it onto the battlefield tapped, then shuffle"),
-              MF_OP_INERT);
+              MF_OP_UNMATCHED);
 }
 
 MF_TEST(a_trigger_inside_turns_one_to_four_still_counts) {
@@ -202,7 +208,13 @@ MF_TEST(an_inert_clause_may_say_unless_all_it_likes) {
        conditional wording into the unmatched column and collapse the gate for a
        reason that has nothing to do with what is modelled. */
     MF_EQ_INT(of("Counter target spell unless its controller pays {3}"), MF_OP_INERT);
-    MF_EQ_INT(of("Whenever a creature attacks, it gets +1/+0 unless you control a Forest"),
+    /* The example here used to be an attack trigger that pumps. Sprint 5.0 T7
+       made both halves of that visible — the trigger fires now and the pump
+       changes the exchange combat resolves — so it is unmatched and no longer
+       demonstrates anything about inert text. Replaced with a clause still in a
+       currency the model does not spend. */
+    MF_EQ_INT(of("Return target instant card from your graveyard to your hand unless an "
+                 "opponent pays {2}"),
               MF_OP_INERT);
 }
 
@@ -215,16 +227,137 @@ MF_TEST(a_replacement_that_removes_the_effect_is_not_the_effect) {
 }
 
 MF_TEST(text_these_phases_cannot_see_is_inert_and_not_a_failure) {
-    /* The distinction the whole gate number rests on. None of this happens
-       before turn five, or in a currency the opening spends — so a card that
-       says only this is *fully* modelled for the purpose being measured. */
-    MF_EQ_INT(of("Flying"), MF_OP_INERT);
-    MF_EQ_INT(of("Destroy target creature"), MF_OP_INERT);
-    MF_EQ_INT(of("When this creature enters, each opponent loses 3 life"), MF_OP_INERT);
+    /* The distinction the whole gate number rests on, and it survives T7 —
+       what moved is *which* text the phases can see, not the principle. A
+       clause in a currency the model does not spend is still fully modelled
+       for the purpose being measured. */
     MF_EQ_INT(of("Counter target spell"), MF_OP_INERT);
-    /* Tutoring a spell is not ramp, and the opening does not model the spell. */
+    /* Tutoring a spell is not ramp, and the model does not simulate the spell. */
     MF_EQ_INT(of("Search your library for a creature card, reveal it, put it into your hand"),
               MF_OP_INERT);
+    /* The graveyard, the hand's contents beyond castability, and the stack are
+       all still outside the model. */
+    MF_EQ_INT(of("Return target instant card from your graveyard to your hand"), MF_OP_INERT);
+    MF_EQ_INT(of("Each opponent reveals their hand"), MF_OP_INERT);
+}
+
+MF_TEST(what_combat_made_visible_stops_being_inert) {
+    /* **The wide reading, taken deliberately in 5.0 T7.** A duel resolves
+       combat on power and toughness and tracks life totals, so text that
+       changes who can attack, who can block, how big a creature is, whether it
+       survives, or what anybody's life total is, is now text the model WOULD
+       observe. It cannot express any of it, so it is unmatched.
+       The narrow alternative was available and rejected: keywords could have
+       stayed inert on the grounds that this combat never *consults* them. That
+       lets a model call itself faithful by declining to look — a 1/1 flier
+       simulated as a 1/1 vanilla is wrong about exactly the exchange being
+       simulated. §8 settles it: inertia is relative to what is simulated. */
+    MF_EQ_INT(of("Flying"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("Trample"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("Vigilance"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("First strike"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("Deathtouch"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("Defender"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("Haste"), MF_OP_UNMATCHED); /* summoning sickness is modelled */
+    MF_EQ_INT(of("Target creature gets +3/+3 until end of turn"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("When this creature enters, each opponent loses 3 life"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("You gain 4 life"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("Destroy all creatures"), MF_OP_UNMATCHED); /* no mass removal in the model */
+    MF_EQ_INT(of("Exile target creature"), MF_OP_UNMATCHED);
+
+    /* **And a mana ability that costs life is no longer free.** Life is a
+       currency the model spends now, so paying it is part of what the clause
+       does. This is the clause type the wide reading costs the most. */
+    MF_EQ_INT(of("{T}, Pay 1 life: Add {B}"), MF_OP_UNMATCHED);
+}
+
+MF_TEST(every_word_the_combat_sweep_names_is_a_word_it_was_tested_on) {
+    /* The sweep is a list of substrings, and a list nobody enumerated is a
+       list with a typo in it. Same discipline as
+       `every_wording_the_rule_names_is_a_wording_it_was_tested_on` — one row
+       per branch, so a word that stopped matching is visible rather than
+       quietly returning inert. Each is a real card's wording. */
+    static const char *const visible[] = {
+        "Flying",
+        "Trample",
+        "Vigilance",
+        "First strike",
+        "Double strike",
+        "Deathtouch",
+        "Menace",
+        "Reach",
+        "Defender",
+        "Indestructible",
+        "Protection from red",
+        "Hexproof",
+        "Shroud",
+        "Lifelink",
+        "Haste",
+        "This creature can't be blocked",
+        "This creature can't block",
+        "Creatures with power 2 or less can't attack you",
+        "This creature must be blocked if able",
+        "Put a +1/+1 counter on target creature",
+        "Target creature gets -1/-1 until end of turn",
+        "Target creature gets +2/+0 until end of turn",
+        "All creatures get -0/-2 until end of turn",
+        "This spell deals 4 damage to each opponent",
+        "You gain 3 life",
+        "Each opponent loses 2 life",
+        "Tap target creature",
+        "Untap target creature",
+        "Destroy all creatures",
+        "Exile target creature",
+        "Sacrifice a creature: draw a card",
+        "Destroy target permanent",
+    };
+    for (size_t i = 0; i < sizeof visible / sizeof *visible; i++) {
+        mf_opcode got = of(visible[i]);
+        if (got != MF_OP_UNMATCHED) {
+            MF_FAILED("'%s' classified %s, wanted unmatched", visible[i], mf_opcode_name(got));
+        }
+        mf_t_pass++;
+    }
+
+    /* **And the qualification, which is what the bare verbs got wrong.** These
+       three say "exile" and "sacrifice" and touch nothing a duel resolves
+       combat on. Matching the verb alone charged the gate for a library
+       effect, a mana ability and a discard — worth about four points of G1. */
+    MF_EQ_INT(of("Exile the top card of your library"), MF_OP_INERT);
+    MF_EQ_INT(of("Sacrifice a Clue"), MF_OP_INERT);
+    MF_EQ_INT(of("Exile two cards from your graveyard"), MF_OP_INERT);
+}
+
+MF_TEST(removal_is_expressible_and_gets_its_own_opcodes) {
+    /* The two shapes the opcode set grew for. Both are checked *before* the
+       combat-visible sweep, or "destroy" would take them straight to
+       unmatched and the set would have grown for nothing. */
+    MF_EQ_INT(of("Destroy target creature"), MF_OP_DESTROY);
+    MF_EQ_INT(of("Destroy target creature. It can't be regenerated"), MF_OP_DESTROY);
+    MF_EQ_INT(of("This spell deals 3 damage to target creature"), MF_OP_DAMAGE);
+    MF_EQ_INT(of("This spell deals 2 damage to any target"), MF_OP_DAMAGE);
+
+    /* The amount is carried, because damage without it is not damage — a
+       2-damage spell and a 7-damage spell kill different creatures, and this
+       is the one place the opcode set has ever recorded a magnitude. */
+    mf_opcode_scan s = scan("This spell deals 3 damage to target creature.");
+    MF_EQ_INT(s.by_op[MF_OP_DAMAGE], 1);
+    MF_EQ_INT(s.removal, 3);
+    MF_CHECK(mf_opcode_representable(&s));
+
+    /* Destroy carries no amount: it is not a magnitude, and recording one
+       would invent a number the card does not print. */
+    mf_opcode_scan d = scan("Destroy target creature.");
+    MF_EQ_INT(d.by_op[MF_OP_DESTROY], 1);
+    MF_EQ_INT(d.removal, 0);
+
+    /* A damage amount this model cannot read is unmatched rather than guessed —
+       the rule 1.2.1 established for mana, applied to the second magnitude the
+       set carries. */
+    MF_EQ_INT(of("This spell deals X damage to target creature"), MF_OP_UNMATCHED);
+    MF_EQ_INT(of("This spell deals damage to target creature equal to the number of Mountains "
+                 "you control"),
+              MF_OP_UNMATCHED);
 }
 
 MF_TEST(a_vanilla_card_is_fully_represented) {
@@ -236,10 +369,22 @@ MF_TEST(a_vanilla_card_is_fully_represented) {
     MF_EQ_INT(s.unmatched, 0);
     MF_CHECK(mf_opcode_representable(&s));
 
+    /* **A creature with Vigilance stopped being fully represented in 5.0 T7,
+       and that is the finding rather than a regression.** This assertion used
+       to read `v.inert == 1` and `representable`. A duel resolves combat by
+       tapping attackers, so vigilance changes the exchange being simulated —
+       text the model would see and cannot express. The vanilla case above is
+       untouched: a cost, a colour requirement and a body is still all of it. */
     mf_opcode_scan v = scan("Vigilance");
     MF_EQ_INT(v.clauses, 1);
-    MF_EQ_INT(v.inert, 1);
-    MF_CHECK(mf_opcode_representable(&v));
+    MF_EQ_INT(v.unmatched, 1);
+    MF_CHECK(!mf_opcode_representable(&v));
+
+    /* Still inert, and still representable: a currency the model does not
+       spend at all. */
+    mf_opcode_scan c = scan("Counter target spell");
+    MF_EQ_INT(c.inert, 1);
+    MF_CHECK(mf_opcode_representable(&c));
 }
 
 MF_TEST(reminder_text_is_not_rules_text) {
@@ -247,8 +392,11 @@ MF_TEST(reminder_text_is_not_rules_text) {
        make a Flying creature look like it had unmodelled text. */
     mf_opcode_scan s = scan("Flying (This creature can't be blocked except by creatures with "
                             "flying or reach.)");
+    /* One clause, not two: the reminder is stripped. The keyword itself is
+       unmatched from 5.0 T7 on — what this test protects is the *count*, which
+       is what reading the parenthetical would inflate. */
     MF_EQ_INT(s.clauses, 1);
-    MF_EQ_INT(s.inert, 1);
+    MF_EQ_INT(s.unmatched, 1);
 
     /* And a reminder mentioning a thing we DO model must not be read as one. */
     mf_opcode_scan t = scan("Convoke (Your creatures can help cast this spell. Each creature you "
@@ -292,7 +440,12 @@ MF_TEST(every_wording_the_rule_names_is_a_wording_it_was_tested_on) {
         mf_opcode want;
     } rows[] = {
         /* "cost" alone is not cost reduction — most of Magic mentions costs. */
-        {"Destroy target creature with mana value 3 or less", MF_OP_INERT},
+        /* Removal with a restriction on *which* creature. Inert until 5.0 T7
+           because nothing was on a board worth destroying; unmatched now, and
+           deliberately not MF_OP_DESTROY — the model picks a target with no way
+           to filter it, so a card that removes only some creatures is one this
+           set cannot state. This row is what found that defect. */
+        {"Destroy target creature with mana value 3 or less", MF_OP_UNMATCHED},
         /* The older templating for entering tapped, still printed on reprints. */
         {"Karoo enters the battlefield tapped", MF_OP_ENTERS_TAPPED},
 
@@ -313,7 +466,7 @@ MF_TEST(every_wording_the_rule_names_is_a_wording_it_was_tested_on) {
         /* Revised in 1.2.1. Combat is not simulated, so the trigger never
            fires and the clause is inert rather than unmodelled; and a draw
            belonging to an opponent is not something this gate observes. */
-        {"Whenever this creature attacks, draw a card", MF_OP_INERT},
+        {"Whenever this creature attacks, draw a card", MF_OP_UNMATCHED},
         {"You may draw a card", MF_OP_DRAW},
         {"Each opponent may draw a card", MF_OP_INERT},
 
@@ -449,7 +602,7 @@ MF_TEST(only_unmatched_clauses_reach_the_report) {
        purpose is "what should be built next". */
     mf_opcode_report *r = mf_opcode_report_new(A);
     mf_opcode_scan s;
-    mf_opcode_scan_report("Flying.\nDestroy target creature.\n{T}: Add {G}.", &s, r);
+    mf_opcode_scan_report("Counter target spell.\n{T}: Add {G}.", &s, r);
     MF_EQ_INT(mf_opcode_report_shapes(r), 0);
     MF_EQ_INT(mf_opcode_report_clauses(r), 0);
 }
@@ -545,10 +698,13 @@ MF_TEST(a_trigger_that_fires_every_turn_is_not_a_fixed_opcode) {
     MF_EQ_INT(of("When this creature enters, draw a card"), MF_OP_DRAW);
     MF_EQ_INT(of("Draw a card"), MF_OP_DRAW);
 
-    /* And a repeating trigger on an unreachable event is still inert rather
-       than unmatched: reachability runs first, and charging the opcode set for
-       a combat trigger would count the narrowness of the phases twice. */
-    MF_EQ_INT(of("At the beginning of combat on your turn, this creature attacks"), MF_OP_INERT);
+    /* A repeating trigger on a combat event. Inert until 5.0 T7, on the
+       argument that no combat phase ran; a duel runs one, so the trigger fires
+       and the model does nothing with it. Unmatched on either of two counts
+       now — reachable-but-unfired, and no way to write down "every turn" —
+       and it is the first that decides it, because step 1 runs first. */
+    MF_EQ_INT(of("At the beginning of combat on your turn, this creature attacks"),
+              MF_OP_UNMATCHED);
 }
 
 void run_opcode_tests(void) {
@@ -560,7 +716,7 @@ void run_opcode_tests(void) {
     MF_RUN(a_choice_from_a_printed_set_is_representable_and_kept_apart);
     MF_RUN(the_other_observables_are_recognised);
     MF_RUN(a_conditional_draw_counts_against_the_gate_too);
-    MF_RUN(a_trigger_these_phases_never_run_is_inert);
+    MF_RUN(a_trigger_combat_now_reaches_is_no_longer_inert);
     MF_RUN(a_trigger_inside_turns_one_to_four_still_counts);
     MF_RUN(a_land_that_might_enter_untapped_is_not_one_that_enters_tapped);
     MF_RUN(a_reduction_that_varies_is_not_a_reduction_this_model_has);
@@ -571,6 +727,9 @@ void run_opcode_tests(void) {
     MF_RUN(an_inert_clause_may_say_unless_all_it_likes);
     MF_RUN(a_replacement_that_removes_the_effect_is_not_the_effect);
     MF_RUN(text_these_phases_cannot_see_is_inert_and_not_a_failure);
+    MF_RUN(what_combat_made_visible_stops_being_inert);
+    MF_RUN(every_word_the_combat_sweep_names_is_a_word_it_was_tested_on);
+    MF_RUN(removal_is_expressible_and_gets_its_own_opcodes);
     MF_RUN(a_vanilla_card_is_fully_represented);
     MF_RUN(reminder_text_is_not_rules_text);
     MF_RUN(a_card_is_split_into_the_clauses_it_prints);

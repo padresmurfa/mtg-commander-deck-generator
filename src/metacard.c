@@ -26,6 +26,7 @@ void mf_metacard_of(const mf_card *c, const mf_opcode_scan *s, mf_metacard *out)
     }
     out->produces = s->produces;
     out->produces_max = s->produces_max;
+    out->removal = s->removal;
 
     out->power = c->power;
     out->toughness = c->toughness;

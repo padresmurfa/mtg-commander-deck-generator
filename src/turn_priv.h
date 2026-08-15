@@ -66,6 +66,12 @@ typedef struct {
     uint16_t spent;  /* mana committed */
     uint16_t wasted; /* available and never spent */
     uint8_t spells;  /* cast this turn, commander included */
+    /* Removal cast this turn, **reported rather than applied** (sprint 5.0 T7).
+       The turn has no opponent — that is what lets the solo phase share it —
+       so it says what was cast and `mf_duel` decides what it hits, exactly as
+       `mf_combat` hands back damage for `mf_duel` to apply. */
+    uint8_t destroys;    /* MF_OP_DESTROY spells that resolved */
+    uint8_t damage;      /* printed damage from MF_OP_DAMAGE spells, summed */
     bool made_drop;
 } mf_turn_result;
 

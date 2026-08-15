@@ -118,12 +118,23 @@ MF_TEST(preprocess_reports_the_unmatched_tail_only_when_asked) {
 
     char *tail = mf_mem_read_file(A, out, NULL);
     MF_CHECK(tail != NULL);
-    MF_CHECK(strstr(tail, "unmatched clauses: 3 in 2 distinct shapes") != NULL);
+    /* **3-in-2 until sprint 5.0 T7, 4-in-3 after it**, on an unchanged fixture.
+       One clause changed category because the model grew an opponent, not
+       because the scanner got worse: "Vigilance" changes who is tapped after
+       an attack, which is an exchange a duel resolves and this set cannot
+       state. "Sacrifice a Clue" briefly joined it and should not have — the
+       sweep matched the bare verb, which also catches library and mana
+       abilities, so it is qualified by what is being removed. */
+    MF_CHECK(strstr(tail, "unmatched clauses: 4 in 3 distinct shapes") != NULL);
     MF_CHECK(strstr(tail, "If you do, draw a card") != NULL);
     MF_CHECK(strstr(tail, "unless you control a Mountain or a Plains") != NULL);
+    MF_CHECK(strstr(tail, "Vigilance") != NULL);
     /* Inert text is not a failure to model, so it has no business in a list
-       whose entire purpose is "what should be built next". */
-    MF_CHECK(strstr(tail, "Vigilance") == NULL);
+       whose entire purpose is "what should be built next". The example had to
+       change with the boundary: "Vigilance" was the inert one until T7, and
+       "Discard a card" is in the same fixture and still spends no currency
+       this model tracks. */
+    MF_CHECK(strstr(tail, "Discard a card") == NULL);
 
     remove(out);
     remove("build/test-worker-cards.bin");

@@ -19,8 +19,8 @@
  *   - put lands onto the battlefield
  *   - make spells cost less
  *
- * Everything else a card says — combat, removal, counters, the entire stack —
- * happens after the phases this model looks at, or in a currency it does not
+ * Everything else a card says — counters, the graveyard, the entire stack —
+ * happens outside the phases this model looks at, or in a currency it does not
  * spend. A clause like that is **inert**, not unrepresentable: a vanilla 4/4 is
  * fully modelled, because a cost, a colour requirement and a body is all of it
  * that turn 4 can see.
@@ -28,7 +28,30 @@
  * That distinction is the whole of gate G1's number, which is why it is a
  * classification with a reason attached rather than a regex nobody can audit. A
  * later sprint that widens the simulated phases must re-measure — inertia is
- * relative to what is being simulated, and that changes. */
+ * relative to what is being simulated, and that changes.
+ *
+ * ---- and it changed (sprint 5.0 T7) --------------------------------------
+ *
+ * **The sentence above came due.** Sprint 5.0 gave the model an opponent: two
+ * boards, creatures that attack and block and die, and life totals that decide
+ * games. So the observable list above grew by two more entries —
+ *
+ *   - **remove a creature from the battlefield**
+ *   - **change a life total**
+ *
+ * — and, far more consequentially, a great deal of text that was correctly
+ * inert became text the model *would* see. Combat keywords change who can
+ * attack and block; a pump spell changes the exchange combat resolves; a life
+ * cost on a mana ability is now a cost in a currency that is spent. None of it
+ * is expressible, so it is unmatched.
+ *
+ * **G1 therefore went stale in T4, when combat landed — not in T7.** The
+ * opcode set did not get worse; the thing being modelled got bigger, which is
+ * the only way this number was ever going to move in the honest direction.
+ *
+ * The narrow alternative was available and rejected: keywords could have
+ * stayed inert on the grounds that this combat never *consults* them. That
+ * lets a model call itself faithful by declining to look. */
 
 typedef enum {
     MF_OP_NONE = 0,
@@ -44,6 +67,17 @@ typedef enum {
     MF_OP_DRAW,           /* changes what there is to cast */
     MF_OP_FETCH_LAND,     /* the other half of sequencing */
     MF_OP_COST_LESS,      /* changes castability directly */
+    /* Sprint 5.0 T7. Unconditional removal of one creature — no amount,
+       because "destroy" is not a magnitude and recording one would invent a
+       number the card does not print. */
+    MF_OP_DESTROY,
+    /* A printed amount of damage, to a creature or to a life total. The amount
+       is carried in `removal`: a 2-damage spell and a 7-damage spell kill
+       different creatures, so damage without its magnitude is not damage. This
+       is the only place the opcode set records a number, and the reason it can
+       is that the number is printed on the card — an amount that depends on
+       the board is unmatched, exactly as it is for mana (1.2.1). */
+    MF_OP_DAMAGE,
     MF_OP_INERT,          /* real text, in a currency these phases do not spend */
     MF_OP_UNMATCHED,      /* text these phases WOULD see, that this set cannot express */
     MF_OP_COUNT
@@ -83,11 +117,22 @@ typedef struct {
        count on — an unmatched producer's amount is exactly the thing the model
        cannot say, so recording a number would be inventing one. */
     uint8_t produces_max;
+    /* Damage this card's text deals, as printed (sprint 5.0 T7). The largest
+       single printed amount, on the `produces_max` precedent — a card with two
+       damage clauses is not a card that deals their sum. Zero for `DESTROY`,
+       which has no magnitude, and zero when nothing deals damage. */
+    uint8_t removal;
 } mf_opcode_scan;
 
 /* Classifies one clause. Exposed so the rule can be tested one clause at a
    time, which is the only way the inert/unmatched boundary stays auditable. */
 mf_opcode mf_opcode_classify(const char *clause, size_t len);
+
+/* The same, reporting a printed damage amount for MF_OP_DAMAGE and 0 for every
+   other opcode. Separate entry point rather than a widened one, because almost
+   every caller wants the classification and only the scanner wants the
+   magnitude. */
+mf_opcode mf_opcode_classify_amount(const char *clause, size_t len, uint8_t *amount);
 
 /* Splits oracle text into clauses and classifies each. Reminder text in
    parentheses is dropped: it restates rules rather than adding them, and every

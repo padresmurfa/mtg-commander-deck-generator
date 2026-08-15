@@ -40,5 +40,5 @@ cards.printings 9
 cards.other_games 2
 cards.legality_disagreements 1
 cards.digest 60944572c2f39dd8396baa4b3665c863
-cards.table_hash 55d8fe02a5a08087653ebb998cdb95b2
-cards.table_bytes 364
+cards.table_hash 79f6b7466a1d43b99dca0190b2bfea59
+cards.table_bytes 369

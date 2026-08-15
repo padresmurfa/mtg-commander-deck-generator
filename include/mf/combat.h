@@ -69,4 +69,25 @@ typedef struct {
 void mf_combat(const mf_deck *ad, mf_board *attack, const mf_deck *dd, mf_board *block,
                uint8_t defender_life, mf_combat_result *out);
 
+/* ---- what a removal spell takes (sprint 5.0 T7) --------------------------
+ *
+ * The biggest creature on `b` whose toughness is at most `max_toughness`, by
+ * **combat's own total order** — power, then toughness, then board index. Two
+ * orderings for "which creature matters" would be two things to keep in step,
+ * and the one that drifts is the one nothing reads until a later sprint.
+ *
+ * `MF_REMOVAL_ANY` for destroy, which has no toughness limit. False when the
+ * board holds no creature the effect could take, which is a real outcome — a
+ * removal spell cast into an empty board resolves and does nothing.
+ *
+ * **The choice of target is a placeholder and says so**, on the T3 precedent.
+ * "Take the biggest thing you can" is defensible and not measured; which
+ * creature to remove is exactly the kind of decision §5's rungs should
+ * eventually differ on, and inventing a rung mid-sprint would mean grading the
+ * ladder against a rung this sprint made up. One fixed rule for both seats,
+ * which is what a mirror needs. */
+#define MF_REMOVAL_ANY 255
+
+bool mf_combat_best_target(const mf_deck *d, const mf_board *b, uint8_t max_toughness, uint8_t *at);
+
 #endif

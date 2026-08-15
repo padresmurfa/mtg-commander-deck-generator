@@ -922,6 +922,60 @@ tasks:
         is a suite that stops being run.
     - id: T7
       name: removal, and the opcode set grows - G1's failure branch taken deliberately
+      status: done
+      g1_went_stale_in_T4_not_T7: >
+        The classifier returned INERT for attack, block and death triggers on an argument written
+        into the module: "section 3 does not simulate combat, so an attack trigger never fires...
+        nothing dies in a phase where nothing attacks." A duel makes every one of those happen.
+        Section 8's own sentence - a later sprint that widens the simulated phases must re-measure,
+        inertia is relative to what is being simulated - came due at T4.
+      reachable_is_not_fired: >
+        Those clauses are unmatched rather than classified by shape. The duel resolves combat and
+        does not run triggered abilities, so "When this creature dies, draw a card" is text the
+        model would see and does nothing with; by shape it would be recorded as a card the deck
+        draws.
+      wide_reading_chosen_by_the_owner: >
+        Anything changing who can attack, who can block, how big a creature is, whether it
+        survives, or what a life total is, is now unmatched. The narrow alternative - keywords stay
+        inert because this combat never CONSULTS them - was available and rejected: it lets a model
+        call itself faithful by declining to look.
+      opcodes_added: [MF_OP_DESTROY, MF_OP_DAMAGE]
+      metacard_reserved_byte_spent_on: >
+        The printed damage amount. A real change to the equivalence classes - two burn spells
+        differing only in how much they deal used to be one class and are now two, which is
+        correct, because a 2-damage spell and a 7-damage spell kill different creatures.
+      removal_resolution: >
+        In the duel, before combat. mf_turn_play REPORTS what was cast and mf_duel decides what it
+        hits, exactly as mf_combat hands back damage - the turn keeps no opponent, which is what
+        lets the solo phase share it. Damage kills the biggest creature it can reach or goes to the
+        face: a placeholder on the T3 precedent, one fixed rule for both seats.
+      g1_measured:
+        before_3_1: 0.9301
+        t7_verbs_matched_bare: 0.2252        # 7167 / 31829
+        t7_verbs_qualified: 0.2630           # 8372 / 31829  <- the recorded figure
+        clauses: {destroy: 189, damage: 803, inert: 34991, unmatched: 36821}
+        note: unmatched now exceeds inert, which is the whole shape of the finding
+      the_instrument_is_coarse_and_the_bias_runs_both_ways: >
+        The keyword list is not exhaustive, which OVERSTATES G1; substring matching catches text it
+        should not ("reach" also matches "reaches"), which UNDERSTATES it. Measured once:
+        qualifying the removal verbs by what is being removed - rather than matching destroy,
+        exile and sacrifice bare, which also caught library effects and mana abilities - was worth
+        about four points. A more careful sweep would be worth more.
+      verdict_is_T10s: G1 is not adjudicated here.
+      a_field_added_and_silently_dropped: >
+        The metacard grew a `removal` byte; mf_metacard_of set it, mf_metacard_eq compared it, and
+        the unit tests for both passed. The card table serialises field by field - deliberately, so
+        the format does not inherit the compiler's padding - and nobody named the new field in
+        put_key/get_key, so every deck built from a table read it back as ZERO and no burn spell
+        ever dealt damage. It surfaced three modules away, as a duel fixture whose games would not
+        end. Fixed, MF_TABLE_VERSION bumped 1 -> 2 so a v1 file is refused rather than misparsed,
+        and guarded by two static asserts tying MF_TABLE_KEY_BYTES and MF_TABLE_RECORD to
+        sizeof(mf_metacard) - so the next field added without widening the format breaks the build
+        instead of reading back as zero.
+      goldens_moved_deliberately: >
+        cards.table_bytes 364 -> 369 (five cards, one byte each) and the table hash with it.
+        Nothing else in the digest moved, which is the evidence that the format change is the whole
+        of it. Recorded with `make golden`, which is a command you have to type.
     - id: T8
       name: G3 re-run against the mirror, thresholds unchanged, components separately
     - id: T9

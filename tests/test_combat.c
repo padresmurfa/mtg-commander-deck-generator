@@ -232,7 +232,73 @@ MF_TEST(combat_is_the_same_however_the_board_was_ordered) {
     MF_EQ_INT(def1.count, def2.count);
 }
 
+MF_TEST(removal_takes_the_biggest_thing_it_can_reach) {
+    /* Combat's own total key, so the answer cannot tie and does not depend on
+       the scan order. Two orderings for "which creature matters" would be two
+       things to keep in step. */
+    const uint8_t p[] = {2, 5, 3}, t[] = {2, 1, 9};
+    creatures(p, t, 3);
+    const uint8_t all[] = {0, 1, 2};
+    mf_board b = board_of(all, 3, 0);
+
+    uint8_t at;
+    /* Destroy has no toughness limit, so it takes the highest power: the 5/1. */
+    MF_CHECK(mf_combat_best_target(&DECK, &b, MF_REMOVAL_ANY, &at));
+    MF_EQ_INT(at, 1);
+
+    /* The limit is *toughness*, so two damage reaches the 2/2 and the 5/1 and
+       takes the higher power of the two. */
+    MF_CHECK(mf_combat_best_target(&DECK, &b, 2, &at));
+    MF_EQ_INT(at, 1);
+
+    /* One damage reaches only the 5/1, which is the one with toughness 1. */
+    MF_CHECK(mf_combat_best_target(&DECK, &b, 1, &at));
+    MF_EQ_INT(at, 1);
+
+    /* Nine reaches everything, and the 5/1 still has the highest power. */
+    MF_CHECK(mf_combat_best_target(&DECK, &b, 9, &at));
+    MF_EQ_INT(at, 1);
+
+    /* An empty board is a real outcome: the spell resolves and does nothing. */
+    mf_board empty = board_of(all, 0, 0);
+    MF_CHECK(!mf_combat_best_target(&DECK, &empty, MF_REMOVAL_ANY, &at));
+}
+
+MF_TEST(removal_cannot_reach_what_it_cannot_kill) {
+    /* The whole of why the damage amount is carried: a 2-damage spell and a
+       7-damage spell take different creatures, and a set that recorded neither
+       would call them the same card. */
+    const uint8_t p[] = {1, 1}, t[] = {6, 9};
+    creatures(p, t, 2);
+    const uint8_t all[] = {0, 1};
+    mf_board b = board_of(all, 2, 0);
+
+    uint8_t at;
+    MF_CHECK(!mf_combat_best_target(&DECK, &b, 3, &at));  /* neither dies to 3 */
+    MF_CHECK(mf_combat_best_target(&DECK, &b, 6, &at));   /* the 1/6 does */
+    MF_EQ_INT(at, 0);
+    MF_CHECK(mf_combat_best_target(&DECK, &b, 9, &at));   /* both do; ties break on toughness */
+    MF_EQ_INT(at, 1);
+}
+
+MF_TEST(a_noncreature_permanent_is_not_a_removal_target) {
+    /* The board holds lands and rocks too, and this model's removal is
+       creature removal. A destroy spell that ate a Sol Ring would be a
+       different card. */
+    memset(&DECK, 0, sizeof DECK);
+    DECK.key[0].types = MF_TYPE_LAND;
+    DECK.key[1].types = MF_TYPE_ARTIFACT;
+    const uint8_t all[] = {0, 1};
+    mf_board b = board_of(all, 2, 0);
+
+    uint8_t at;
+    MF_CHECK(!mf_combat_best_target(&DECK, &b, MF_REMOVAL_ANY, &at));
+}
+
 void run_combat_tests(void) {
+    MF_RUN(removal_takes_the_biggest_thing_it_can_reach);
+    MF_RUN(removal_cannot_reach_what_it_cannot_kill);
+    MF_RUN(a_noncreature_permanent_is_not_a_removal_target);
     MF_RUN(an_unblocked_attack_is_damage_and_nothing_dies);
     MF_RUN(a_summoning_sick_creature_cannot_attack_but_can_block);
     MF_RUN(a_good_block_kills_the_attacker_and_survives);

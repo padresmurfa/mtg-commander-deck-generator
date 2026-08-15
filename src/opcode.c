@@ -6,8 +6,8 @@
 
 static const char *const g_names[MF_OP_COUNT] = {
     "none",       "tap_for_mana",        "add_mana", "tap_for_mana_choice", "add_mana_choice",
-    "enters_tapped", "draw",             "fetch_land", "cost_less",         "inert",
-    "unmatched"};
+    "enters_tapped", "draw",             "fetch_land", "cost_less",         "destroy",
+    "damage",     "inert",               "unmatched"};
 
 const char *mf_opcode_name(mf_opcode op) { return op < MF_OP_COUNT ? g_names[op] : "?"; }
 
@@ -24,29 +24,137 @@ static bool has(const char *s, size_t len, const char *needle) {
     return false;
 }
 
-/* Step 1 — reachability. A clause is only worth classifying if its trigger
- * fires inside the phases being simulated. §3 runs turns 1-4 exactly: cards are
- * cast, permanents enter, lands are played, turns begin. It does not run
- * combat, and nothing dies in a phase where nothing attacks.
+/* Step 1 — the trigger. **Reversed in sprint 5.0 T7, and the reversal is what
+ * the task is.**
  *
- * So a clause gated on one of these events contributes nothing to what is being
- * measured, whatever it goes on to do — which is inert, in the same sense and
- * for the same reason that a vanilla 4/4 is fully represented. Charging the
- * opcode set for it instead would count the narrowness of the simulated phases
- * twice: once as the inert majority, and again as unmodelled text.
+ * This function used to return "unreachable, therefore inert", on an argument
+ * that was correct when it was written: §3 ran turns 1–4 exactly — cards cast,
+ * permanents entering, lands played, turns beginning — and *did not run
+ * combat*, so nothing attacked, blocked or died, and a trigger hung on one of
+ * those events never fired.
+ *
+ * Sprint 5.0 built a duel. Every event on this list now happens.
+ *
+ * So the clauses are **reachable and not fired**: the duel loop resolves
+ * combat and does not execute triggered abilities. That is unmatched, not
+ * inert — the model would see the trigger go off and does nothing about it.
+ * Classifying by shape instead would be worse than either, because "When this
+ * creature dies, draw a card" would be recorded as a card this deck draws.
  *
  * The leading spaces are not decoration. "dies" is a substring of "bodies". */
-static bool trigger_is_unreachable(const char *s, size_t n) {
+static bool trigger_is_reachable_but_unfired(const char *s, size_t n) {
     return has(s, n, " dies") || has(s, n, " attacks") || has(s, n, " blocks") ||
            has(s, n, "combat damage") || has(s, n, "is put into a graveyard") ||
-           has(s, n, "leaves the battlefield") ||
-           /* No combat phase is run, in the opening or in the aggregate phases
-              past it, so a trigger hung on one never fires. Added in 3.1 T6
-              beside the recurrence rule below, and it has to run *first*:
-              charging the opcode set for a combat trigger would count the
-              narrowness of the phases twice, once as inert and again as
-              unmodelled text. */
-           has(s, n, "beginning of combat");
+           has(s, n, "leaves the battlefield") || has(s, n, "beginning of combat");
+}
+
+/* Step 2a — what having an opponent made visible (sprint 5.0 T7).
+ *
+ * A duel resolves combat on power and toughness and tracks life totals, so
+ * text changing who can attack, who can block, how big a creature is, whether
+ * it survives, or what a life total is, is text the model **would observe**.
+ * None of it is expressible, so it is unmatched.
+ *
+ * **The bias runs both ways and the net is not known.** The keyword list is
+ * not exhaustive — Magic has far more combat-relevant words than these — so
+ * genuinely visible text still falls through to inert, which overstates G1.
+ * And substring matching catches text it should not: "reach" also matches
+ * "reaches", which understates it. Measured once: qualifying the removal verbs
+ * by what is being removed, rather than matching them bare, moved G1 from
+ * 0.2252 to 0.2630, so this sweep's precision is worth about four points and
+ * a more careful one would be worth more. Recorded rather than rounded off —
+ * the number is a measurement of a coarse instrument, and saying which
+ * direction it errs in would be claiming more than has been checked. */
+static bool combat_visible(const char *s, size_t n) {
+    /* Who can attack, who can block, and what survives the exchange. */
+    if (has(s, n, "flying") || has(s, n, "trample") || has(s, n, "vigilance") ||
+        has(s, n, "first strike") || has(s, n, "double strike") || has(s, n, "deathtouch") ||
+        has(s, n, "menace") || has(s, n, "reach") || has(s, n, "defender") ||
+        has(s, n, "indestructible") || has(s, n, "protection from") || has(s, n, "hexproof") ||
+        has(s, n, "shroud") || has(s, n, "lifelink") || has(s, n, "haste") ||
+        has(s, n, "can't be blocked") || has(s, n, "can't block") || has(s, n, "can't attack") ||
+        has(s, n, "must be blocked")) {
+        return true;
+    }
+    /* Size, which is the currency combat is resolved in. Both verb forms:
+       "gets +2/+0" is one creature and "creatures get -0/-2" is all of them,
+       and only the first was matched until an enumeration test asked for the
+       second by name. */
+    if (has(s, n, "+1/+1") || has(s, n, "-1/-1") || has(s, n, "gets +") || has(s, n, "gets -") ||
+        has(s, n, "get +") || has(s, n, "get -")) {
+        return true;
+    }
+    /* Damage and life totals, which decide the game outright. */
+    if (has(s, n, "damage") || has(s, n, " life") || has(s, n, "tap target") ||
+        has(s, n, "untap target")) {
+        return true;
+    }
+    /* Removal shapes this set has no room for. `MF_OP_DESTROY` and
+       `MF_OP_DAMAGE` are checked before this, so what reaches here is the
+       removal the model cannot express rather than the removal it can.
+     *
+     * **Qualified by what is being removed, and the bare verbs were wrong.**
+     * "Exile the top card of your library" and "Sacrifice a land: add {C}" are
+     * a library effect and a mana ability; neither touches a board a duel
+     * resolves combat on, and matching the verb alone charged the gate for
+     * both. What matters is a permanent leaving the battlefield. */
+    if (!has(s, n, "creature") && !has(s, n, "permanent")) return false;
+    return has(s, n, "destroy") || has(s, n, "exile") || has(s, n, "sacrifice");
+}
+
+/* The printed damage amount, or 0 when the clause does not print one. Digits
+   only: "X damage" and "damage equal to..." have no number to read, and the
+   caller sends those to unmatched rather than guessing — the 1.2.1 rule for
+   mana, applied to the second magnitude this set carries. */
+static uint8_t printed_damage(const char *s, size_t n) {
+    for (size_t i = 0; i + 6 <= n; i++) {
+        if (!has(s + i, 6 < n - i ? 6 : n - i, "deals ")) continue;
+        size_t j = i + 6;
+        unsigned v = 0;
+        if (j >= n || !isdigit((unsigned char)s[j])) continue;
+        while (j < n && isdigit((unsigned char)s[j])) {
+            v = v * 10 + (unsigned)(s[j] - '0');
+            j++;
+        }
+        return v > 255u ? (uint8_t)255 : (uint8_t)v;
+    }
+    return 0;
+}
+
+/* A restriction on *which* creature can be chosen. The model picks a target off
+ * the opposing board with no way to filter it, so a card that only removes some
+ * creatures is a card whose effect this set cannot state.
+ *
+ * Found by an existing test rather than by design: "Destroy target creature
+ * with mana value 3 or less" matched the phrase below and was recorded as
+ * unconditional removal, which is the 1.2.1 defect exactly — a fixed opcode
+ * standing in for a conditional effect is a wrong answer, not an approximation. */
+static bool target_is_restricted(const char *s, size_t n) {
+    return has(s, n, " with ") || has(s, n, " that ") || has(s, n, " you control") ||
+           has(s, n, " opponent controls") || has(s, n, " another ") || has(s, n, "nonland") ||
+           has(s, n, "non-");
+}
+
+/* Step 2b — removal, the two shapes the set grew for. Checked before the sweep
+   above, or "destroy" would take them straight to unmatched and the opcode set
+   would have grown for nothing. */
+static mf_opcode removal_shape(const char *clause, size_t len, uint8_t *amount) {
+    *amount = 0;
+    bool destroy = has(clause, len, "destroy target creature");
+    bool damage = has(clause, len, "damage to target creature") ||
+                  has(clause, len, "damage to any target") ||
+                  has(clause, len, "damage to target player");
+    if (!destroy && !damage) return MF_OP_NONE;
+    if (target_is_restricted(clause, len)) return MF_OP_NONE; /* the sweep refuses it */
+
+    /* One creature, unconditionally. Mass removal ("destroy all creatures") is
+       a different effect the model has no way to apply and is left to the
+       sweep, which calls it unmatched. */
+    if (destroy) return MF_OP_DESTROY;
+    uint8_t v = printed_damage(clause, len);
+    if (!v) return MF_OP_NONE; /* no printed amount; the sweep will refuse it */
+    *amount = v;
+    return MF_OP_DAMAGE;
 }
 
 /* Step 3b — recurrence, and it is a *different* reason from the one below.
@@ -163,7 +271,33 @@ static mf_opcode shape_of(const char *clause, size_t len) {
  * there is a concrete opcode for it to disqualify — an inert clause is allowed
  * to say "unless" all it likes. */
 mf_opcode mf_opcode_classify(const char *clause, size_t len) {
-    if (trigger_is_unreachable(clause, len)) return MF_OP_INERT;
+    uint8_t amount;
+    return mf_opcode_classify_amount(clause, len, &amount);
+}
+
+mf_opcode mf_opcode_classify_amount(const char *clause, size_t len, uint8_t *amount) {
+    *amount = 0;
+    /* Reachable and not fired: the duel runs combat and does not run triggered
+       abilities, so these are text the model would see and does nothing with. */
+    if (trigger_is_reachable_but_unfired(clause, len)) return MF_OP_UNMATCHED;
+
+    /* Removal before the combat sweep, or "destroy" would send the one shape
+       the set can express to unmatched along with the ones it cannot. */
+    mf_opcode rem = removal_shape(clause, len, amount);
+    if (rem != MF_OP_NONE) {
+        /* Still subject to expressibility: "destroy target creature unless..."
+           is a condition this model cannot evaluate. */
+        if (depends_on_unheld_state(clause, len) || fires_every_turn(clause, len)) {
+            *amount = 0;
+            return MF_OP_UNMATCHED;
+        }
+        return rem;
+    }
+
+    /* Everything combat and life totals made observable, which the set has no
+       room for. Ahead of the shapes below because a clause that spends life to
+       make mana spends life, whatever else it does. */
+    if (combat_visible(clause, len)) return MF_OP_UNMATCHED;
 
     mf_opcode op = shape_of(clause, len);
     if (op == MF_OP_INERT || op == MF_OP_UNMATCHED) return op;
@@ -393,9 +527,14 @@ void mf_opcode_scan_report(const char *oracle_text, mf_opcode_scan *out, mf_opco
             clause_len--;
         }
         if (clause_len > 0) {
-            mf_opcode op = mf_opcode_classify(text + start, clause_len);
+            uint8_t dealt = 0;
+            mf_opcode op = mf_opcode_classify_amount(text + start, clause_len, &dealt);
             out->clauses++;
             out->by_op[op]++;
+            /* The largest single printed amount, on the `produces_max`
+               precedent: a card with two damage clauses does not deal their
+               sum, it deals one of them. */
+            if (dealt > out->removal) out->removal = dealt;
             if (op == MF_OP_INERT) out->inert++;
             if (op == MF_OP_UNMATCHED) {
                 out->unmatched++;
